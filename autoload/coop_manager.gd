@@ -383,7 +383,10 @@ func ForceWindowed() -> void:
 
 
 func IsConnected() -> bool:
-    return !(multiplayer.multiplayer_peer is OfflineMultiplayerPeer)
+    var peer: MultiplayerPeer = multiplayer.multiplayer_peer
+    if peer == null || peer is OfflineMultiplayerPeer:
+        return false
+    return peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED
 
 
 func GetLocalIP() -> String:
