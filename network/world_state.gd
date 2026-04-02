@@ -125,6 +125,20 @@ func SyncTransition(transitionPath: String) -> void:
         return
     Loader.LoadScene(nextMap)
 
+
+## Host sends spawn position to clients after a scene transition.
+## Deferred so the host's Controller has had a frame to settle into its spawn point.
+func SyncSpawnPosition(pos: Vector3) -> void:
+    TeleportClient.rpc(pos)
+
+
+## Teleports the client's local Controller to the given position.
+@rpc("authority", "call_remote", "reliable")
+func TeleportClient(pos: Vector3) -> void:
+    var controller: Node3D = get_tree().current_scene.get_node_or_null("Core/Controller")
+    if controller != null:
+        controller.global_position = pos
+
 # ---------- Container Sync ----------
 
 

@@ -359,6 +359,11 @@ func OnSceneChanged() -> void:
     if !IsConnected():
         return
     EnsureAllSpawned()
+    # Host sends spawn position to clients after scene loads
+    if isHost:
+        var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
+        if controller != null:
+            worldState.SyncSpawnPosition.call_deferred(controller.global_position)
     Log("Scene changed, remote players respawned")
 
 # ---------- Utility ----------
