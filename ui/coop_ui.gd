@@ -25,7 +25,7 @@ var playerList: VBoxContainer = null
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     mouse_filter = Control.MOUSE_FILTER_IGNORE
-    BuildUI()
+    build_ui()
     panel.hide()
 
 
@@ -45,10 +45,10 @@ func _input(event: InputEvent) -> void:
             else:
                 Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
         KEY_F10:
-            OnHostPressed()
+            on_host_pressed()
         KEY_F11:
             if CoopManager.DEBUG:
-                OnDirectJoinPressed()
+                on_direct_join_pressed()
 
 
 func build_ui() -> void:
@@ -264,7 +264,7 @@ func on_lobby_list_received(response: Dictionary) -> void:
         var lobbyID: String = lobby.get("lobby_id", "")
         for conn: Dictionary in btn.pressed.get_connections():
             btn.pressed.disconnect(conn["callable"])
-        btn.pressed.connect(OnLobbyJoinPressed.bind(lobbyID))
+        btn.pressed.connect(on_lobby_join_pressed.bind(lobbyID))
 
     for i: int in range(lobbies.size(), lobbyLabelPool.size()):
         lobbyLabelPool[i].hide()
