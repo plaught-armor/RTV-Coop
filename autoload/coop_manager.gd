@@ -13,8 +13,10 @@ const MAX_CLIENTS: int = 3
 const DEBUG: bool = true
 ## Force windowed mode on startup for multi-instance testing.
 const DEV_WINDOWED: bool = true
-## Known MD5 hash of Controller.gd that this mod was built against.
+## Known MD5 hashes of patched scripts that this mod was built against.
 const CONTROLLER_HASH: String = "da2049367c3298a152dc0cb35217ad9a"
+const DOOR_HASH: String = "2f7397b8801d17304a102661df6fd327"
+const SWITCH_HASH: String = "89fbf23ff77c2a35b45ab6678607fb98"
 
 ## The local peer's multiplayer ID. 0 when not connected.
 var localPeerId: int = 0
@@ -104,11 +106,14 @@ func _physics_process(delta: float) -> void:
 ## Applies [code]take_over_path[/code] patches to game scripts.
 ## Checks file hashes before patching and warns if the game has been updated.
 func RegisterPatches() -> void:
-	if !VerifyHash("res://Scripts/Controller.gd", CONTROLLER_HASH):
-		Log("WARNING: Controller.gd has changed — mod may be incompatible with this game version")
-	PatchScript("res://mod/patches/controller_patch.gd", "res://Scripts/Controller.gd")
-	PatchScript("res://mod/patches/door_patch.gd", "res://Scripts/Door.gd")
-	PatchScript("res://mod/patches/switch_patch.gd", "res://Scripts/Switch.gd")
+	for pair: Array in [
+		["res://Scripts/Controller.gd", CONTROLLER_HASH, "res://mod/patches/controller_patch.gd"],
+		["res://Scripts/Door.gd", DOOR_HASH, "res://mod/patches/door_patch.gd"],
+		["res://Scripts/Switch.gd", SWITCH_HASH, "res://mod/patches/switch_patch.gd"],
+	]:
+		if !VerifyHash(pair[0], pair[1]):
+			Log("WARNING: %s has changed — mod may be incompatible" % pair[0])
+		PatchScript(pair[2], pair[0])
 	Log("Patches registered")
 
 
@@ -290,10 +295,10 @@ func SyncName(peerName: String) -> void:
 
 
 func SanitizeName(rawName: String) -> String:
-	var name: String = rawName.substr(0, 64)
+	var truncated: String = rawName.substr(0, 64)
 	var clean: String = ""
-	for i: int in name.length():
-		var c: String = name[i]
+	for i: int in truncated.length():
+		var c: String = truncated[i]
 		if c.unicode_at(0) >= 32:
 			clean += c
 	return clean if !clean.is_empty() else "Unknown"

@@ -2,14 +2,15 @@
 ## In single-player (not connected), falls through to the original [method Interact].
 extends "res://Scripts/Door.gd"
 
-func Interact() -> void:
+func Interact():
 	if !CoopManager.isActive:
 		super.Interact()
 		return
 
 	if CoopManager.isHost:
-		# Host runs the interaction locally and broadcasts
+		# Host runs the original interaction logic
 		super.Interact()
+		# Broadcast the resulting state to all clients
 		var doorPath: String = get_tree().current_scene.get_path_to(self)
 		CoopManager.worldState.SyncDoorState.rpc(doorPath, isOpen)
 	else:
@@ -18,7 +19,7 @@ func Interact() -> void:
 		CoopManager.worldState.RequestDoorInteract.rpc_id(1, doorPath)
 
 
-func CheckKey() -> void:
+func CheckKey():
 	super.CheckKey()
 
 	if !CoopManager.isActive:
