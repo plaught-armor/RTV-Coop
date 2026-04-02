@@ -1,5 +1,6 @@
 ## Patch for [code]Pickup.gd[/code] — host-authoritative pickup interactions.
-## Host validates and broadcasts pickup consumption. Clients request via RPC.
+## Host validates pickup exists and marks it consumed. The requesting peer
+## then adds the item to their own inventory. Prevents duplication.
 ## In single-player, falls through to the original [method Interact].
 extends "res://Scripts/Pickup.gd"
 
@@ -9,22 +10,29 @@ func Interact():
 		return
 
 	if CoopManager.isHost:
-		# Host validates locally (inventory check) and broadcasts if consumed
-		if interface.AutoStack(slotData, interface.inventoryGrid):
-			interface.UpdateStats(false)
-			PlayPickup()
+		# Host picks up directly — validate, consume, broadcast
+		if TryPickup():
 			var pickupPath: String = get_tree().current_scene.get_path_to(self)
+			remove_from_group(&"Item")
 			CoopManager.worldState.SyncPickupConsumed.rpc(pickupPath)
 			queue_free()
-		elif interface.Create(slotData, interface.inventoryGrid, false):
-			interface.UpdateStats(false)
-			PlayPickup()
-			var pickupPath: String = get_tree().current_scene.get_path_to(self)
-			CoopManager.worldState.SyncPickupConsumed.rpc(pickupPath)
-			queue_free()
-		else:
-			interface.PlayError()
 	else:
 		# Client requests the host to validate
 		var pickupPath: String = get_tree().current_scene.get_path_to(self)
 		CoopManager.worldState.RequestPickupInteract.rpc_id(1, pickupPath)
+
+
+## Attempts to add this pickup's item to the local player's inventory.
+## Returns true if successful, false if inventory is full.
+func TryPickup() -> bool:
+	if interface.AutoStack(slotData, interface.inventoryGrid):
+		interface.UpdateStats(false)
+		PlayPickup()
+		return true
+	elif interface.Create(slotData, interface.inventoryGrid, false):
+		interface.UpdateStats(false)
+		PlayPickup()
+		return true
+	else:
+		interface.PlayError()
+		return false

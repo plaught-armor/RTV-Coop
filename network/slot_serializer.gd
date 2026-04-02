@@ -4,7 +4,15 @@
 class_name SlotSerializer
 extends RefCounted
 
+## Allowed resource path prefixes for [method load] calls. Rejects arbitrary paths.
+const ALLOWED_PREFIXES: PackedStringArray = [
+	"res://Items/",
+	"res://Loot/",
+]
+
+
 ## Converts a [SlotData] to a [Dictionary] suitable for RPC transmission.
+## Returns empty dict for null/invalid slots (preserved as-is in arrays).
 static func Pack(slot: SlotData) -> Dictionary:
 	if slot == null || slot.itemData == null:
 		return { }
@@ -19,24 +27,32 @@ static func Pack(slot: SlotData) -> Dictionary:
 		&"casing": slot.casing,
 		&"state": slot.state,
 	}
-	# Serialize nested attachments (Array[ItemData] → Array[String])
+	# Nested attachments (Array[ItemData] → PackedStringArray, preserve nulls as "")
 	var nestedPaths: PackedStringArray = []
 	for attachment: ItemData in slot.nested:
-		if attachment != null:
-			nestedPaths.append(attachment.resource_path)
+		nestedPaths.append(attachment.resource_path if attachment != null else "")
 	data[&"nested"] = nestedPaths
+
+	# Recursive storage (Array[SlotData] → Array[Dictionary])
+	if slot.storage.size() > 0:
+		var packedStorage: Array[Dictionary] = []
+		for stored: SlotData in slot.storage:
+			packedStorage.append(Pack(stored))
+		data[&"storage"] = packedStorage
+
 	return data
 
 
 ## Reconstructs a [SlotData] from a packed [Dictionary].
+## Returns null for empty/invalid dicts.
 static func Unpack(data: Dictionary) -> SlotData:
 	if data.is_empty():
 		return null
 	var itemPath: String = data.get(&"item_path", "")
-	if itemPath.is_empty():
+	if !IsAllowedPath(itemPath):
 		return null
 	var itemRes: Resource = load(itemPath)
-	if itemRes == null || !(itemRes is ItemData):
+	if !(itemRes is ItemData):
 		return null
 
 	var slot: SlotData = SlotData.new()
@@ -50,29 +66,46 @@ static func Unpack(data: Dictionary) -> SlotData:
 	slot.casing = data.get(&"casing", false)
 	slot.state = data.get(&"state", "")
 
-	# Reconstruct nested attachments
-	var nestedPaths: PackedStringArray = data.get(&"nested", [])
+	# Nested attachments (preserve null entries for slot index stability)
+	var nestedPaths: PackedStringArray = data.get(&"nested", PackedStringArray())
 	for path: String in nestedPaths:
-		var attachment: Resource = load(path)
-		if attachment is ItemData:
-			slot.nested.append(attachment)
+		if path.is_empty():
+			slot.nested.append(null)
+		elif IsAllowedPath(path):
+			var attachment: Resource = load(path)
+			slot.nested.append(attachment if attachment is ItemData else null)
+		else:
+			slot.nested.append(null)
+
+	# Recursive storage
+	var packedStorage: Array = data.get(&"storage", [])
+	for storedData: Dictionary in packedStorage:
+		slot.storage.append(Unpack(storedData))
 
 	return slot
 
 
-## Packs an array of [SlotData] into an array of [Dictionary].
-static func PackArray(slots: Array) -> Array:
-	var result: Array = []
-	for slot in slots:
+## Packs an array of [SlotData]. Null entries become empty dicts (preserved).
+static func PackArray(slots: Array[SlotData]) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for slot: SlotData in slots:
 		result.append(Pack(slot))
 	return result
 
 
-## Unpacks an array of [Dictionary] into an array of [SlotData].
-static func UnpackArray(dataArray: Array) -> Array[SlotData]:
+## Unpacks an array of [Dictionary]. Empty dicts become null (preserved to keep indices stable).
+static func UnpackArray(dataArray: Array[Dictionary]) -> Array[SlotData]:
 	var result: Array[SlotData] = []
 	for data: Dictionary in dataArray:
-		var slot: SlotData = Unpack(data)
-		if slot != null:
-			result.append(slot)
+		result.append(Unpack(data))
 	return result
+
+
+## Returns true if the path starts with an allowed prefix.
+static func IsAllowedPath(path: String) -> bool:
+	if path.is_empty():
+		return false
+	for prefix: String in ALLOWED_PREFIXES:
+		if path.begins_with(prefix):
+			return true
+	return false

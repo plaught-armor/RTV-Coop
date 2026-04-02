@@ -122,27 +122,75 @@ func RequestContainerOpen(containerPath: String) -> void:
 
 ## Host broadcasts a container's loot state to all peers.
 @rpc("authority", "call_remote", "reliable")
-func SyncContainerState(containerPath: String, packedLoot: Array) -> void:
+func SyncContainerState(containerPath: String, packedLoot: Array[Dictionary]) -> void:
 	var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
 	if container == null || !(container is LootContainer):
 		return
 	container.loot = SlotSerializer.UnpackArray(packedLoot)
 
+
+## Client requests to take a specific item from a container by index.
+@rpc("any_peer", "call_remote", "reliable")
+func RequestContainerTakeItem(containerPath: String, itemIndex: int) -> void:
+	if !CoopManager.isHost:
+		return
+	if !IsValidInteractablePath(containerPath, &"Interactable"):
+		return
+	var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
+	if !is_instance_valid(container) || !(container is LootContainer):
+		return
+	if itemIndex < 0 || itemIndex >= container.loot.size():
+		return
+	var takenSlot: SlotData = container.loot[itemIndex]
+	if takenSlot == null:
+		return
+	# Remove from host's authoritative loot array
+	container.loot.remove_at(itemIndex)
+	# Send item to requesting client
+	var requesterId: int = multiplayer.get_remote_sender_id()
+	GrantPickupToClient.rpc_id(requesterId, SlotSerializer.Pack(takenSlot))
+	# Broadcast updated loot to all peers
+	SyncContainerState.rpc(containerPath, SlotSerializer.PackArray(container.loot))
+
 # ---------- Pickup Sync ----------
 
 
-## Client requests to pick up an item.
+## Client requests to pick up an item. Host validates, marks consumed,
+## sends the item data back to the requester, and broadcasts removal to all.
 @rpc("any_peer", "call_remote", "reliable")
 func RequestPickupInteract(pickupPath: String) -> void:
 	if !CoopManager.isHost:
 		return
 	if !IsValidInteractablePath(pickupPath, &"Item"):
 		return
-	var pickup: Node = get_tree().current_scene.get_node(pickupPath)
-	if !(pickup is Pickup):
+	var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
+	if !is_instance_valid(pickup) || !(pickup is Pickup):
 		return
-	# Run the patched Interact on the host (validates inventory, consumes, broadcasts)
-	pickup.Interact()
+	# Immediately mark consumed to prevent race condition (C2)
+	pickup.remove_from_group(&"Item")
+	# Send item data to the requesting client so they add it to their own inventory
+	var requesterId: int = multiplayer.get_remote_sender_id()
+	var packedSlot: Dictionary = SlotSerializer.Pack(pickup.slotData)
+	GrantPickupToClient.rpc_id(requesterId, packedSlot)
+	# Broadcast removal to all peers
+	SyncPickupConsumed.rpc(pickupPath)
+	pickup.queue_free()
+
+
+## Host sends a pickup's item data to the client who picked it up.
+## The client adds it to their own inventory locally.
+@rpc("authority", "call_remote", "reliable")
+func GrantPickupToClient(packedSlot: Dictionary) -> void:
+	var slotData: SlotData = SlotSerializer.Unpack(packedSlot)
+	if slotData == null:
+		return
+	var iface: Node = get_tree().current_scene.get_node_or_null("/root/Map/Core/UI/Interface")
+	if iface == null:
+		return
+	if iface.AutoStack(slotData, iface.inventoryGrid):
+		iface.UpdateStats(false)
+	elif iface.Create(slotData, iface.inventoryGrid, false):
+		iface.UpdateStats(false)
 
 
 ## Host broadcasts that a pickup was consumed (removed from world).
@@ -233,7 +281,7 @@ func SendFullState(peerId: int) -> void:
 
 ## Validates a NodePath is safe and points to the expected group.
 func IsValidInteractablePath(nodePath: String, expectedGroup: StringName) -> bool:
-	if ".." in nodePath:
+	if nodePath.is_empty() || ".." in nodePath || nodePath.begins_with("/"):
 		return false
 	var node: Node = get_tree().current_scene.get_node_or_null(nodePath)
 	if node == null:
