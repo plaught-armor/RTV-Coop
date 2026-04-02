@@ -5,6 +5,7 @@
 
 # Build output
 *.vmz
+bin/
 
 # OS
 .DS_Store
