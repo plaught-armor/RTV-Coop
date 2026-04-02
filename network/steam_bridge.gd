@@ -4,8 +4,8 @@
 class_name SteamBridge
 extends Node
 
-## TCP port the helper listens on.
-const HELPER_PORT: int = 27099
+## TCP port the helper listens on. Randomized per instance to allow multiple.
+var HELPER_PORT: int = 27099 + (OS.get_process_id() % 100)
 ## Max time to wait for helper TCP to be ready after launch.
 const CONNECT_TIMEOUT: float = 5.0
 ## Poll interval for TCP connection attempts.
@@ -39,9 +39,10 @@ func Launch() -> void:
     var libSrc: String = GetSteamLibResPath()
     var libDst: String = GetSteamLibUserPath()
 
-    # Extract helper binary from res:// to user://
+    # Extract helper binary + Steam SDK lib + appid to user://
     ExtractFile(helperSrc, helperDst)
     ExtractFile(libSrc, libDst)
+    ExtractFile("res://mod/bin/steam_appid.txt", "user://steam_appid.txt")
 
     # Make executable on Linux
     if OS.get_name() == "Linux":

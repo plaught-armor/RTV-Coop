@@ -86,9 +86,8 @@ func _ready() -> void:
     multiplayer.connection_failed.connect(OnConnectionFailed)
     multiplayer.server_disconnected.connect(OnServerDisconnected)
 
-    # Launch Steam helper (skip in DEBUG — use ENet direct-connect)
-    if !DEBUG:
-        steamBridge.Launch()
+    # Always launch Steam helper
+    steamBridge.Launch()
 
     Log("Initialized (debug: %s)" % str(DEBUG))
 
