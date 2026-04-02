@@ -130,8 +130,8 @@ func PatchScript(patchPath: String, targetPath: String) -> void:
 
 
 func VerifyHash(path: String, expectedHash: String) -> bool:
-    var hash: String = FileAccess.get_md5(path)
-    return hash == expectedHash
+    var fileHash: String = FileAccess.get_md5(path)
+    return fileHash == expectedHash
 
 # ---------- Peer Lifecycle ----------
 

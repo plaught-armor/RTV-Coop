@@ -99,7 +99,7 @@ func Movement(delta: float) -> void:
     CoopManager.playerState.BroadcastPosition(
         global_transform.origin,
         Vector3(rotation.y, head.rotation.x, 0.0),
-        CoopManager.playerState.EncodeFlags(gd),
+        PlayerState.EncodeFlags(gd),
     )
 
 # ---------- Inertia ----------
