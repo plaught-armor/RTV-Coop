@@ -125,10 +125,11 @@ func HostGame(port: int = DEFAULT_PORT) -> void:
 	isHost = true
 	isActive = true
 
-	# Register own name
+	# Register own name and create Steam lobby if applicable
 	if useSteam && steamBridge.IsReady():
 		peerNames[localPeerId] = steamBridge.localSteamName
-		steamBridge.CreateLobby(MAX_CLIENTS + 1, OnLobbyCreated)
+		var localIP: String = GetLocalIP()
+		steamBridge.CreateLobby(MAX_CLIENTS + 1, OnLobbyCreated, localIP, port)
 	else:
 		peerNames[localPeerId] = "Host"
 
@@ -330,6 +331,15 @@ func ForceWindowed() -> void:
 
 func IsConnected() -> bool:
 	return !(multiplayer.multiplayer_peer is OfflineMultiplayerPeer)
+
+
+## Returns the first non-loopback, non-IPv6 local IP address.
+func GetLocalIP() -> String:
+	for addr: String in IP.get_local_addresses():
+		if addr.begins_with("127.") || addr.begins_with("::") || ":" in addr:
+			continue
+		return addr
+	return "127.0.0.1"
 
 
 func Log(msg: String) -> void:

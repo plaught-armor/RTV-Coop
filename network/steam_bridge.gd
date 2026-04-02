@@ -185,8 +185,8 @@ func CheckOwnership(callback: Callable) -> void:
 	SendCommand("check_ownership", { }, callback)
 
 
-func CreateLobby(maxPlayers: int, callback: Callable) -> void:
-	SendCommand("create_lobby", { "max_players": maxPlayers }, callback)
+func CreateLobby(maxPlayers: int, callback: Callable, hostIP: String = "", hostPort: int = 9050) -> void:
+	SendCommand("create_lobby", { "max_players": maxPlayers, "host_ip": hostIP, "host_port": hostPort }, callback)
 
 
 func ListLobbies(callback: Callable) -> void:

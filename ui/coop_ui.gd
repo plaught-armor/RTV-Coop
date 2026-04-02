@@ -296,11 +296,15 @@ func OnLobbyJoinPressed(lobbyID: String) -> void:
 func OnLobbyJoined(response: Dictionary) -> void:
 	if !response.get("ok", false):
 		return
-	# TODO: Get host IP from lobby data and connect ENet
-	# For now, the lobby join just registers us in the Steam lobby.
-	# Actual ENet connection still needs the host's IP.
 	var data: Dictionary = response.get("data", { })
-	CoopManager.Log("Joined lobby: %s" % data.get("lobby_id", ""))
+	var hostIP: String = data.get("host_ip", "")
+	var hostPort: String = data.get("host_port", "9050")
+	if hostIP.is_empty():
+		CoopManager.Log("Lobby has no host IP — cannot connect")
+		return
+	var port: int = hostPort.to_int() if hostPort.is_valid_int() else CoopManager.DEFAULT_PORT
+	CoopManager.Log("Lobby joined — connecting ENet to %s:%d" % [hostIP, port])
+	CoopManager.JoinGame(hostIP, port)
 
 
 func GetPooledLobbyButton(idx: int) -> Button:
@@ -333,8 +337,4 @@ func GetAddress() -> String:
 
 
 func GetLocalIP() -> String:
-	for addr: String in IP.get_local_addresses():
-		if addr.begins_with("127.") || addr.begins_with("::") || ":" in addr:
-			continue
-		return addr
-	return "127.0.0.1"
+	return CoopManager.GetLocalIP()
