@@ -3,7 +3,7 @@
 ## Never reads [code]GameData[/code] directly.
 extends Node3D
 
-const MoveFlag = preload("res://mod/network/player_state.gd").MoveFlag
+const MoveFlag = PlayerState.MoveFlag
 
 var targetPosition: Vector3 = Vector3.ZERO
 var targetRotationY: float = 0.0

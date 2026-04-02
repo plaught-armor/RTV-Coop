@@ -10,8 +10,6 @@
 ## Original behaviour is 100% preserved. The networking hook is a no-op when not connected.
 extends "res://Scripts/Controller.gd"
 
-const PlayerStateScript = preload("res://mod/network/player_state.gd")
-
 ## Typed reference to the shared GameData resource. Shadows the parent's untyped
 ## [code]gameData[/code] to enable typed instructions in our overridden methods.
 var gd: GameData = preload("res://Resources/GameData.tres")
@@ -101,7 +99,7 @@ func Movement(delta: float) -> void:
 	CoopManager.playerState.BroadcastPosition(
 		global_transform.origin,
 		Vector3(rotation.y, head.rotation.x, 0.0),
-		PlayerStateScript.EncodeFlags(gd),
+		CoopManager.playerState.EncodeFlags(gd),
 	)
 
 # ---------- Inertia ----------
