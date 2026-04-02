@@ -117,7 +117,8 @@ func RegisterPatches() -> void:
         ["res://Scripts/Switch.gd", SWITCH_HASH, "res://mod/patches/switch_patch.gd"],
         ["res://Scripts/Transition.gd", TRANSITION_HASH, "res://mod/patches/transition_patch.gd"],
         ["res://Scripts/Pickup.gd", PICKUP_HASH, "res://mod/patches/pickup_patch.gd"],
-        ["res://Scripts/LootContainer.gd", LOOT_CONTAINER_HASH, "res://mod/patches/loot_container_patch.gd"],
+        # LootContainer patch disabled — conflicts with TraderDisplay.gd type checks
+        # ["res://Scripts/LootContainer.gd", LOOT_CONTAINER_HASH, "res://mod/patches/loot_container_patch.gd"],
     ]:
         if !VerifyHash(pair[0], pair[1]):
             Log("WARNING: %s has changed — mod may be incompatible" % pair[0])
