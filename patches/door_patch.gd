@@ -3,32 +3,32 @@
 extends "res://Scripts/Door.gd"
 
 func Interact():
-	if !CoopManager.isActive:
-		super.Interact()
-		return
+    if !CoopManager.isActive:
+        super.Interact()
+        return
 
-	if CoopManager.isHost:
-		# Host runs the original interaction logic
-		super.Interact()
-		# Broadcast the resulting state to all clients
-		var doorPath: String = get_tree().current_scene.get_path_to(self)
-		CoopManager.worldState.SyncDoorState.rpc(doorPath, isOpen)
-	else:
-		# Client requests the host to do it
-		var doorPath: String = get_tree().current_scene.get_path_to(self)
-		CoopManager.worldState.RequestDoorInteract.rpc_id(1, doorPath)
+    if CoopManager.isHost:
+        # Host runs the original interaction logic
+        super.Interact()
+        # Broadcast the resulting state to all clients
+        var doorPath: String = get_tree().current_scene.get_path_to(self)
+        CoopManager.worldState.SyncDoorState.rpc(doorPath, isOpen)
+    else:
+        # Client requests the host to do it
+        var doorPath: String = get_tree().current_scene.get_path_to(self)
+        CoopManager.worldState.RequestDoorInteract.rpc_id(1, doorPath)
 
 
 func CheckKey():
-	super.CheckKey()
+    super.CheckKey()
 
-	if !CoopManager.isActive:
-		return
+    if !CoopManager.isActive:
+        return
 
-	# If the key check succeeded (locked is now false), broadcast the unlock
-	if !locked && CoopManager.isHost:
-		var doorPath: String = get_tree().current_scene.get_path_to(self)
-		CoopManager.worldState.SyncDoorUnlock.rpc(doorPath)
-		if linked:
-			var linkedPath: String = get_tree().current_scene.get_path_to(linked)
-			CoopManager.worldState.SyncDoorUnlock.rpc(linkedPath)
+    # If the key check succeeded (locked is now false), broadcast the unlock
+    if !locked && CoopManager.isHost:
+        var doorPath: String = get_tree().current_scene.get_path_to(self)
+        CoopManager.worldState.SyncDoorUnlock.rpc(doorPath)
+        if linked:
+            var linkedPath: String = get_tree().current_scene.get_path_to(linked)
+            CoopManager.worldState.SyncDoorUnlock.rpc(linkedPath)

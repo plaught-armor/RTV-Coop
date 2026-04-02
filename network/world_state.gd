@@ -36,24 +36,24 @@ func RequestDoorInteract(doorPath: String) -> void:
 ## Host broadcasts a door's state to peers. Clients animate accordingly.
 @rpc("authority", "call_remote", "reliable")
 func SyncDoorState(doorPath: String, isOpen: bool) -> void:
-	var door: Node = get_tree().current_scene.get_node_or_null(doorPath)
-	if door == null || !(door is Door):
-		return
-	door.isOpen = isOpen
-	door.animationTime += 4.0
-	door.handleMoving = true
-	door.handleTarget = Vector3(0, 0, -45) if door.openAngle.y > 0.0 else Vector3(0, 0, 45)
-	door.PlayDoor()
+    var door: Node = get_tree().current_scene.get_node_or_null(doorPath)
+    if door == null || !(door is Door):
+        return
+    door.isOpen = isOpen
+    door.animationTime += 4.0
+    door.handleMoving = true
+    door.handleTarget = Vector3(0, 0, -45) if door.openAngle.y > 0.0 else Vector3(0, 0, 45)
+    door.PlayDoor()
 
 
 ## Host broadcasts a door unlock to peers.
 @rpc("authority", "call_remote", "reliable")
 func SyncDoorUnlock(doorPath: String) -> void:
-	var door: Node = get_tree().current_scene.get_node_or_null(doorPath)
-	if door == null || !(door is Door):
-		return
-	door.locked = false
-	door.PlayUnlock()
+    var door: Node = get_tree().current_scene.get_node_or_null(doorPath)
+    if door == null || !(door is Door):
+        return
+    door.locked = false
+    door.PlayUnlock()
 
 # ---------- Switch Sync ----------
 
@@ -61,34 +61,34 @@ func SyncDoorUnlock(doorPath: String) -> void:
 ## Client requests the host to interact with a switch.
 @rpc("any_peer", "call_remote", "reliable")
 func RequestSwitchInteract(switchPath: String) -> void:
-	if !CoopManager.isHost:
-		return
-	if !IsValidInteractablePath(switchPath, &"Switch"):
-		return
-	var sw: Node = get_tree().current_scene.get_node(switchPath)
-	# Toggle on host and broadcast
-	sw.active = !sw.active
-	if sw.active:
-		sw.Activate()
-		sw.PlaySwitch()
-	else:
-		sw.Deactivate()
-		sw.PlaySwitch()
-	SyncSwitchState.rpc(switchPath, sw.active)
+    if !CoopManager.isHost:
+        return
+    if !IsValidInteractablePath(switchPath, &"Switch"):
+        return
+    var sw: Node = get_tree().current_scene.get_node(switchPath)
+    # Toggle on host and broadcast
+    sw.active = !sw.active
+    if sw.active:
+        sw.Activate()
+        sw.PlaySwitch()
+    else:
+        sw.Deactivate()
+        sw.PlaySwitch()
+    SyncSwitchState.rpc(switchPath, sw.active)
 
 
 ## Host broadcasts a switch state to peers.
 @rpc("authority", "call_remote", "reliable")
 func SyncSwitchState(switchPath: String, active: bool) -> void:
-	var sw: Node = get_tree().current_scene.get_node_or_null(switchPath)
-	if sw == null:
-		return
-	if active && !sw.active:
-		sw.Activate()
-		sw.PlaySwitch()
-	elif !active && sw.active:
-		sw.Deactivate()
-		sw.PlaySwitch()
+    var sw: Node = get_tree().current_scene.get_node_or_null(switchPath)
+    if sw == null:
+        return
+    if active && !sw.active:
+        sw.Activate()
+        sw.PlaySwitch()
+    elif !active && sw.active:
+        sw.Deactivate()
+        sw.PlaySwitch()
 
 # ---------- Transition Sync ----------
 
@@ -96,12 +96,12 @@ func SyncSwitchState(switchPath: String, active: bool) -> void:
 ## Client requests the host to trigger a map transition.
 @rpc("any_peer", "call_remote", "reliable")
 func RequestTransition(transitionPath: String) -> void:
-	if !CoopManager.isHost:
-		return
-	if !IsValidInteractablePath(transitionPath, &"Transition"):
-		return
-	var transition: Node = get_tree().current_scene.get_node(transitionPath)
-	transition.Interact()
+    if !CoopManager.isHost:
+        return
+    if !IsValidInteractablePath(transitionPath, &"Transition"):
+        return
+    var transition: Node = get_tree().current_scene.get_node(transitionPath)
+    transition.Interact()
 
 # ---------- Container Sync ----------
 
@@ -109,15 +109,15 @@ func RequestTransition(transitionPath: String) -> void:
 ## Client requests to open a loot container.
 @rpc("any_peer", "call_remote", "reliable")
 func RequestContainerOpen(containerPath: String) -> void:
-	if !CoopManager.isHost:
-		return
-	if !IsValidInteractablePath(containerPath, &"Interactable"):
-		return
-	var container: Node = get_tree().current_scene.get_node(containerPath)
-	if !(container is LootContainer):
-		return
-	# Host opens the container (original logic) and broadcasts loot state
-	container.Interact()
+    if !CoopManager.isHost:
+        return
+    if !IsValidInteractablePath(containerPath, &"Interactable"):
+        return
+    var container: Node = get_tree().current_scene.get_node(containerPath)
+    if !(container is LootContainer):
+        return
+    # Host opens the container (original logic) and broadcasts loot state
+    container.Interact()
 
 
 ## Host broadcasts a container's loot state to all peers.
@@ -145,12 +145,12 @@ func RequestContainerTakeItem(containerPath: String, itemIndex: int) -> void:
     if takenSlot == null:
         return
     # Remove from host's authoritative loot array
-	container.loot.remove_at(itemIndex)
-	# Send item to requesting client
-	var requesterId: int = multiplayer.get_remote_sender_id()
-	GrantPickupToClient.rpc_id(requesterId, SlotSerializer.Pack(takenSlot))
-	# Broadcast updated loot to all peers
-	SyncContainerState.rpc(containerPath, SlotSerializer.PackArray(container.loot))
+    container.loot.remove_at(itemIndex)
+    # Send item to requesting client
+    var requesterId: int = multiplayer.get_remote_sender_id()
+    GrantPickupToClient.rpc_id(requesterId, SlotSerializer.Pack(takenSlot))
+    # Broadcast updated loot to all peers
+    SyncContainerState.rpc(containerPath, SlotSerializer.PackArray(container.loot))
 
 # ---------- Pickup Sync ----------
 
@@ -159,22 +159,22 @@ func RequestContainerTakeItem(containerPath: String, itemIndex: int) -> void:
 ## sends the item data back to the requester, and broadcasts removal to all.
 @rpc("any_peer", "call_remote", "reliable")
 func RequestPickupInteract(pickupPath: String) -> void:
-	if !CoopManager.isHost:
-		return
-	if !IsValidInteractablePath(pickupPath, &"Item"):
-		return
-	var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
-	if !is_instance_valid(pickup) || !(pickup is Pickup):
-		return
-	# Immediately mark consumed to prevent race condition (C2)
-	pickup.remove_from_group(&"Item")
-	# Send item data to the requesting client so they add it to their own inventory
-	var requesterId: int = multiplayer.get_remote_sender_id()
-	var packedSlot: Dictionary = SlotSerializer.Pack(pickup.slotData)
-	GrantPickupToClient.rpc_id(requesterId, packedSlot)
-	# Broadcast removal to all peers
-	SyncPickupConsumed.rpc(pickupPath)
-	pickup.queue_free()
+    if !CoopManager.isHost:
+        return
+    if !IsValidInteractablePath(pickupPath, &"Item"):
+        return
+    var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
+    if !is_instance_valid(pickup) || !(pickup is Pickup):
+        return
+    # Immediately mark consumed to prevent race condition (C2)
+    pickup.remove_from_group(&"Item")
+    # Send item data to the requesting client so they add it to their own inventory
+    var requesterId: int = multiplayer.get_remote_sender_id()
+    var packedSlot: Dictionary = SlotSerializer.Pack(pickup.slotData)
+    GrantPickupToClient.rpc_id(requesterId, packedSlot)
+    # Broadcast removal to all peers
+    SyncPickupConsumed.rpc(pickupPath)
+    pickup.queue_free()
 
 
 ## Host sends a pickup's item data to the client who picked it up.
@@ -208,29 +208,29 @@ func SyncPickupSpawn(packedSlot: Dictionary, pos: Vector3, rot: Vector3, pickupN
     if slotData == null:
         return
     # Find the PackedScene from Database using the item's file key
-	var scene: PackedScene = FindPickupScene(slotData.itemData.file)
-	if scene == null:
-		return
-	var pickup: Node3D = scene.instantiate()
-	pickup.name = pickupName
-	pickup.slotData = slotData
-	pickup.global_position = pos
-	pickup.global_rotation = rot
-	get_tree().current_scene.add_child(pickup)
-	pickup.Freeze()
+    var scene: PackedScene = FindPickupScene(slotData.itemData.file)
+    if scene == null:
+        return
+    var pickup: Node3D = scene.instantiate()
+    pickup.name = pickupName
+    pickup.slotData = slotData
+    pickup.global_position = pos
+    pickup.global_rotation = rot
+    get_tree().current_scene.add_child(pickup)
+    pickup.Freeze()
 
 
 ## Looks up a Pickup PackedScene from the Database constants by item file key.
 func FindPickupScene(fileKey: String) -> PackedScene:
-	var db: Node = get_node_or_null("/root/Database")
-	if db == null:
-		return null
-	var constants: Dictionary = db.get_script().get_script_constant_map()
-	if fileKey in constants:
-		var res: Variant = constants[fileKey]
-		if res is PackedScene:
-			return res
-	return null
+    var db: Node = get_node_or_null("/root/Database")
+    if db == null:
+        return null
+    var constants: Dictionary = db.get_script().get_script_constant_map()
+    if fileKey in constants:
+        var res: Variant = constants[fileKey]
+        if res is PackedScene:
+            return res
+    return null
 
 # ---------- Simulation Sync ----------
 
@@ -238,52 +238,52 @@ func FindPickupScene(fileKey: String) -> PackedScene:
 ## Host periodically broadcasts time/day/weather to all peers (unreliable).
 @rpc("authority", "call_remote", "unreliable")
 func SyncSimulation(syncTime: float, syncDay: int, syncWeather: String) -> void:
-	Simulation.time = syncTime
-	Simulation.day = syncDay
-	Simulation.weather = syncWeather
+    Simulation.time = syncTime
+    Simulation.day = syncDay
+    Simulation.weather = syncWeather
 
 
 ## Reliable simulation sync for initial state on peer join.
 @rpc("authority", "call_remote", "reliable")
 func SyncSimulationReliable(syncTime: float, syncDay: int, syncWeather: String) -> void:
-	Simulation.time = syncTime
-	Simulation.day = syncDay
-	Simulation.weather = syncWeather
+    Simulation.time = syncTime
+    Simulation.day = syncDay
+    Simulation.weather = syncWeather
 
 # ---------- Full State Sync (on peer join) ----------
 
 
 ## Sends the current world state to a specific peer (called by host on peer connect).
 func SendFullState(peerId: int) -> void:
-	if !CoopManager.isHost:
-		return
+    if !CoopManager.isHost:
+        return
 
-	# Sync all doors via Interactable group
-	for node: Node in get_tree().get_nodes_in_group("Interactable"):
-		var obj: Node = node.owner
-		if obj is Door:
-			var doorPath: String = get_tree().current_scene.get_path_to(obj)
-			SyncDoorState.rpc_id(peerId, doorPath, obj.isOpen)
-			if !obj.locked && obj.key:
-				SyncDoorUnlock.rpc_id(peerId, doorPath)
+    # Sync all doors via Interactable group
+    for node: Node in get_tree().get_nodes_in_group("Interactable"):
+        var obj: Node = node.owner
+        if obj is Door:
+            var doorPath: String = get_tree().current_scene.get_path_to(obj)
+            SyncDoorState.rpc_id(peerId, doorPath, obj.isOpen)
+            if !obj.locked && obj.key:
+                SyncDoorUnlock.rpc_id(peerId, doorPath)
 
-	# Sync all switches
-	for node: Node in get_tree().get_nodes_in_group("Switch"):
-		var obj: Node = node.owner
-		var switchPath: String = get_tree().current_scene.get_path_to(obj)
-		SyncSwitchState.rpc_id(peerId, switchPath, obj.active)
+    # Sync all switches
+    for node: Node in get_tree().get_nodes_in_group("Switch"):
+        var obj: Node = node.owner
+        var switchPath: String = get_tree().current_scene.get_path_to(obj)
+        SyncSwitchState.rpc_id(peerId, switchPath, obj.active)
 
-	# Sync simulation (reliable for initial join)
-	SyncSimulationReliable.rpc_id(peerId, Simulation.time, Simulation.day, Simulation.weather)
+    # Sync simulation (reliable for initial join)
+    SyncSimulationReliable.rpc_id(peerId, Simulation.time, Simulation.day, Simulation.weather)
 
 # ---------- Validation ----------
 
 
 ## Validates a NodePath is safe and points to the expected group.
 func IsValidInteractablePath(nodePath: String, expectedGroup: StringName) -> bool:
-	if nodePath.is_empty() || ".." in nodePath || nodePath.begins_with("/"):
-		return false
-	var node: Node = get_tree().current_scene.get_node_or_null(nodePath)
-	if node == null:
-		return false
-	return node.is_in_group(expectedGroup)
+    if nodePath.is_empty() || ".." in nodePath || nodePath.begins_with("/"):
+        return false
+    var node: Node = get_tree().current_scene.get_node_or_null(nodePath)
+    if node == null:
+        return false
+    return node.is_in_group(expectedGroup)

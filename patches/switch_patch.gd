@@ -5,16 +5,16 @@
 extends "res://Scripts/Switch.gd"
 
 func Interact():
-	if !CoopManager.isActive:
-		super.Interact()
-		return
+    if !CoopManager.isActive:
+        super.Interact()
+        return
 
-	if CoopManager.isHost:
-		# Host runs original logic and broadcasts
-		super.Interact()
-		var switchPath: String = get_tree().current_scene.get_path_to(self)
-		CoopManager.worldState.SyncSwitchState.rpc(switchPath, active)
-	else:
-		# Client requests the host to do it
-		var switchPath: String = get_tree().current_scene.get_path_to(self)
-		CoopManager.worldState.RequestSwitchInteract.rpc_id(1, switchPath)
+    if CoopManager.isHost:
+        # Host runs original logic and broadcasts
+        super.Interact()
+        var switchPath: String = get_tree().current_scene.get_path_to(self)
+        CoopManager.worldState.SyncSwitchState.rpc(switchPath, active)
+    else:
+        # Client requests the host to do it
+        var switchPath: String = get_tree().current_scene.get_path_to(self)
+        CoopManager.worldState.RequestSwitchInteract.rpc_id(1, switchPath)
