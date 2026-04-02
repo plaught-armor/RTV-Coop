@@ -60,10 +60,17 @@ func _process(delta: float) -> void:
     UpdatePlayerLabels()
 
 
-## Updates the keybind hints based on connection state.
+## Updates the keybind hints based on connection and Steam state.
 func UpdateHints() -> void:
     if CoopManager.isActive:
         hintsLabel.text = "F9 Panel  |  F12 Hide"
+    elif !CoopManager.DEBUG && !CoopManager.steamBridge.IsReady():
+        if CoopManager.steamBridge.connected:
+            hintsLabel.text = "Steam: verifying...  |  F12 Hide"
+        elif CoopManager.steamBridge.connecting:
+            hintsLabel.text = "Steam: connecting...  |  F12 Hide"
+        else:
+            hintsLabel.text = "Steam: offline  |  F12 Hide"
     else:
         hintsLabel.text = "F9 Panel  |  F10 Host  |  F12 Hide"
 
