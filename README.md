@@ -5,10 +5,15 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 ## Features
 
 - **2-4 player co-op** via ENet networking with 20Hz position sync and interpolation
-- **Steam integration** — lobbies, persona names, ownership verification, and NAT traversal via Steam Networking Sockets (no port forwarding)
+- **Steam integration** — lobbies, persona names, ownership verification, and NAT traversal via Steam Networking Sockets (no port forwarding needed)
+- **World state sync** — doors, switches, time/weather synced between all players. Host-authoritative with client request/validation model
+- **Synchronized map transitions** — both players transition together, spawn at the same location
+- **Remote player audio** — footsteps, jumps, and landings play spatially at the remote player's position
+- **Pickup sync** — host-authoritative item pickups prevent duplication
 - **Zero game file modifications** — installs as a standard VostokMods `.vmz` archive
 - **Optimized controller patch** — pooled audio, match-based footstep resolution, typed GameData access, collapsed input handling
-- **Ping overlay** — always-visible HUD showing connected players and round-trip times (F12 to toggle)
+- **Version safety** — MD5 hash check on all patched scripts; skips patches if game has updated
+- **Ping overlay** — always-visible HUD showing connected players and round-trip times
 
 ## Installation
 
@@ -32,68 +37,85 @@ git clone https://github.com/plaught-armor/mod.git mod
 # CoopManager="*res://mod/autoload/coop_manager.gd"
 
 # Build the Steam helper (requires Go 1.21+)
-cd steam_helper
+cd mod/steam_helper
 go build -o bin/steam_helper_linux -ldflags="-s -w" .
 
-# Copy Steam SDK lib next to the helper
-cp "$(go env GOMODCACHE)/github.com/assemblaj/purego-steamworks@*/libsteam_api.so" bin/
-ln -s libsteam_api64.so bin/libsteam_api.so  # if 64-bit version
+# Copy 64-bit Steam SDK lib next to the helper
+cp "$(go env GOMODCACHE)/github.com/assemblaj/purego-steamworks@*/libsteam_api64.so" bin/libsteam_api.so
+
+# Copy helper + lib to mod/bin for the mod to extract at runtime
+mkdir -p ../bin
+cp bin/steam_helper_linux bin/libsteam_api.so ../bin/
+echo "2141300" > ../bin/steam_appid.txt
 
 # Open the project in Godot 4.6+ and run
 ```
 
 ## Usage
 
-### Hosting (LAN / Direct)
-
-1. Both players load into a map (not the main menu)
-2. Host presses **F10** (or opens panel with **F9** → "Host")
-3. Client presses **F9**, enters host's IP, and clicks "Join" (or **F11** for localhost)
-
-### Hosting (Steam)
-
-1. Both players launch the game through Steam
-2. Host presses **F10** — creates a Steam lobby (friends-only)
-3. Client presses **F9** → "Refresh" to see available lobbies → clicks to join
-4. Connection is automatic via Steam relay — no IP or port forwarding needed
-
 ### Controls
 
 | Key | Action |
 |-----|--------|
-| **F9** | Toggle co-op panel (host/join/disconnect) |
+| **Insert** | Toggle multiplayer panel (host/join/disconnect/lobbies) |
 | **F10** | Quick host |
-| **F11** | Quick join (localhost in ENet mode) |
+| **F11** | Quick join localhost (debug builds only) |
 | **F12** | Toggle player/ping HUD |
 | **`** (backtick) | Toggle mouse capture (debug builds only) |
+
+### Hosting (Steam — default)
+
+1. Both players launch the game through Steam and load into a map
+2. Host presses **Insert** → clicks "Host" (or **F10**)
+3. Client presses **Insert** → clicks "Refresh" to see available lobbies → clicks to join
+4. Connection is automatic via Steam relay — no IP or port forwarding needed
+
+### Hosting (Direct Connect — debug only)
+
+1. Both players load into a map
+2. Host presses **F10** (or **Insert** → "Host")
+3. Client presses **Insert**, enters host's IP in the "Direct Connect" section, clicks "Direct Join" (or **F11** for localhost)
 
 ## Architecture
 
 ```
 mod/
-├── autoload/coop_manager.gd    # Singleton: peers, patches, lifecycle
+├── autoload/coop_manager.gd       # Singleton: peers, patches, lifecycle
 ├── network/
-│   ├── player_state.gd         # Position sync: 20Hz RPCs, interpolation
-│   └── steam_bridge.gd         # Steam helper IPC over localhost TCP
+│   ├── player_state.gd            # Position + footstep sync: 20Hz RPCs, interpolation
+│   ├── world_state.gd             # World sync: doors, switches, transitions, pickups, sim
+│   ├── steam_bridge.gd            # Steam helper IPC over localhost TCP
+│   └── slot_serializer.gd         # SlotData <-> Dictionary for network transmission
 ├── patches/
-│   └── controller_patch.gd     # Extends Controller.gd via take_over_path
+│   ├── controller_patch.gd        # Movement broadcast, optimized input/audio/surface
+│   ├── door_patch.gd              # Host-authoritative door interactions
+│   ├── switch_patch.gd            # Host-authoritative switch interactions
+│   ├── transition_patch.gd        # Synchronized map transitions
+│   ├── pickup_patch.gd            # Host-authoritative item pickups
+│   └── loot_container_patch.gd    # Container sync (disabled — TraderDisplay conflict)
 ├── presentation/
-│   ├── remote_player.gd        # Ghost capsule visual for remote players
+│   ├── remote_player.gd           # Ghost visual + spatial audio for remote players
 │   └── remote_player.tscn
-└── ui/
-    ├── coop_ui.gd              # Host/join panel + lobby browser
-    └── coop_hud.gd             # Player list + ping overlay
-
-steam_helper/                    # Go binary (separate process)
-├── main.go                     # TCP server, Steam init, lobby commands
-└── tunnel.go                   # Steam Networking Sockets UDP relay
+├── ui/
+│   ├── coop_ui.gd                 # Multiplayer panel + lobby browser
+│   └── coop_hud.gd                # Player list + ping overlay + keybind hints
+├── steam_helper/                   # Go binary (separate process)
+│   ├── main.go                    # TCP server, Steam init, lobby commands
+│   └── tunnel.go                  # Steam Networking Sockets UDP relay
+├── build.sh                       # Packages everything into .vmz
+├── mod.txt                        # VostokMods manifest
+└── README.md
 ```
 
 **How it works:**
 - The mod injects as a VostokMods autoload and patches game scripts via `take_over_path()`
-- Position sync uses Godot's built-in `@rpc` over `ENetMultiplayerPeer`
+- All patches verify script hashes before applying — skips if game has updated
+- Position sync uses Godot's `@rpc` over `ENetMultiplayerPeer` at 20Hz with 100ms interpolation delay
+- World state (doors, switches, pickups) is host-authoritative: clients send requests, host validates and broadcasts
+- Map transitions are synchronized: host broadcasts to clients before transitioning, then teleports clients to host's spawn position
 - Steam features (lobbies, ownership, NAT traversal) are handled by a Go helper binary communicating over localhost TCP
-- For internet play, Steam Networking Sockets creates a transparent UDP tunnel — ENet thinks it's talking to localhost while Steam handles relay/NAT
+- For internet play, Steam Networking Sockets creates a transparent UDP tunnel — ENet connects to localhost while Steam handles relay/NAT
+- All mod functions follow GDScript `snake_case` convention; only game overrides use PascalCase
 
 ## Building
 
@@ -113,30 +135,37 @@ The build script copies the Steam helper binaries and `libsteam_api` into `mod/b
 
 ### Known Mod Conflicts
 
-This mod patches `Controller.gd` via `take_over_path`. **Any other mod that also patches `Controller.gd` will conflict** — whichever loads last wins. Known conflicting mods:
+This mod patches the following scripts via `take_over_path`. Any other mod patching the same scripts will conflict — whichever loads last wins:
 
-- Fly Mode mods (override Controller for flight)
-- Immersive Overhaul (overrides Controller for movement changes)
-
-If you need both, one would need to be ported as a patch on top of the other.
+| Script | Patch | Conflict Risk |
+|--------|-------|---------------|
+| `Controller.gd` | Movement broadcast, optimized audio/input | High — Fly Mode, Immersive Overhaul |
+| `Door.gd` | Host-authoritative door sync | Low |
+| `Switch.gd` | Host-authoritative switch sync | Low |
+| `Transition.gd` | Synchronized map transitions | Low |
+| `Pickup.gd` | Host-authoritative pickups | Low |
 
 ### Game Version
 
-The mod checks a hash of `Controller.gd` at startup and logs a warning if the game has been updated since the mod was built. If you see `WARNING: Controller.gd has changed`, the mod may behave incorrectly — check for an updated release.
+The mod checks MD5 hashes of all patched scripts at startup. If a hash doesn't match (game updated), that patch is **skipped** to avoid crashes. Check the console for warnings.
 
 ## Roadmap
 
 - [x] **Phase 1** — Position sync, ghost visuals, connection UI
-- [x] **Steam** — Lobbies, persona names, ownership check, NAT traversal
-- [ ] **Phase 2** — World state sync (doors, loot containers, pickups, time/weather)
+- [x] **Steam** — Lobbies, persona names, ownership check, NAT traversal (P2P tunnel)
+- [x] **Phase 2** — World state sync (doors, switches, simulation time/weather)
+- [x] **Phase 2.5** — Transitions, pickups, footstep audio, serialization
+- [ ] **Loot containers** — Deferred (TraderDisplay conflict needs resolution)
 - [ ] **Phase 3** — AI multi-player awareness (enemies detect all players)
 - [ ] **Phase 4** — Combat sync (weapon fire, hit registration, damage)
+- [ ] **Third-person model** — Replace ghost capsule with Bandit mesh
+- [ ] **Voice chat** — Steam Voice API or external (Discord)
 
 ## Requirements
 
 - [Road to Vostok](https://store.steampowered.com/app/2141300/Road_to_Vostok/) (Steam)
 - [VostokMods](https://github.com/Ryhon0/VostokMods) or Metro Mod Loader
-- Steam running (for Steam features)
+- Steam running (for lobbies and ownership verification)
 
 ## Credits
 
