@@ -1,16 +1,20 @@
 ## Main mod autoload for the Road to Vostok co-op mod.
-## Manages ENet peer lifecycle, script patching, remote player spawning,
+## Manages peer lifecycle, script patching, remote player spawning,
 ## Steam integration, and scene change detection. Persists across scene transitions.
+## All connections go through Steam (lobbies + P2P tunnel). ENet direct-connect
+## is available behind [member DEBUG] for local development only.
 extends Node
 
-## Default ENet server port.
+## Default ENet server port (used internally by the P2P tunnel).
 const DEFAULT_PORT: int = 9050
 ## Maximum number of clients that can connect to the host.
 const MAX_CLIENTS: int = 3
-## Enable debug logging and ENet direct-connect mode.
+## Enable debug logging and ENet direct-connect fallback.
 const DEBUG: bool = true
 ## Force windowed mode on startup for multi-instance testing.
 const DEV_WINDOWED: bool = true
+## Known MD5 hash of Controller.gd that this mod was built against.
+const CONTROLLER_HASH: String = "da2049367c3298a152dc0cb35217ad9a"
 
 ## The local peer's multiplayer ID. 0 when not connected.
 var localPeerId: int = 0
@@ -18,8 +22,6 @@ var localPeerId: int = 0
 var isHost: bool = false
 ## Whether a multiplayer session is active (host or client).
 var isActive: bool = false
-## Whether Steam mode is active (lobbies + ownership). False = ENet-only (DEBUG/LAN).
-var useSteam: bool = false
 ## Connected peer IDs. Source of truth for who is in the session.
 var connectedPeers: PackedInt32Array = []
 ## Spawned remote player nodes, keyed by peer ID. Only contains live nodes.
@@ -71,12 +73,10 @@ func _ready() -> void:
 	multiplayer.connection_failed.connect(OnConnectionFailed)
 	multiplayer.server_disconnected.connect(OnServerDisconnected)
 
-	# Launch Steam helper in non-debug mode
-	if !DEBUG:
-		useSteam = true
-		steamBridge.Launch()
+	# Always launch Steam helper
+	steamBridge.Launch()
 
-	Log("Initialized (steam: %s)" % str(useSteam))
+	Log("Initialized")
 
 
 func _physics_process(delta: float) -> void:
@@ -94,9 +94,6 @@ func _physics_process(delta: float) -> void:
 	elif isActive:
 		EnsureAllSpawned()
 
-## Known MD5 hash of Controller.gd that this mod was built against.
-const CONTROLLER_HASH: String = "da2049367c3298a152dc0cb35217ad9a"
-
 
 ## Applies [code]take_over_path[/code] patches to game scripts.
 ## Checks file hashes before patching and warns if the game has been updated.
@@ -113,7 +110,6 @@ func PatchScript(patchPath: String, targetPath: String) -> void:
 	patch.take_over_path(targetPath)
 
 
-## Returns true if the file at [param path] matches the expected [param expectedHash] (MD5).
 func VerifyHash(path: String, expectedHash: String) -> bool:
 	var hash: String = FileAccess.get_md5(path)
 	return hash == expectedHash
@@ -121,13 +117,12 @@ func VerifyHash(path: String, expectedHash: String) -> bool:
 # ---------- Peer Lifecycle ----------
 
 
-## Creates an ENet server on the given [param port]. In Steam mode, also starts
-## a P2P listen socket and creates a lobby with the host's Steam ID.
+## Creates an ENet server and a Steam P2P listen socket + lobby.
 func HostGame(port: int = DEFAULT_PORT) -> void:
 	if IsConnected():
 		Log("Already connected, disconnect first")
 		return
-	if useSteam && !steamBridge.ownsGame:
+	if !steamBridge.ownsGame:
 		Log("Cannot host — game ownership not verified")
 		return
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
@@ -139,25 +134,23 @@ func HostGame(port: int = DEFAULT_PORT) -> void:
 	localPeerId = multiplayer.get_unique_id()
 	isHost = true
 	isActive = true
+	peerNames[localPeerId] = steamBridge.localSteamName if steamBridge.IsReady() else "Host"
 
-	if useSteam && steamBridge.IsReady():
-		peerNames[localPeerId] = steamBridge.localSteamName
-		# Start P2P listener that relays Steam peers to local ENet
+	if steamBridge.IsReady():
 		steamBridge.StartP2PHost(OnP2PHostReady, port)
-		# Create lobby with Steam ID (no IP needed — tunnel handles it)
 		steamBridge.CreateLobby(MAX_CLIENTS + 1, OnLobbyCreated)
-	else:
-		peerNames[localPeerId] = "Host"
 
 	Log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
 
 ## Connects to a host at [param address]:[param port] as a client.
+## Called internally by [method OnP2PTunnelReady] with the tunnel's localhost port,
+## or directly in DEBUG mode for ENet direct-connect.
 func JoinGame(address: String, port: int = DEFAULT_PORT) -> void:
 	if IsConnected():
 		Log("Already connected, disconnect first")
 		return
-	if useSteam && !steamBridge.ownsGame:
+	if !steamBridge.ownsGame && !DEBUG:
 		Log("Cannot join — game ownership not verified")
 		return
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
@@ -167,7 +160,6 @@ func JoinGame(address: String, port: int = DEFAULT_PORT) -> void:
 		return
 	multiplayer.multiplayer_peer = peer
 	isHost = false
-	# isActive set in OnConnectedToServer after handshake completes
 	Log("Connecting to %s:%d" % [address, port])
 
 
@@ -188,8 +180,7 @@ func Disconnect() -> void:
 	localPeerId = 0
 	isHost = false
 	isActive = false
-	if useSteam:
-		steamBridge.LeaveLobby()
+	steamBridge.LeaveLobby()
 	Log("Disconnected")
 
 # ---------- Signal Handlers ----------
@@ -199,7 +190,6 @@ func OnPeerConnected(peerId: int) -> void:
 	Log("Peer connected: %d" % peerId)
 	connectedPeers.append(peerId)
 	SpawnRemotePlayer.call_deferred(peerId)
-	# Send our name to the new peer
 	SyncName.rpc_id(peerId, GetLocalName())
 
 
@@ -222,7 +212,6 @@ func OnConnectedToServer() -> void:
 	isActive = true
 	peerNames[localPeerId] = GetLocalName()
 	Log("Connected to server (id: %d)" % localPeerId)
-	# Send our name to all existing peers
 	SyncName.rpc(GetLocalName())
 
 
@@ -268,9 +257,9 @@ func OnP2PTunnelReady(response: Dictionary) -> void:
 # ---------- Name Sync ----------
 
 
-## Returns the local player's display name (Steam persona or fallback).
+## Returns the local player's display name.
 func GetLocalName() -> String:
-	if useSteam && steamBridge.IsReady():
+	if steamBridge.IsReady():
 		return steamBridge.localSteamName
 	return "Player_%d" % localPeerId
 
@@ -289,7 +278,6 @@ func SyncName(peerName: String) -> void:
 	Log("Peer %d name: %s" % [senderId, sanitized])
 
 
-## Clamps name length and strips control characters.
 func SanitizeName(rawName: String) -> String:
 	var name: String = rawName.substr(0, 64)
 	var clean: String = ""
@@ -302,7 +290,6 @@ func SanitizeName(rawName: String) -> String:
 # ---------- Remote Player Management ----------
 
 
-## Instantiates a [code]RemotePlayer[/code] ghost for [param peerId] under the current map.
 func SpawnRemotePlayer(peerId: int) -> void:
 	if peerId in remoteNodes:
 		return
@@ -348,6 +335,7 @@ func OnSceneChanged() -> void:
 # ---------- Utility ----------
 
 
+## Toggles mouse capture with backtick for debugging.
 func _input(event: InputEvent) -> void:
 	if !DEBUG:
 		return
@@ -374,7 +362,6 @@ func IsConnected() -> bool:
 	return !(multiplayer.multiplayer_peer is OfflineMultiplayerPeer)
 
 
-## Returns the first non-loopback, non-IPv6 local IP address.
 func GetLocalIP() -> String:
 	for addr: String in IP.get_local_addresses():
 		if addr.begins_with("127.") || addr.begins_with("::") || ":" in addr:

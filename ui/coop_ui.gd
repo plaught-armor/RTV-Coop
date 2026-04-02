@@ -1,6 +1,6 @@
 ## Host/join panel for the co-op mod.
-## [kbd]F9[/kbd] toggles the panel. [kbd]F10[/kbd] quick-hosts. [kbd]F11[/kbd] quick-joins.
-## Shows ENet direct-connect in DEBUG mode, Steam lobby browser otherwise.
+## [kbd]F9[/kbd] toggles the panel. [kbd]F10[/kbd] quick-hosts.
+## Primary UI is Steam lobby browser. ENet direct-connect shown only in DEBUG mode.
 extends Control
 
 var panel: PanelContainer = null
@@ -10,16 +10,13 @@ var lastPeerCount: int = -1
 var lastConnectionState: int = -1
 var playerLabelPool: Array[Label] = []
 
-# ENet mode widgets
-var ipLabel: Label = null
-var addressInput: LineEdit = null
-var portInput: LineEdit = null
-var enetSection: VBoxContainer = null
-
-# Steam mode widgets
-var lobbySection: VBoxContainer = null
+# Steam lobby widgets
 var lobbyList: VBoxContainer = null
 var lobbyLabelPool: Array[Button] = []
+
+# ENet debug widgets (only created in DEBUG mode)
+var addressInput: LineEdit = null
+var portInput: LineEdit = null
 
 # Shared
 var playerList: VBoxContainer = null
@@ -45,8 +42,6 @@ func _input(event: InputEvent) -> void:
 				Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		KEY_F10:
 			OnHostPressed()
-		KEY_F11:
-			OnJoinPressed()
 
 
 func BuildUI() -> void:
@@ -77,23 +72,68 @@ func BuildUI() -> void:
 
 	vbox.add_child(HSeparator.new())
 
-	# ENet section (DEBUG only)
-	enetSection = VBoxContainer.new()
-	vbox.add_child(enetSection)
-	BuildENetSection()
+	# Steam lobby section (always visible)
+	var steamLabel: Label = Label.new()
+	steamLabel.text = "Steam Lobbies"
+	vbox.add_child(steamLabel)
 
-	# Steam section
-	lobbySection = VBoxContainer.new()
-	vbox.add_child(lobbySection)
-	BuildSteamSection()
+	var btnRow: HBoxContainer = HBoxContainer.new()
+	vbox.add_child(btnRow)
 
-	# Show the correct section
-	enetSection.visible = CoopManager.DEBUG
-	lobbySection.visible = CoopManager.useSteam
+	var hostBtn: Button = Button.new()
+	hostBtn.text = "Host (F10)"
+	hostBtn.pressed.connect(OnHostPressed)
+	btnRow.add_child(hostBtn)
+
+	var refreshBtn: Button = Button.new()
+	refreshBtn.text = "Refresh"
+	refreshBtn.pressed.connect(OnRefreshLobbies)
+	btnRow.add_child(refreshBtn)
+
+	lobbyList = VBoxContainer.new()
+	vbox.add_child(lobbyList)
+
+	# ENet debug section (DEBUG only)
+	if CoopManager.DEBUG:
+		vbox.add_child(HSeparator.new())
+
+		var debugLabel: Label = Label.new()
+		debugLabel.text = "Direct Connect (DEBUG)"
+		vbox.add_child(debugLabel)
+
+		var addrRow: HBoxContainer = HBoxContainer.new()
+		vbox.add_child(addrRow)
+
+		var addrLabel: Label = Label.new()
+		addrLabel.text = "IP:"
+		addrRow.add_child(addrLabel)
+
+		addressInput = LineEdit.new()
+		addressInput.placeholder_text = "127.0.0.1"
+		addressInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		addressInput.mouse_filter = Control.MOUSE_FILTER_STOP
+		addrRow.add_child(addressInput)
+
+		var portRow: HBoxContainer = HBoxContainer.new()
+		vbox.add_child(portRow)
+
+		var portLabel: Label = Label.new()
+		portLabel.text = "Port:"
+		portRow.add_child(portLabel)
+
+		portInput = LineEdit.new()
+		portInput.placeholder_text = str(CoopManager.DEFAULT_PORT)
+		portInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		portInput.mouse_filter = Control.MOUSE_FILTER_STOP
+		portRow.add_child(portInput)
+
+		var joinBtn: Button = Button.new()
+		joinBtn.text = "Direct Join"
+		joinBtn.pressed.connect(OnDirectJoinPressed)
+		vbox.add_child(joinBtn)
 
 	vbox.add_child(HSeparator.new())
 
-	# Disconnect button (always visible)
 	var disconnectBtn: Button = Button.new()
 	disconnectBtn.text = "Disconnect"
 	disconnectBtn.pressed.connect(OnDisconnectPressed)
@@ -107,78 +147,6 @@ func BuildUI() -> void:
 
 	playerList = VBoxContainer.new()
 	vbox.add_child(playerList)
-
-
-func BuildENetSection() -> void:
-	ipLabel = Label.new()
-	ipLabel.text = "Your IP: %s" % GetLocalIP()
-	enetSection.add_child(ipLabel)
-
-	var copyBtn: Button = Button.new()
-	copyBtn.text = "Copy IP"
-	copyBtn.pressed.connect(OnCopyIP)
-	enetSection.add_child(copyBtn)
-
-	var addrRow: HBoxContainer = HBoxContainer.new()
-	enetSection.add_child(addrRow)
-
-	var addrLabel: Label = Label.new()
-	addrLabel.text = "IP:"
-	addrRow.add_child(addrLabel)
-
-	addressInput = LineEdit.new()
-	addressInput.placeholder_text = "127.0.0.1"
-	addressInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	addressInput.mouse_filter = Control.MOUSE_FILTER_STOP
-	addrRow.add_child(addressInput)
-
-	var portRow: HBoxContainer = HBoxContainer.new()
-	enetSection.add_child(portRow)
-
-	var portLabel: Label = Label.new()
-	portLabel.text = "Port:"
-	portRow.add_child(portLabel)
-
-	portInput = LineEdit.new()
-	portInput.placeholder_text = str(CoopManager.DEFAULT_PORT)
-	portInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	portInput.mouse_filter = Control.MOUSE_FILTER_STOP
-	portRow.add_child(portInput)
-
-	var btnRow: HBoxContainer = HBoxContainer.new()
-	enetSection.add_child(btnRow)
-
-	var hostBtn: Button = Button.new()
-	hostBtn.text = "Host (F10)"
-	hostBtn.pressed.connect(OnHostPressed)
-	btnRow.add_child(hostBtn)
-
-	var joinBtn: Button = Button.new()
-	joinBtn.text = "Join (F11)"
-	joinBtn.pressed.connect(OnJoinPressed)
-	btnRow.add_child(joinBtn)
-
-
-func BuildSteamSection() -> void:
-	var steamStatus: Label = Label.new()
-	steamStatus.text = "Steam Lobbies"
-	lobbySection.add_child(steamStatus)
-
-	var btnRow: HBoxContainer = HBoxContainer.new()
-	lobbySection.add_child(btnRow)
-
-	var hostBtn: Button = Button.new()
-	hostBtn.text = "Host Lobby"
-	hostBtn.pressed.connect(OnHostPressed)
-	btnRow.add_child(hostBtn)
-
-	var refreshBtn: Button = Button.new()
-	refreshBtn.text = "Refresh"
-	refreshBtn.pressed.connect(OnRefreshLobbies)
-	btnRow.add_child(refreshBtn)
-
-	lobbyList = VBoxContainer.new()
-	lobbySection.add_child(lobbyList)
 
 
 func _process(_delta: float) -> void:
@@ -237,24 +205,19 @@ func GetPooledPlayerLabel(idx: int) -> Label:
 
 
 func OnHostPressed() -> void:
-	if CoopManager.useSteam:
-		CoopManager.HostGame()
-	else:
-		CoopManager.HostGame(GetPort())
+	CoopManager.HostGame()
 
 
-func OnJoinPressed() -> void:
-	if CoopManager.useSteam:
-		return # Steam mode uses lobby join buttons
-	CoopManager.JoinGame(GetAddress(), GetPort())
+func OnDirectJoinPressed() -> void:
+	var address: String = addressInput.text if addressInput != null && !addressInput.text.is_empty() else "127.0.0.1"
+	var port: int = CoopManager.DEFAULT_PORT
+	if portInput != null && portInput.text.is_valid_int():
+		port = clampi(portInput.text.to_int(), 1024, 65535)
+	CoopManager.JoinGame(address, port)
 
 
 func OnDisconnectPressed() -> void:
 	CoopManager.Disconnect()
-
-
-func OnCopyIP() -> void:
-	DisplayServer.clipboard_set(GetLocalIP())
 
 
 func OnRefreshLobbies() -> void:
@@ -264,7 +227,6 @@ func OnRefreshLobbies() -> void:
 
 
 func OnLobbyListReceived(response: Dictionary) -> void:
-	# Clear old lobby buttons
 	for i: int in range(lobbyLabelPool.size()):
 		lobbyLabelPool[i].hide()
 
@@ -280,7 +242,6 @@ func OnLobbyListReceived(response: Dictionary) -> void:
 		var maxPlayers: int = lobby.get("max_players", 0)
 		btn.text = "%s (%d/%d)" % [hostName, players, maxPlayers]
 		var lobbyID: String = lobby.get("lobby_id", "")
-		# Clear all old connections before rebinding
 		for conn: Dictionary in btn.pressed.get_connections():
 			btn.pressed.disconnect(conn["callable"])
 		btn.pressed.connect(OnLobbyJoinPressed.bind(lobbyID))
@@ -315,24 +276,3 @@ func GetPooledLobbyButton(idx: int) -> Button:
 	lobbyList.add_child(btn)
 	lobbyLabelPool.append(btn)
 	return btn
-
-# ---------- ENet Helpers ----------
-
-
-func GetPort() -> int:
-	if portInput == null:
-		return CoopManager.DEFAULT_PORT
-	var portText: String = portInput.text
-	if portText.is_valid_int():
-		return clampi(portText.to_int(), 1024, 65535)
-	return CoopManager.DEFAULT_PORT
-
-
-func GetAddress() -> String:
-	if addressInput != null && !addressInput.text.is_empty():
-		return addressInput.text
-	return "127.0.0.1"
-
-
-func GetLocalIP() -> String:
-	return CoopManager.GetLocalIP()
