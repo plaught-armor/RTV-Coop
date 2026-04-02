@@ -90,6 +90,100 @@ func SyncSwitchState(switchPath: String, active: bool) -> void:
 		sw.Deactivate()
 		sw.PlaySwitch()
 
+# ---------- Transition Sync ----------
+
+
+## Client requests the host to trigger a map transition.
+@rpc("any_peer", "call_remote", "reliable")
+func RequestTransition(transitionPath: String) -> void:
+	if !CoopManager.isHost:
+		return
+	if !IsValidInteractablePath(transitionPath, &"Transition"):
+		return
+	var transition: Node = get_tree().current_scene.get_node(transitionPath)
+	transition.Interact()
+
+# ---------- Container Sync ----------
+
+
+## Client requests to open a loot container.
+@rpc("any_peer", "call_remote", "reliable")
+func RequestContainerOpen(containerPath: String) -> void:
+	if !CoopManager.isHost:
+		return
+	if !IsValidInteractablePath(containerPath, &"Interactable"):
+		return
+	var container: Node = get_tree().current_scene.get_node(containerPath)
+	if !(container is LootContainer):
+		return
+	# Host opens the container (original logic) and broadcasts loot state
+	container.Interact()
+
+
+## Host broadcasts a container's loot state to all peers.
+@rpc("authority", "call_remote", "reliable")
+func SyncContainerState(containerPath: String, packedLoot: Array) -> void:
+	var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
+	if container == null || !(container is LootContainer):
+		return
+	container.loot = SlotSerializer.UnpackArray(packedLoot)
+
+# ---------- Pickup Sync ----------
+
+
+## Client requests to pick up an item.
+@rpc("any_peer", "call_remote", "reliable")
+func RequestPickupInteract(pickupPath: String) -> void:
+	if !CoopManager.isHost:
+		return
+	if !IsValidInteractablePath(pickupPath, &"Item"):
+		return
+	var pickup: Node = get_tree().current_scene.get_node(pickupPath)
+	if !(pickup is Pickup):
+		return
+	# Run the patched Interact on the host (validates inventory, consumes, broadcasts)
+	pickup.Interact()
+
+
+## Host broadcasts that a pickup was consumed (removed from world).
+@rpc("authority", "call_remote", "reliable")
+func SyncPickupConsumed(pickupPath: String) -> void:
+	var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
+	if is_instance_valid(pickup):
+		pickup.queue_free()
+
+
+## Host broadcasts a new pickup spawned in the world.
+@rpc("authority", "call_remote", "reliable")
+func SyncPickupSpawn(packedSlot: Dictionary, pos: Vector3, rot: Vector3, pickupName: String) -> void:
+	var slotData: SlotData = SlotSerializer.Unpack(packedSlot)
+	if slotData == null:
+		return
+	# Find the PackedScene from Database using the item's file key
+	var scene: PackedScene = FindPickupScene(slotData.itemData.file)
+	if scene == null:
+		return
+	var pickup: Node3D = scene.instantiate()
+	pickup.name = pickupName
+	pickup.slotData = slotData
+	pickup.global_position = pos
+	pickup.global_rotation = rot
+	get_tree().current_scene.add_child(pickup)
+	pickup.Freeze()
+
+
+## Looks up a Pickup PackedScene from the Database constants by item file key.
+func FindPickupScene(fileKey: String) -> PackedScene:
+	var db: Node = get_node_or_null("/root/Database")
+	if db == null:
+		return null
+	var constants: Dictionary = db.get_script().get_script_constant_map()
+	if fileKey in constants:
+		var res: Variant = constants[fileKey]
+		if res is PackedScene:
+			return res
+	return null
+
 # ---------- Simulation Sync ----------
 
 

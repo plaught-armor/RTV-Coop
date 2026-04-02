@@ -17,6 +17,9 @@ const DEV_WINDOWED: bool = true
 const CONTROLLER_HASH: String = "da2049367c3298a152dc0cb35217ad9a"
 const DOOR_HASH: String = "2f7397b8801d17304a102661df6fd327"
 const SWITCH_HASH: String = "89fbf23ff77c2a35b45ab6678607fb98"
+const TRANSITION_HASH: String = "c370261a9529c4bd74d19faf5b7ad2f8"
+const PICKUP_HASH: String = "bc1af42d61966dab4a02eabeb8d3ab10"
+const LOOT_CONTAINER_HASH: String = "988851b309f6db683dcbf5e95a7c0666"
 
 ## The local peer's multiplayer ID. 0 when not connected.
 var localPeerId: int = 0
@@ -110,6 +113,9 @@ func RegisterPatches() -> void:
 		["res://Scripts/Controller.gd", CONTROLLER_HASH, "res://mod/patches/controller_patch.gd"],
 		["res://Scripts/Door.gd", DOOR_HASH, "res://mod/patches/door_patch.gd"],
 		["res://Scripts/Switch.gd", SWITCH_HASH, "res://mod/patches/switch_patch.gd"],
+		["res://Scripts/Transition.gd", TRANSITION_HASH, "res://mod/patches/transition_patch.gd"],
+		["res://Scripts/Pickup.gd", PICKUP_HASH, "res://mod/patches/pickup_patch.gd"],
+		["res://Scripts/LootContainer.gd", LOOT_CONTAINER_HASH, "res://mod/patches/loot_container_patch.gd"],
 	]:
 		if !VerifyHash(pair[0], pair[1]):
 			Log("WARNING: %s has changed — mod may be incompatible" % pair[0])
