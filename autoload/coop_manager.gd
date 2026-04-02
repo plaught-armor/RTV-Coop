@@ -89,7 +89,7 @@ func _ready() -> void:
     # Always launch Steam helper
     steamBridge.launch()
 
-    Log("Initialized (debug: %s)" % str(DEBUG))
+    _log("Initialized (debug: %s)" % str(DEBUG))
 
 
 func _physics_process(delta: float) -> void:
@@ -121,10 +121,10 @@ func register_patches() -> void:
         # ["res://Scripts/LootContainer.gd", LOOT_CONTAINER_HASH, "res://mod/patches/loot_container_patch.gd"],
     ]:
         if !verify_hash(pair[0], pair[1]):
-            Log("WARNING: %s has changed — skipping patch to avoid crashes" % pair[0])
+            _log("WARNING: %s has changed — skipping patch to avoid crashes" % pair[0])
             continue
         patch_script(pair[2], pair[0])
-    Log("Patches registered")
+    _log("Patches registered")
 
 
 func patch_script(patchPath: String, targetPath: String) -> void:
@@ -143,15 +143,15 @@ func verify_hash(path: String, expectedHash: String) -> bool:
 ## Creates an ENet server and a Steam P2P listen socket + lobby.
 func host_game(port: int = DEFAULT_PORT) -> void:
     if is_session_active():
-        Log("Already connected, disconnect first")
+        _log("Already connected, disconnect first")
         return
     if !DEBUG && !steamBridge.ownsGame:
-        Log("Cannot host — game ownership not verified")
+        _log("Cannot host — game ownership not verified")
         return
     var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
     var error: Error = peer.create_server(port, MAX_CLIENTS)
     if error != OK:
-        Log("Failed to create server: %s" % error)
+        _log("Failed to create server: %s" % error)
         return
     multiplayer.multiplayer_peer = peer
     localPeerId = multiplayer.get_unique_id()
@@ -163,7 +163,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
-    Log("Hosting on port %d (id: %d)" % [port, localPeerId])
+    _log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
 
 ## Connects to a host at [param address]:[param port] as a client.
@@ -171,19 +171,19 @@ func host_game(port: int = DEFAULT_PORT) -> void:
 ## or directly in DEBUG mode for ENet direct-connect.
 func join_game(address: String, port: int = DEFAULT_PORT) -> void:
     if is_session_active():
-        Log("Already connected, disconnect first")
+        _log("Already connected, disconnect first")
         return
     if !steamBridge.ownsGame && !DEBUG:
-        Log("Cannot join — game ownership not verified")
+        _log("Cannot join — game ownership not verified")
         return
     var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
     var error: Error = peer.create_client(address, port)
     if error != OK:
-        Log("Failed to connect: %s" % error)
+        _log("Failed to connect: %s" % error)
         return
     multiplayer.multiplayer_peer = peer
     isHost = false
-    Log("Connecting to %s:%d" % [address, port])
+    _log("Connecting to %s:%d" % [address, port])
 
 
 ## Tears down the multiplayer session and cleans up all remote players.
@@ -204,13 +204,13 @@ func disconnect_session() -> void:
     isHost = false
     isActive = false
     steamBridge.leave_lobby()
-    Log("Disconnected")
+    _log("Disconnected")
 
 # ---------- Signal Handlers ----------
 
 
 func on_peer_connected(peerId: int) -> void:
-    Log("Peer connected: %d" % peerId)
+    _log("Peer connected: %d" % peerId)
     connectedPeers.append(peerId)
     spawn_remote_player.call_deferred(peerId)
     sync_name.rpc_id(peerId, get_local_name())
@@ -222,7 +222,7 @@ func on_peer_connected(peerId: int) -> void:
 
 
 func on_peer_disconnected(peerId: int) -> void:
-    Log("Peer disconnected: %d" % peerId)
+    _log("Peer disconnected: %d" % peerId)
     var idx: int = connectedPeers.find(peerId)
     if idx >= 0:
         connectedPeers.remove_at(idx)
@@ -240,18 +240,18 @@ func on_connected_to_server() -> void:
     isActive = true
     peerNames[localPeerId] = get_local_name()
     set_peer_timeout(1) # Server is always peer ID 1
-    Log("Connected to server (id: %d)" % localPeerId)
+    _log("Connected to server (id: %d)" % localPeerId)
     sync_name.rpc(get_local_name())
 
 
 func on_connection_failed() -> void:
-    Log("Connection failed")
+    _log("Connection failed")
     multiplayer.multiplayer_peer = null
     isActive = false
 
 
 func on_server_disconnected() -> void:
-    Log("Server disconnected")
+    _log("Server disconnected")
     Disconnect()
 
 # ---------- Steam Callbacks ----------
@@ -259,28 +259,28 @@ func on_server_disconnected() -> void:
 
 func on_lobby_created(response: Dictionary) -> void:
     if !response.get("ok", false):
-        Log("Lobby creation failed: %s" % response.get("error", "unknown"))
+        _log("Lobby creation failed: %s" % response.get("error", "unknown"))
         return
     var lobbyID: String = response.get("data", { }).get("lobby_id", "")
-    Log("Steam lobby created: %s" % lobbyID)
+    _log("Steam lobby created: %s" % lobbyID)
 
 
 func on_p2p_host_ready(response: Dictionary) -> void:
     if !response.get("ok", false):
-        Log("P2P host failed: %s" % response.get("error", "unknown"))
+        _log("P2P host failed: %s" % response.get("error", "unknown"))
         return
-    Log("P2P host listening for Steam peers")
+    _log("P2P host listening for Steam peers")
 
 
 func on_p2p_tunnel_ready(response: Dictionary) -> void:
     if !response.get("ok", false):
-        Log("P2P tunnel failed: %s" % response.get("error", "unknown"))
+        _log("P2P tunnel failed: %s" % response.get("error", "unknown"))
         return
     var tunnelPort: int = response.get("data", { }).get("tunnel_port", 0)
     if tunnelPort == 0:
-        Log("P2P tunnel returned invalid port")
+        _log("P2P tunnel returned invalid port")
         return
-    Log("P2P tunnel ready on 127.0.0.1:%d — connecting ENet" % tunnelPort)
+    _log("P2P tunnel ready on 127.0.0.1:%d — connecting ENet" % tunnelPort)
     join_game("127.0.0.1", tunnelPort)
 
 # ---------- Name Sync ----------
@@ -304,7 +304,7 @@ func sync_name(peerName: String) -> void:
     var senderId: int = multiplayer.get_remote_sender_id()
     var sanitized: String = sanitize_name(peerName)
     peerNames[senderId] = sanitized
-    Log("Peer %d name: %s" % [senderId, sanitized])
+    _log("Peer %d name: %s" % [senderId, sanitized])
 
 
 func sanitize_name(rawName: String) -> String:
@@ -336,7 +336,7 @@ func spawn_remote_player(peerId: int) -> void:
     remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
     remoteNodes[peerId] = remote
-    Log("Spawned remote player for peer %d" % peerId)
+    _log("Spawned remote player for peer %d" % peerId)
 
 
 func on_remote_node_exiting(peerId: int) -> void:
@@ -364,7 +364,7 @@ func on_scene_changed() -> void:
         var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
         if controller != null:
             worldState.sync_spawn_position.call_deferred(controller.global_position)
-    Log("Scene changed, remote players respawned")
+    _log("Scene changed, remote players respawned")
 
 # ---------- Utility ----------
 

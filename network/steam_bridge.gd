@@ -53,10 +53,10 @@ func launch() -> void:
     var args: PackedStringArray = ["--port", str(HELPER_PORT)]
     helperPID = OS.create_process(globalPath, args)
     if helperPID < 0:
-        Log("Failed to launch Steam helper")
+        _log("Failed to launch Steam helper")
         return
 
-    Log("Steam helper launched (PID: %d)" % helperPID)
+    _log("Steam helper launched (PID: %d)" % helperPID)
     connecting = true
     connectTimer = 0.0
 
@@ -72,7 +72,7 @@ func _process(delta: float) -> void:
     tcp.poll()
     if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
         connected = false
-        Log("Steam helper TCP disconnected")
+        _log("Steam helper TCP disconnected")
         return
 
     read_responses()
@@ -84,7 +84,7 @@ func poll_connect(delta: float) -> void:
 
     if connectTimer >= CONNECT_TIMEOUT:
         connecting = false
-        Log("Steam helper connect timeout")
+        _log("Steam helper connect timeout")
         return
 
     var status: StreamPeerTCP.Status = tcp.get_status()
@@ -96,7 +96,7 @@ func poll_connect(delta: float) -> void:
         StreamPeerTCP.STATUS_CONNECTED:
             connecting = false
             connected = true
-            Log("Steam helper TCP connected")
+            _log("Steam helper TCP connected")
             # Immediately fetch user info
             GetUser(on_initial_user)
         StreamPeerTCP.STATUS_ERROR:
@@ -108,7 +108,7 @@ func on_initial_user(response: Dictionary) -> void:
     var data: Dictionary = response.get("data", { })
     localSteamName = data.get("name", "")
     localSteamID = data.get("steam_id", "")
-    Log("Steam user: %s (%s)" % [localSteamName, localSteamID])
+    _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
     # Chain ownership check now that we know who we are
     CheckOwnership(on_ownership_result)
 
@@ -117,9 +117,9 @@ func on_ownership_result(response: Dictionary) -> void:
     var data: Dictionary = response.get("data", { })
     ownsGame = data.get("owns", false)
     if ownsGame:
-        Log("Ownership verified")
+        _log("Ownership verified")
     else:
-        Log("Ownership check FAILED — co-op disabled")
+        _log("Ownership check FAILED — co-op disabled")
 
 
 ## Reads complete JSON lines from TCP and dispatches to pending callbacks.
@@ -175,7 +175,7 @@ func shutdown() -> void:
         OS.kill(helperPID)
         helperPID = -1
     pendingCallbacks.clear()
-    Log("Steam helper shut down")
+    _log("Steam helper shut down")
 
 
 func _exit_tree() -> void:
@@ -233,13 +233,13 @@ func extract_file(resPath: String, userPath: String) -> void:
         return
     var src: FileAccess = FileAccess.open(resPath, FileAccess.READ)
     if src == null:
-        Log("Cannot read: %s" % resPath)
+        _log("Cannot read: %s" % resPath)
         return
     var data: PackedByteArray = src.get_buffer(src.get_length())
     src.close()
     var dst: FileAccess = FileAccess.open(userPath, FileAccess.WRITE)
     if dst == null:
-        Log("Cannot write: %s" % userPath)
+        _log("Cannot write: %s" % userPath)
         return
     dst.store_buffer(data)
     dst.close()
