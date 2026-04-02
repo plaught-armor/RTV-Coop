@@ -1,0 +1,2 @@
+[autoload]
+CoopManager=res://mod/autoload/coop_manager.gd
