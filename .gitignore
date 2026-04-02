@@ -3,6 +3,9 @@
 *.import
 *.uid
 
+# Build output
+*.vmz
+
 # OS
 .DS_Store
 Thumbs.db
