@@ -297,14 +297,12 @@ func OnLobbyJoined(response: Dictionary) -> void:
 	if !response.get("ok", false):
 		return
 	var data: Dictionary = response.get("data", { })
-	var hostIP: String = data.get("host_ip", "")
-	var hostPort: String = data.get("host_port", "9050")
-	if hostIP.is_empty():
-		CoopManager.Log("Lobby has no host IP — cannot connect")
+	var hostSteamID: String = data.get("host_steam_id", "")
+	if hostSteamID.is_empty():
+		CoopManager.Log("Lobby has no host Steam ID")
 		return
-	var port: int = hostPort.to_int() if hostPort.is_valid_int() else CoopManager.DEFAULT_PORT
-	CoopManager.Log("Lobby joined — connecting ENet to %s:%d" % [hostIP, port])
-	CoopManager.JoinGame(hostIP, port)
+	CoopManager.Log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
+	CoopManager.steamBridge.StartP2PClient(hostSteamID, CoopManager.OnP2PTunnelReady)
 
 
 func GetPooledLobbyButton(idx: int) -> Button:

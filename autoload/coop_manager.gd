@@ -109,8 +109,8 @@ func PatchScript(patchPath: String, targetPath: String) -> void:
 # ---------- Peer Lifecycle ----------
 
 
-## Creates an ENet server on the given [param port]. In Steam mode, also creates
-## a lobby with the host's IP in metadata for discovery.
+## Creates an ENet server on the given [param port]. In Steam mode, also starts
+## a P2P listen socket and creates a lobby with the host's Steam ID.
 func HostGame(port: int = DEFAULT_PORT) -> void:
 	if IsConnected():
 		Log("Already connected, disconnect first")
@@ -125,11 +125,12 @@ func HostGame(port: int = DEFAULT_PORT) -> void:
 	isHost = true
 	isActive = true
 
-	# Register own name and create Steam lobby if applicable
 	if useSteam && steamBridge.IsReady():
 		peerNames[localPeerId] = steamBridge.localSteamName
-		var localIP: String = GetLocalIP()
-		steamBridge.CreateLobby(MAX_CLIENTS + 1, OnLobbyCreated, localIP, port)
+		# Start P2P listener that relays Steam peers to local ENet
+		steamBridge.StartP2PHost(OnP2PHostReady, port)
+		# Create lobby with Steam ID (no IP needed — tunnel handles it)
+		steamBridge.CreateLobby(MAX_CLIENTS + 1, OnLobbyCreated)
 	else:
 		peerNames[localPeerId] = "Host"
 
@@ -226,6 +227,25 @@ func OnLobbyCreated(response: Dictionary) -> void:
 		return
 	var lobbyID: String = response.get("data", { }).get("lobby_id", "")
 	Log("Steam lobby created: %s" % lobbyID)
+
+
+func OnP2PHostReady(response: Dictionary) -> void:
+	if !response.get("ok", false):
+		Log("P2P host failed: %s" % response.get("error", "unknown"))
+		return
+	Log("P2P host listening for Steam peers")
+
+
+func OnP2PTunnelReady(response: Dictionary) -> void:
+	if !response.get("ok", false):
+		Log("P2P tunnel failed: %s" % response.get("error", "unknown"))
+		return
+	var tunnelPort: int = response.get("data", { }).get("tunnel_port", 0)
+	if tunnelPort == 0:
+		Log("P2P tunnel returned invalid port")
+		return
+	Log("P2P tunnel ready on 127.0.0.1:%d — connecting ENet" % tunnelPort)
+	JoinGame("127.0.0.1", tunnelPort)
 
 
 func OnOwnershipResult(response: Dictionary) -> void:

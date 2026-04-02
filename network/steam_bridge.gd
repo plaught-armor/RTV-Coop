@@ -185,8 +185,8 @@ func CheckOwnership(callback: Callable) -> void:
 	SendCommand("check_ownership", { }, callback)
 
 
-func CreateLobby(maxPlayers: int, callback: Callable, hostIP: String = "", hostPort: int = 9050) -> void:
-	SendCommand("create_lobby", { "max_players": maxPlayers, "host_ip": hostIP, "host_port": hostPort }, callback)
+func CreateLobby(maxPlayers: int, callback: Callable) -> void:
+	SendCommand("create_lobby", { "max_players": maxPlayers }, callback)
 
 
 func ListLobbies(callback: Callable) -> void:
@@ -200,6 +200,18 @@ func JoinLobby(lobbyID: String, callback: Callable) -> void:
 func LeaveLobby() -> void:
 	if connected:
 		SendCommand("leave_lobby", { }, Callable())
+
+
+## Starts a Steam Networking Sockets P2P listen socket on the host.
+## Incoming Steam peers are relayed to the local ENet server on [param enetPort].
+func StartP2PHost(callback: Callable, enetPort: int = 9050) -> void:
+	SendCommand("start_p2p_host", { "enet_port": enetPort }, callback)
+
+
+## Connects to a host via Steam P2P and creates a local UDP tunnel.
+## Returns the [code]tunnel_port[/code] that the game's ENet client should connect to.
+func StartP2PClient(hostSteamID: String, callback: Callable) -> void:
+	SendCommand("start_p2p_client", { "host_steam_id": hostSteamID }, callback)
 
 # ---------- File Extraction ----------
 
