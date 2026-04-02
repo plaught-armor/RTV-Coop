@@ -179,7 +179,7 @@ func shutdown() -> void:
 
 
 func _exit_tree() -> void:
-    Shutdown()
+    shutdown()
 
 
 ## Returns true if the helper is running, connected, and user info is cached.

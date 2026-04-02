@@ -35,7 +35,7 @@ static func pack(slot: SlotData) -> Dictionary:
     if slot.storage.size() > 0:
         var packedStorage: Array[Dictionary] = []
         for stored: SlotData in slot.storage:
-            packedStorage.append(Pack(stored))
+            packedStorage.append(pack(stored))
         data[&"storage"] = packedStorage
 
     return data
@@ -78,7 +78,7 @@ static func unpack(data: Dictionary) -> SlotData:
     # Recursive storage
     var packedStorage: Array = data.get(&"storage", [])
     for storedData: Dictionary in packedStorage:
-        slot.storage.append(Unpack(storedData))
+        slot.storage.append(unpack(storedData))
 
     return slot
 
@@ -87,7 +87,7 @@ static func unpack(data: Dictionary) -> SlotData:
 static func pack_array(slots: Array[SlotData]) -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     for slot: SlotData in slots:
-        result.append(Pack(slot))
+        result.append(pack(slot))
     return result
 
 
@@ -95,7 +95,7 @@ static func pack_array(slots: Array[SlotData]) -> Array[Dictionary]:
 static func unpack_array(dataArray: Array[Dictionary]) -> Array[SlotData]:
     var result: Array[SlotData] = []
     for data: Dictionary in dataArray:
-        result.append(Unpack(data))
+        result.append(unpack(data))
     return result
 
 
