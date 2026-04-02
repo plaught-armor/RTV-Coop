@@ -38,12 +38,18 @@ func _input(event: InputEvent) -> void:
         KEY_F9:
             panelVisible = !panelVisible
             panel.visible = panelVisible
+            var gd: GameData = preload("res://Resources/GameData.tres")
             if panelVisible:
                 Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+                gd.freeze = true
             else:
                 Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+                gd.freeze = false
         KEY_F10:
             OnHostPressed()
+        KEY_F11:
+            if CoopManager.DEBUG:
+                OnDirectJoinPressed()
 
 
 func BuildUI() -> void:
