@@ -213,6 +213,8 @@ func OnPeerConnected(peerId: int) -> void:
     connectedPeers.append(peerId)
     SpawnRemotePlayer.call_deferred(peerId)
     SyncName.rpc_id(peerId, GetLocalName())
+    # Set generous timeout on the new peer connection
+    SetPeerTimeout(peerId)
     # Send current world state to the new peer
     if isHost:
         worldState.SendFullState.call_deferred(peerId)
@@ -236,6 +238,7 @@ func OnConnectedToServer() -> void:
     localPeerId = multiplayer.get_unique_id()
     isActive = true
     peerNames[localPeerId] = GetLocalName()
+    SetPeerTimeout(1) # Server is always peer ID 1
     Log("Connected to server (id: %d)" % localPeerId)
     SyncName.rpc(GetLocalName())
 
@@ -381,6 +384,17 @@ func ForceWindowed() -> void:
     prefs.displayMode = 2
     prefs.windowSize = 3
     prefs.Save()
+
+
+## Sets a generous ENet timeout on a specific peer to survive scene loading pauses.
+func SetPeerTimeout(peerId: int) -> void:
+    var peer: MultiplayerPeer = multiplayer.multiplayer_peer
+    if !(peer is ENetMultiplayerPeer):
+        return
+    var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
+    var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
+    if enetPeer != null:
+        enetPeer.set_timeout(0, 10000, 30000)
 
 
 func IsConnected() -> bool:
