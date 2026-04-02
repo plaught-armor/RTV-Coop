@@ -252,7 +252,7 @@ func on_connection_failed() -> void:
 
 func on_server_disconnected() -> void:
     _log("Server disconnected")
-    Disconnect()
+    disconnect_session()
 
 # ---------- Steam Callbacks ----------
 
