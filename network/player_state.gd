@@ -152,14 +152,13 @@ func _physics_process(_delta: float) -> void:
 func BroadcastFootstep(audioPath: String) -> void:
     if !CoopManager.IsConnected():
         return
-    ReceiveFootstep.rpc(multiplayer.get_unique_id(), audioPath)
+    ReceiveFootstep.rpc(audioPath)
 
 
 ## Receives a remote player's footstep event and plays it spatially.
 @rpc("any_peer", "call_remote", "unreliable")
-func ReceiveFootstep(peerId: int, audioPath: String) -> void:
-    var actualSender: int = multiplayer.get_remote_sender_id()
-    var remoteNode: Node3D = CoopManager.GetRemotePlayerNode(actualSender)
+func ReceiveFootstep(audioPath: String) -> void:
+    var remoteNode: Node3D = CoopManager.GetRemotePlayerNode(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     remoteNode.PlayRemoteAudio(audioPath)
