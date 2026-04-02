@@ -98,7 +98,7 @@ func poll_connect(delta: float) -> void:
             connected = true
             _log("Steam helper TCP connected")
             # Immediately fetch user info
-            GetUser(on_initial_user)
+            get_user(on_initial_user)
         StreamPeerTCP.STATUS_ERROR:
             # Retry
             tcp = StreamPeerTCP.new()
@@ -110,7 +110,7 @@ func on_initial_user(response: Dictionary) -> void:
     localSteamID = data.get("steam_id", "")
     _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
     # Chain ownership check now that we know who we are
-    CheckOwnership(on_ownership_result)
+    check_ownership(on_ownership_result)
 
 
 func on_ownership_result(response: Dictionary) -> void:
