@@ -8,7 +8,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-STEAM_HELPER_DIR="${SCRIPT_DIR}/../steam_helper"
+STEAM_HELPER_DIR="${SCRIPT_DIR}/steam_helper"
 OUTPUT_NAME="${1:-rtv-coop}"
 OUTPUT_FILE="${SCRIPT_DIR}/${OUTPUT_NAME}.vmz"
 

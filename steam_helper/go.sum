@@ -1,0 +1,6 @@
+github.com/assemblaj/purego-steamworks v0.0.0-20250919151151-60982fa92bd2 h1:Se4o0XW9LdwLHMV2Z+zYibX3qNXKgHJKVCH4O8kwq+8=
+github.com/assemblaj/purego-steamworks v0.0.0-20250919151151-60982fa92bd2/go.mod h1:e/iYShySJ3asrD2X6bu4EMOHOE5ZVTT6RlBZADJcV6I=
+github.com/ebitengine/purego v0.8.2 h1:jPPGWs2sZ1UgOSgD2bClL0MJIqu58nOmIcBuXr62z1I=
+github.com/ebitengine/purego v0.8.2/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+golang.org/x/sys v0.31.0 h1:ioabZlmFYtWhL+TRYpcnNlLwhyxaM9kWTDEmfnprqik=
+golang.org/x/sys v0.31.0/go.mod h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k=
