@@ -5,10 +5,8 @@ class_name SlotSerializer
 extends RefCounted
 
 ## Allowed resource path prefixes for [method load] calls. Rejects arbitrary paths.
-const ALLOWED_PREFIXES: PackedStringArray = [
-    "res://Items/",
-    "res://Loot/",
-]
+## Returned as a fresh array each call to avoid const PackedArray mutation bug (#88753).
+static var ALLOWED_PREFIXES: PackedStringArray = PackedStringArray(["res://Items/", "res://Loot/"])
 
 
 ## Converts a [SlotData] to a [Dictionary] suitable for RPC transmission.

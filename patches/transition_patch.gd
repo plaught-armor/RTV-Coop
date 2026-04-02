@@ -9,11 +9,15 @@ func Interact():
         return
 
     if CoopManager.isHost:
-        # Tell all clients to transition first, then host transitions
+        # Broadcast to clients first, then defer own transition by one frame
+        # so ENet has time to flush the reliable RPC before scene changes.
         var transitionPath: String = get_tree().current_scene.get_path_to(self)
         CoopManager.worldState.SyncTransition.rpc(transitionPath)
-        super.Interact()
+        HostTransitionDeferred.call_deferred()
     else:
-        # Client requests the host to trigger this transition
         var transitionPath: String = get_tree().current_scene.get_path_to(self)
         CoopManager.worldState.RequestTransition.rpc_id(1, transitionPath)
+
+
+func HostTransitionDeferred() -> void:
+    super.Interact()

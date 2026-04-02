@@ -121,7 +121,8 @@ func RegisterPatches() -> void:
         # ["res://Scripts/LootContainer.gd", LOOT_CONTAINER_HASH, "res://mod/patches/loot_container_patch.gd"],
     ]:
         if !VerifyHash(pair[0], pair[1]):
-            Log("WARNING: %s has changed — mod may be incompatible" % pair[0])
+            Log("WARNING: %s has changed — skipping patch to avoid crashes" % pair[0])
+            continue
         PatchScript(pair[2], pair[0])
     Log("Patches registered")
 
@@ -386,7 +387,7 @@ func ForceWindowed() -> void:
     prefs.Save()
 
 
-## Disables ENet timeout on a peer. Connection only drops on actual network failure.
+## Sets generous ENet timeout to survive scene loads but still detect dead peers.
 func SetPeerTimeout(peerId: int) -> void:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if !(peer is ENetMultiplayerPeer):
@@ -394,7 +395,7 @@ func SetPeerTimeout(peerId: int) -> void:
     var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
     var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
     if enetPeer != null:
-        enetPeer.set_timeout(0, 0, 0)
+        enetPeer.set_timeout(0, 5000, 30000)
 
 
 func IsConnected() -> bool:

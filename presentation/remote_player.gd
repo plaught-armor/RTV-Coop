@@ -9,7 +9,7 @@ var targetRotationX: float = 0.0
 var moveFlags: int = 0
 var smoothSpeed: float = 15.0
 
-var audioLibrary = preload("res://Resources/AudioLibrary.tres")
+var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var audioPlayer: AudioStreamPlayer3D = null
 
 @onready var body: MeshInstance3D = $Body
@@ -67,6 +67,8 @@ func UpdateState(pos: Vector3, rot: Vector3, flags: int) -> void:
 ## Plays a spatial audio event at this remote player's position.
 func PlayRemoteAudio(audioPath: String) -> void:
     if audioPlayer == null:
+        return
+    if !audioPath.begins_with("res://Resources/") && !audioPath.begins_with("res://Audio/"):
         return
     var audioEvent: Resource = load(audioPath)
     if audioEvent == null || !audioEvent.has_method("get"):

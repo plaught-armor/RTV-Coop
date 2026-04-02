@@ -105,9 +105,9 @@ func RequestTransition(transitionPath: String) -> void:
     var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
     if transition == null || !transition.has_method("Interact"):
         return
-    # Host broadcasts transition to all clients, then transitions itself
+    # Broadcast to clients, then defer own transition so RPC flushes first
     SyncTransition.rpc(transitionPath)
-    transition.Interact()
+    transition.call_deferred("Interact")
 
 
 ## Host tells all clients to run a transition. Loads the scene directly
@@ -135,10 +135,9 @@ func RequestContainerOpen(containerPath: String) -> void:
         return
     if !IsValidPath(containerPath):
         return
-    var container: Node = get_tree().current_scene.get_node(containerPath)
-    if !(container is LootContainer):
+    var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
+    if container == null || !(container is LootContainer):
         return
-    # Host opens the container (original logic) and broadcasts loot state
     container.Interact()
 
 
