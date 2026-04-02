@@ -54,15 +54,15 @@ func _input(event: InputEvent) -> void:
 
 func BuildUI() -> void:
     panel = PanelContainer.new()
-    panel.custom_minimum_size = Vector2(340, 360)
-    panel.anchor_left = 1.0
-    panel.anchor_right = 1.0
-    panel.anchor_top = 0.0
-    panel.anchor_bottom = 0.0
-    panel.offset_left = -350
-    panel.offset_right = -10
-    panel.offset_top = 10
-    panel.offset_bottom = 370
+    panel.custom_minimum_size = Vector2(340, 400)
+    panel.anchor_left = 0.5
+    panel.anchor_right = 0.5
+    panel.anchor_top = 0.5
+    panel.anchor_bottom = 0.5
+    panel.offset_left = -170
+    panel.offset_right = 170
+    panel.offset_top = -200
+    panel.offset_bottom = 200
     panel.mouse_filter = Control.MOUSE_FILTER_STOP
     add_child(panel)
 
