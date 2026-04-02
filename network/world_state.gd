@@ -269,7 +269,9 @@ func SendFullState(peerId: int) -> void:
 
     # Sync all switches
     for node: Node in get_tree().get_nodes_in_group("Switch"):
-        var obj: Node = node.owner
+        var obj: Node = node.owner if node.owner != null else node
+        if !obj.has_method("Activate"):
+            continue
         var switchPath: String = get_tree().current_scene.get_path_to(obj)
         SyncSwitchState.rpc_id(peerId, switchPath, obj.active)
 
