@@ -105,7 +105,25 @@ func RequestTransition(transitionPath: String) -> void:
     var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
     if transition == null || !transition.has_method("Interact"):
         return
+    # Host broadcasts transition to all clients, then transitions itself
+    SyncTransition.rpc(transitionPath)
     transition.Interact()
+
+
+## Host tells all clients to run a transition. Loads the scene directly
+## via Loader to bypass the patched Interact (which would RPC back to host).
+@rpc("authority", "call_remote", "reliable")
+func SyncTransition(transitionPath: String) -> void:
+    if !IsValidPath(transitionPath):
+        return
+    var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
+    if transition == null:
+        return
+    # Read the destination from the transition node and load directly
+    var nextMap: String = transition.get("nextMap")
+    if nextMap == null || nextMap.is_empty():
+        return
+    Loader.LoadScene(nextMap)
 
 # ---------- Container Sync ----------
 

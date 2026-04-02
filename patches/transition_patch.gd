@@ -9,6 +9,9 @@ func Interact():
         return
 
     if CoopManager.isHost:
+        # Tell all clients to transition first, then host transitions
+        var transitionPath: String = get_tree().current_scene.get_path_to(self)
+        CoopManager.worldState.SyncTransition.rpc(transitionPath)
         super.Interact()
     else:
         # Client requests the host to trigger this transition
