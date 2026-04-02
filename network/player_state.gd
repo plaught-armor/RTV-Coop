@@ -5,33 +5,33 @@ extends Node
 
 ## Bitfield values for encoding player movement state into a single [code]int[/code].
 enum MoveFlag {
-    MOVING = 1,
-    WALKING = 2,
-    RUNNING = 4,
-    CROUCHING = 8,
-    GROUNDED = 16,
+	MOVING = 1,
+	WALKING = 2,
+	RUNNING = 4,
+	CROUCHING = 8,
+	GROUNDED = 16,
 }
 
 
 ## A single network state snapshot. Typed fields avoid hash lookups.
 class Snapshot extends RefCounted:
-    var timestamp: float
-    var position: Vector3
-    var rotation: Vector3
-    var flags: int
+	var timestamp: float
+	var position: Vector3
+	var rotation: Vector3
+	var flags: int
 
 
-    func _init(t: float, p: Vector3, r: Vector3, f: int) -> void:
-        timestamp = t
-        position = p
-        rotation = r
-        flags = f
+	func _init(t: float, p: Vector3, r: Vector3, f: int) -> void:
+		timestamp = t
+		position = p
+		rotation = r
+		flags = f
 
 
 ## Per-peer interpolation buffer. Holds sequence number and a ring of [Snapshot]s.
 class PeerBuffer extends RefCounted:
-    var seq: int = 0
-    var states: Array[Snapshot] = []
+	var seq: int = 0
+	var states: Array[Snapshot] = []
 
 ## Send position every Nth physics tick. 120 Hz / 6 = 20 Hz.
 const SEND_EVERY_N_TICKS: int = 6
@@ -50,16 +50,16 @@ var peerBuffers: Dictionary[int, PeerBuffer] = { }
 
 ## Called by the controller patch every physics tick. Throttles to 20 Hz before sending.
 func BroadcastPosition(position: Vector3, rot: Vector3, flags: int) -> void:
-    if !CoopManager.isActive:
-        return
+	if !CoopManager.isActive:
+		return
 
-    sendTickCounter += 1
-    if sendTickCounter < SEND_EVERY_N_TICKS:
-        return
-    sendTickCounter = 0
-    sequenceNumber += 1
+	sendTickCounter += 1
+	if sendTickCounter < SEND_EVERY_N_TICKS:
+		return
+	sendTickCounter = 0
+	sequenceNumber += 1
 
-    ReceivePosition.rpc(sequenceNumber, position, rot, flags)
+	ReceivePosition.rpc(sequenceNumber, position, rot, flags)
 
 # ---------- RPC Receive ----------
 
