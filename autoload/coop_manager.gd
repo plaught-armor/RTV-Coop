@@ -30,6 +30,8 @@ var remoteNodes: Dictionary[int, Node3D] = { }
 var peerNames: Dictionary[int, String] = { }
 ## Reference to the [code]PlayerState[/code] child node handling position sync.
 var playerState: PlayerState = null
+## Reference to the [code]WorldState[/code] child node handling world sync.
+var worldState: WorldState = null
 ## Reference to the [code]SteamBridge[/code] child node for Steam helper IPC.
 var steamBridge: SteamBridge = null
 ## Reference to the co-op UI panel.
@@ -50,6 +52,10 @@ func _ready() -> void:
 	playerState = load("res://mod/network/player_state.gd").new()
 	playerState.name = "PlayerState"
 	add_child(playerState)
+
+	worldState = load("res://mod/network/world_state.gd").new()
+	worldState.name = "WorldState"
+	add_child(worldState)
 
 	steamBridge = load("res://mod/network/steam_bridge.gd").new()
 	steamBridge.name = "SteamBridge"
@@ -101,6 +107,8 @@ func RegisterPatches() -> void:
 	if !VerifyHash("res://Scripts/Controller.gd", CONTROLLER_HASH):
 		Log("WARNING: Controller.gd has changed — mod may be incompatible with this game version")
 	PatchScript("res://mod/patches/controller_patch.gd", "res://Scripts/Controller.gd")
+	PatchScript("res://mod/patches/door_patch.gd", "res://Scripts/Door.gd")
+	PatchScript("res://mod/patches/switch_patch.gd", "res://Scripts/Switch.gd")
 	Log("Patches registered")
 
 
@@ -191,6 +199,9 @@ func OnPeerConnected(peerId: int) -> void:
 	connectedPeers.append(peerId)
 	SpawnRemotePlayer.call_deferred(peerId)
 	SyncName.rpc_id(peerId, GetLocalName())
+	# Send current world state to the new peer
+	if isHost:
+		worldState.SendFullState.call_deferred(peerId)
 
 
 func OnPeerDisconnected(peerId: int) -> void:
