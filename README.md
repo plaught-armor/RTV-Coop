@@ -126,7 +126,7 @@ The build script copies the Steam helper binaries and `libsteam_api` into `mod/b
 ## Credits
 
 - **Game:** [Road to Vostok](https://roadtovostok.com/) by Antti Väre
-- **Mod Loader:** [VostokMods](https://github.com/Ryhon0/VostokMods) by Ryhon0
+- **Mod Loaders:** [VostokMods](https://github.com/Ryhon0/VostokMods) by Ryhon0, [Metro Mod Loader](https://modworkshop.net/mod/48937) by the RTV modding community
 - **Steam Bindings:** [purego-steamworks](https://github.com/assemblaj/purego-steamworks) by assemblaj
 
 ## License
