@@ -3,7 +3,7 @@
 extends "res://Scripts/Door.gd"
 
 func Interact():
-    if !CoopManager.isActive:
+    if !CoopManager.IsConnected():
         super.Interact()
         return
 
@@ -22,7 +22,7 @@ func Interact():
 func CheckKey():
     super.CheckKey()
 
-    if !CoopManager.isActive:
+    if !CoopManager.IsConnected():
         return
 
     # If the key check succeeded (locked is now false), broadcast the unlock

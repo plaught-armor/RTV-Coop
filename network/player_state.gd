@@ -50,7 +50,7 @@ var peerBuffers: Dictionary[int, PeerBuffer] = { }
 
 ## Called by the controller patch every physics tick. Throttles to 20 Hz before sending.
 func BroadcastPosition(position: Vector3, rot: Vector3, flags: int) -> void:
-    if !CoopManager.isActive:
+    if !CoopManager.IsConnected():
         return
 
     sendTickCounter += 1
@@ -91,7 +91,7 @@ func ReceivePosition(seq: int, position: Vector3, rot: Vector3, flags: int) -> v
 ## Interpolates buffered snapshots for each remote peer and applies them to
 ## the corresponding [code]RemotePlayer[/code] node every physics tick.
 func _physics_process(_delta: float) -> void:
-    if !CoopManager.isActive:
+    if !CoopManager.IsConnected():
         return
 
     var currentTime: float = Time.get_ticks_msec() / 1000.0
@@ -150,7 +150,7 @@ func _physics_process(_delta: float) -> void:
 ## Broadcasts a footstep sound to all remote peers. Called by the controller patch.
 ## [param audioPath] is the resource path of the [AudioEvent] to play.
 func BroadcastFootstep(audioPath: String) -> void:
-    if !CoopManager.isActive:
+    if !CoopManager.IsConnected():
         return
     ReceiveFootstep.rpc(multiplayer.get_unique_id(), audioPath)
 

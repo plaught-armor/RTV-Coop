@@ -26,10 +26,11 @@ func _physics_process(delta: float) -> void:
 func RequestDoorInteract(doorPath: String) -> void:
     if !CoopManager.isHost:
         return
-    if !IsValidInteractablePath(doorPath, &"Door"):
+    if !IsValidPath(doorPath):
         return
-    var door: Node = get_tree().current_scene.get_node(doorPath)
-    # Run the patched Interact() which handles host logic + broadcast
+    var door: Node = get_tree().current_scene.get_node_or_null(doorPath)
+    if !(door is Door):
+        return
     door.Interact()
 
 
@@ -63,10 +64,11 @@ func SyncDoorUnlock(doorPath: String) -> void:
 func RequestSwitchInteract(switchPath: String) -> void:
     if !CoopManager.isHost:
         return
-    if !IsValidInteractablePath(switchPath, &"Switch"):
+    if !IsValidPath(switchPath):
         return
-    var sw: Node = get_tree().current_scene.get_node(switchPath)
-    # Toggle on host and broadcast
+    var sw: Node = get_tree().current_scene.get_node_or_null(switchPath)
+    if sw == null || !sw.has_method("Activate"):
+        return
     sw.active = !sw.active
     if sw.active:
         sw.Activate()
@@ -98,9 +100,11 @@ func SyncSwitchState(switchPath: String, active: bool) -> void:
 func RequestTransition(transitionPath: String) -> void:
     if !CoopManager.isHost:
         return
-    if !IsValidInteractablePath(transitionPath, &"Transition"):
+    if !IsValidPath(transitionPath):
         return
-    var transition: Node = get_tree().current_scene.get_node(transitionPath)
+    var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
+    if transition == null || !transition.has_method("Interact"):
+        return
     transition.Interact()
 
 # ---------- Container Sync ----------
@@ -111,7 +115,7 @@ func RequestTransition(transitionPath: String) -> void:
 func RequestContainerOpen(containerPath: String) -> void:
     if !CoopManager.isHost:
         return
-    if !IsValidInteractablePath(containerPath, &"Interactable"):
+    if !IsValidPath(containerPath):
         return
     var container: Node = get_tree().current_scene.get_node(containerPath)
     if !(container is LootContainer):
@@ -134,7 +138,7 @@ func SyncContainerState(containerPath: String, packedLoot: Array[Dictionary]) ->
 func RequestContainerTakeItem(containerPath: String, itemIndex: int) -> void:
     if !CoopManager.isHost:
         return
-    if !IsValidInteractablePath(containerPath, &"Interactable"):
+    if !IsValidPath(containerPath):
         return
     var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
     if !is_instance_valid(container) || !(container is LootContainer):
@@ -161,7 +165,7 @@ func RequestContainerTakeItem(containerPath: String, itemIndex: int) -> void:
 func RequestPickupInteract(pickupPath: String) -> void:
     if !CoopManager.isHost:
         return
-    if !IsValidInteractablePath(pickupPath, &"Item"):
+    if !IsValidPath(pickupPath):
         return
     var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
     if !is_instance_valid(pickup) || !(pickup is Pickup):
@@ -281,11 +285,6 @@ func SendFullState(peerId: int) -> void:
 # ---------- Validation ----------
 
 
-## Validates a NodePath is safe and points to the expected group.
-func IsValidInteractablePath(nodePath: String, expectedGroup: StringName) -> bool:
-    if nodePath.is_empty() || ".." in nodePath || nodePath.begins_with("/"):
-        return false
-    var node: Node = get_tree().current_scene.get_node_or_null(nodePath)
-    if node == null:
-        return false
-    return node.is_in_group(expectedGroup)
+## Validates a NodePath is safe (no traversal, no absolute paths).
+func IsValidPath(nodePath: String) -> bool:
+    return !nodePath.is_empty() && !(".." in nodePath) && !nodePath.begins_with("/")

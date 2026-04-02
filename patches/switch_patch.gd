@@ -5,7 +5,7 @@
 extends "res://Scripts/Switch.gd"
 
 func Interact():
-    if !CoopManager.isActive:
+    if !CoopManager.IsConnected():
         super.Interact()
         return
 
