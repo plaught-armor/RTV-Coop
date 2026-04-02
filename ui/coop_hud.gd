@@ -1,25 +1,35 @@
-## Always-visible HUD overlay showing connected players and their ping.
+## Always-visible HUD overlay in the top-right showing keybind hints,
+## connected players, and their ping. [kbd]F12[/kbd] toggles visibility.
 ## Added as a child of [code]CoopManager[/code]'s [code]CanvasLayer[/code].
 extends VBoxContainer
 
 var pingTimer: float = 0.0
 var hudVisible: bool = true
-## How often to poll ENet peer round-trip times.
 const PING_INTERVAL: float = 1.0
-## Cached ping values per peer in milliseconds.
 var peerPings: Dictionary[int, int] = { }
-## Pre-allocated label pool to avoid per-update allocation.
 var labelPool: Array[Label] = []
+var hintsLabel: Label = null
+const HINT_COLOR: Color = Color(0.6, 0.6, 0.6, 0.6)
+const PLAYER_COLOR: Color = Color(0.8, 1.0, 0.8, 0.8)
 
 
 func _ready() -> void:
 	anchor_left = 1.0
 	anchor_right = 1.0
 	anchor_top = 0.0
-	offset_left = -200
+	offset_left = -220
 	offset_right = -10
 	offset_top = 10
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Static keybind hints label (always at top of VBox)
+	hintsLabel = Label.new()
+	hintsLabel.add_theme_font_size_override("font_size", 12)
+	hintsLabel.add_theme_color_override("font_color", HINT_COLOR)
+	hintsLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hintsLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(hintsLabel)
+	UpdateHints()
 
 
 func _input(event: InputEvent) -> void:
@@ -27,14 +37,18 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.keycode == KEY_F12:
 		hudVisible = !hudVisible
-		if !hudVisible:
-			HideAllLabels()
+		visible = hudVisible
 
 
 func _process(delta: float) -> void:
-	if !hudVisible || !CoopManager.isActive:
-		if get_child_count() > 0:
-			HideAllLabels()
+	if !hudVisible:
+		return
+
+	# Always update hints (connection state may change)
+	UpdateHints()
+
+	if !CoopManager.isActive:
+		HideAllPlayerLabels()
 		return
 
 	pingTimer += delta
@@ -43,10 +57,17 @@ func _process(delta: float) -> void:
 	pingTimer = 0.0
 
 	UpdatePings()
-	UpdateLabels()
+	UpdatePlayerLabels()
 
 
-## Reads round-trip time from each connected [code]ENetPacketPeer[/code].
+## Updates the keybind hints based on connection state.
+func UpdateHints() -> void:
+	if CoopManager.isActive:
+		hintsLabel.text = "F9 Panel  |  F12 Hide"
+	else:
+		hintsLabel.text = "F9 Panel  |  F10 Host  |  F12 Hide"
+
+
 func UpdatePings() -> void:
 	var peer: MultiplayerPeer = multiplayer.multiplayer_peer
 	if !(peer is ENetMultiplayerPeer):
@@ -65,17 +86,14 @@ func UpdatePings() -> void:
 			peerPings.erase(peerId)
 
 
-## Updates label text in-place using a pool. Grows pool if needed, hides extras.
-func UpdateLabels() -> void:
+func UpdatePlayerLabels() -> void:
 	var idx: int = 0
 
-	# Local player line
 	var localLabel: Label = GetPooledLabel(idx)
 	idx += 1
 	var localName: String = CoopManager.GetLocalName()
 	localLabel.text = "%s (Host)" % localName if CoopManager.isHost else localName
 
-	# Remote peer lines
 	for peerId: int in CoopManager.connectedPeers:
 		var label: Label = GetPooledLabel(idx)
 		idx += 1
@@ -83,12 +101,10 @@ func UpdateLabels() -> void:
 		var ping: int = peerPings.get(peerId, -1)
 		label.text = "%s: %dms" % [peerName, ping] if ping >= 0 else "%s: ..." % peerName
 
-	# Hide unused labels
 	for i: int in range(idx, labelPool.size()):
 		labelPool[i].hide()
 
 
-## Returns the pooled label at [param idx], creating it if the pool is too small.
 func GetPooledLabel(idx: int) -> Label:
 	if idx < labelPool.size():
 		labelPool[idx].show()
@@ -96,7 +112,7 @@ func GetPooledLabel(idx: int) -> Label:
 
 	var label: Label = Label.new()
 	label.add_theme_font_size_override("font_size", 14)
-	label.add_theme_color_override("font_color", Color(0.8, 1.0, 0.8, 0.8))
+	label.add_theme_color_override("font_color", PLAYER_COLOR)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(label)
@@ -104,6 +120,6 @@ func GetPooledLabel(idx: int) -> Label:
 	return label
 
 
-func HideAllLabels() -> void:
+func HideAllPlayerLabels() -> void:
 	for label: Label in labelPool:
 		label.hide()
