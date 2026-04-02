@@ -39,8 +39,7 @@ func _input(event: InputEvent) -> void:
         KEY_F9:
             panelVisible = !panelVisible
             panel.visible = panelVisible
-            var gd: GameData = preload("res://Resources/GameData.tres")
-            gd.freeze = panelVisible
+            CoopManager.panelOpen = panelVisible
             if panelVisible:
                 Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
             else:
@@ -214,8 +213,7 @@ func ClosePanel() -> void:
         return
     panelVisible = false
     panel.visible = false
-    var gd: GameData = preload("res://Resources/GameData.tres")
-    gd.freeze = false
+    CoopManager.panelOpen = false
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 

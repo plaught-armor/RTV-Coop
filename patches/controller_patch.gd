@@ -67,7 +67,7 @@ func PlayPooled(audioEvent: AudioEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
-    if gd.freeze || gd.isCaching:
+    if gd.freeze || gd.isCaching || CoopManager.panelOpen:
         return
     if !(event is InputEventMouseMotion):
         return

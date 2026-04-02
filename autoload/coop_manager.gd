@@ -21,6 +21,8 @@ const TRANSITION_HASH: String = "c370261a9529c4bd74d19faf5b7ad2f8"
 const PICKUP_HASH: String = "bc1af42d61966dab4a02eabeb8d3ab10"
 const LOOT_CONTAINER_HASH: String = "988851b309f6db683dcbf5e95a7c0666"
 
+## Whether the co-op panel is open (blocks mouse input on the controller).
+var panelOpen: bool = false
 ## The local peer's multiplayer ID. 0 when not connected.
 var localPeerId: int = 0
 ## Whether this instance is the host (server).
