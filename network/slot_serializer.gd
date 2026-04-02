@@ -11,7 +11,7 @@ static var ALLOWED_PREFIXES: PackedStringArray = PackedStringArray(["res://Items
 
 ## Converts a [SlotData] to a [Dictionary] suitable for RPC transmission.
 ## Returns empty dict for null/invalid slots (preserved as-is in arrays).
-static func Pack(slot: SlotData) -> Dictionary:
+static func pack(slot: SlotData) -> Dictionary:
     if slot == null || slot.itemData == null:
         return { }
     var data: Dictionary = {
@@ -43,11 +43,11 @@ static func Pack(slot: SlotData) -> Dictionary:
 
 ## Reconstructs a [SlotData] from a packed [Dictionary].
 ## Returns null for empty/invalid dicts.
-static func Unpack(data: Dictionary) -> SlotData:
+static func unpack(data: Dictionary) -> SlotData:
     if data.is_empty():
         return null
     var itemPath: String = data.get(&"item_path", "")
-    if !IsAllowedPath(itemPath):
+    if !is_allowed_path(itemPath):
         return null
     var itemRes: Resource = load(itemPath)
     if !(itemRes is ItemData):
@@ -69,7 +69,7 @@ static func Unpack(data: Dictionary) -> SlotData:
     for path: String in nestedPaths:
         if path.is_empty():
             slot.nested.append(null)
-        elif IsAllowedPath(path):
+        elif is_allowed_path(path):
             var attachment: Resource = load(path)
             slot.nested.append(attachment if attachment is ItemData else null)
         else:
@@ -84,7 +84,7 @@ static func Unpack(data: Dictionary) -> SlotData:
 
 
 ## Packs an array of [SlotData]. Null entries become empty dicts (preserved).
-static func PackArray(slots: Array[SlotData]) -> Array[Dictionary]:
+static func pack_array(slots: Array[SlotData]) -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     for slot: SlotData in slots:
         result.append(Pack(slot))
@@ -92,7 +92,7 @@ static func PackArray(slots: Array[SlotData]) -> Array[Dictionary]:
 
 
 ## Unpacks an array of [Dictionary]. Empty dicts become null (preserved to keep indices stable).
-static func UnpackArray(dataArray: Array[Dictionary]) -> Array[SlotData]:
+static func unpack_array(dataArray: Array[Dictionary]) -> Array[SlotData]:
     var result: Array[SlotData] = []
     for data: Dictionary in dataArray:
         result.append(Unpack(data))
@@ -100,7 +100,7 @@ static func UnpackArray(dataArray: Array[Dictionary]) -> Array[SlotData]:
 
 
 ## Returns true if the path starts with an allowed prefix.
-static func IsAllowedPath(path: String) -> bool:
+static func is_allowed_path(path: String) -> bool:
     if path.is_empty():
         return false
     for prefix: String in ALLOWED_PREFIXES:

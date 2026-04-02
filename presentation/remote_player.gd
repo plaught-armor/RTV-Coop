@@ -57,7 +57,7 @@ func _physics_process(delta: float) -> void:
 
 ## Applies a network state snapshot. Called by the interpolation loop in [code]PlayerState[/code].
 ## [param pos]: world position. [param rot]: packed rotation (x=yaw, y=pitch). [param flags]: [enum MoveFlag] bitfield.
-func UpdateState(pos: Vector3, rot: Vector3, flags: int) -> void:
+func update_state(pos: Vector3, rot: Vector3, flags: int) -> void:
     targetPosition = pos
     targetRotationY = rot.x
     targetRotationX = rot.y
@@ -65,7 +65,7 @@ func UpdateState(pos: Vector3, rot: Vector3, flags: int) -> void:
 
 
 ## Plays a spatial audio event at this remote player's position.
-func PlayRemoteAudio(audioPath: String) -> void:
+func play_remote_audio(audioPath: String) -> void:
     if audioPlayer == null:
         return
     if !audioPath.begins_with("res://Resources/") && !audioPath.begins_with("res://Audio/"):

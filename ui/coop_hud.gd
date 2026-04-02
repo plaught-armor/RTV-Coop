@@ -29,7 +29,7 @@ func _ready() -> void:
     hintsLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     hintsLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(hintsLabel)
-    UpdateHints()
+    update_hints()
 
 
 func _input(event: InputEvent) -> void:
@@ -41,17 +41,17 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-    if !hudVisible || !IsInGameplay():
+    if !hudVisible || !is_in_gameplay():
         if visible:
             visible = false
         return
     if !visible:
         visible = true
 
-    UpdateHints()
+    update_hints()
 
     if !CoopManager.isActive:
-        HideAllPlayerLabels()
+        hide_all_player_labels()
         return
 
     pingTimer += delta
@@ -59,15 +59,15 @@ func _process(delta: float) -> void:
         return
     pingTimer = 0.0
 
-    UpdatePings()
-    UpdatePlayerLabels()
+    update_pings()
+    update_player_labels()
 
 
 ## Updates the keybind hints based on connection and Steam state.
-func UpdateHints() -> void:
+func update_hints() -> void:
     if CoopManager.isActive:
         hintsLabel.text = "INS Multiplayer"
-    elif !CoopManager.DEBUG && !CoopManager.steamBridge.IsReady():
+    elif !CoopManager.DEBUG && !CoopManager.steamBridge.is_ready():
         if CoopManager.steamBridge.connected:
             hintsLabel.text = "Steam: verifying..."
         elif CoopManager.steamBridge.connecting:
@@ -78,7 +78,7 @@ func UpdateHints() -> void:
         hintsLabel.text = "INS Multiplayer"
 
 
-func UpdatePings() -> void:
+func update_pings() -> void:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if !(peer is ENetMultiplayerPeer):
         return
@@ -96,18 +96,18 @@ func UpdatePings() -> void:
             peerPings.erase(peerId)
 
 
-func UpdatePlayerLabels() -> void:
+func update_player_labels() -> void:
     var idx: int = 0
 
-    var localLabel: Label = GetPooledLabel(idx)
+    var localLabel: Label = get_pooled_label(idx)
     idx += 1
-    var localName: String = CoopManager.GetLocalName()
+    var localName: String = CoopManager.get_local_name()
     localLabel.text = "%s (Host)" % localName if CoopManager.isHost else localName
 
     for peerId: int in CoopManager.connectedPeers:
-        var label: Label = GetPooledLabel(idx)
+        var label: Label = get_pooled_label(idx)
         idx += 1
-        var peerName: String = CoopManager.GetPeerName(peerId)
+        var peerName: String = CoopManager.get_peer_name(peerId)
         var ping: int = peerPings.get(peerId, -1)
         label.text = "%s: %dms" % [peerName, ping] if ping >= 0 else "%s: ..." % peerName
 
@@ -115,7 +115,7 @@ func UpdatePlayerLabels() -> void:
         labelPool[i].hide()
 
 
-func GetPooledLabel(idx: int) -> Label:
+func get_pooled_label(idx: int) -> Label:
     if idx < labelPool.size():
         labelPool[idx].show()
         return labelPool[idx]
@@ -130,11 +130,11 @@ func GetPooledLabel(idx: int) -> Label:
     return label
 
 
-func HideAllPlayerLabels() -> void:
+func hide_all_player_labels() -> void:
     for label: Label in labelPool:
         label.hide()
 
 
-func IsInGameplay() -> bool:
+func is_in_gameplay() -> bool:
     var scene: Node = get_tree().current_scene
     return is_instance_valid(scene) && scene.get_node_or_null("Core/Controller") != null

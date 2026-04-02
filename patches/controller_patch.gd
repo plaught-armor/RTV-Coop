@@ -21,12 +21,12 @@ const AUDIO_POOL_INITIAL: int = 8
 
 func _ready() -> void:
     super._ready()
-    WarmAudioPool()
+    warm_audio_pool()
 
 
 ## Pre-allocates audio player nodes. They self-manage: play, then stop processing
 ## until reused. Avoids instantiate+queue_free churn on every footstep.
-func WarmAudioPool() -> void:
+func warm_audio_pool() -> void:
     for i: int in AUDIO_POOL_INITIAL:
         var player: AudioStreamPlayer = audioInstance2D.instantiate()
         player.set_script(null)
@@ -36,7 +36,7 @@ func WarmAudioPool() -> void:
 
 
 ## Returns an idle audio player from the pool, growing it if all are busy.
-func GetAudioPlayer() -> AudioStreamPlayer:
+func get_audio_player() -> AudioStreamPlayer:
     for player: AudioStreamPlayer in audioPool:
         if !player.playing:
             return player
@@ -50,10 +50,10 @@ func GetAudioPlayer() -> AudioStreamPlayer:
 
 
 ## Plays an [code]AudioEvent[/code] using a pooled player instead of instantiating.
-func PlayPooled(audioEvent: AudioEvent) -> void:
+func play_pooled(audioEvent: AudioEvent) -> void:
     if audioEvent.audioClips.is_empty():
         return
-    var player: AudioStreamPlayer = GetAudioPlayer()
+    var player: AudioStreamPlayer = get_audio_player()
     player.stream = audioEvent.audioClips.pick_random()
     if audioEvent.randomPitch:
         player.volume_db = randf_range(audioEvent.volume - 1.0, audioEvent.volume)
@@ -93,13 +93,13 @@ func _input(event: InputEvent) -> void:
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         return
 
-    CoopManager.playerState.BroadcastPosition(
+    CoopManager.playerState.broadcast_position(
         global_transform.origin,
         Vector3(rotation.y, head.rotation.x, 0.0),
-        PlayerState.EncodeFlags(gd),
+        PlayerState.encode_flags(gd),
     )
 
 # ---------- Inertia ----------
@@ -174,8 +174,8 @@ func PlayFootstep() -> void:
         audio = audioLibrary.footstepWater
     else:
         audio = ResolveFootstep(false)
-    PlayPooled(audio)
-    CoopManager.playerState.BroadcastFootstep(audio.resource_path)
+    play_pooled(audio)
+    CoopManager.playerState.broadcast_footstep(audio.resource_path)
 
 
 func PlayFootstepJump() -> void:
@@ -188,8 +188,8 @@ func PlayFootstepJump() -> void:
         audio = audioLibrary.footstepWater
     else:
         audio = ResolveFootstep(false)
-    PlayPooled(audio)
-    CoopManager.playerState.BroadcastFootstep(audio.resource_path)
+    play_pooled(audio)
+    CoopManager.playerState.broadcast_footstep(audio.resource_path)
 
 
 func PlayFootstepLand() -> void:
@@ -202,13 +202,13 @@ func PlayFootstepLand() -> void:
         audio = audioLibrary.footstepWaterLand
     else:
         audio = ResolveFootstep(true)
-    PlayPooled(audio)
-    CoopManager.playerState.BroadcastFootstep(audio.resource_path)
+    play_pooled(audio)
+    CoopManager.playerState.broadcast_footstep(audio.resource_path)
 
 
 func PlayMovementCloth() -> void:
-    PlayPooled(audioLibrary.movementCloth)
+    play_pooled(audioLibrary.movementCloth)
 
 
 func PlayMovementGear() -> void:
-    PlayPooled(audioLibrary.movementGear)
+    play_pooled(audioLibrary.movementGear)

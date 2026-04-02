@@ -32,7 +32,7 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
     if !(event is InputEventKey) || !event.pressed || event.echo:
         return
-    if !IsInGameplay():
+    if !is_in_gameplay():
         return
 
     match event.keycode:
@@ -51,7 +51,7 @@ func _input(event: InputEvent) -> void:
                 OnDirectJoinPressed()
 
 
-func BuildUI() -> void:
+func build_ui() -> void:
     panel = PanelContainer.new()
     panel.custom_minimum_size = Vector2(340, 400)
     panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -84,12 +84,12 @@ func BuildUI() -> void:
 
     var hostBtn: Button = Button.new()
     hostBtn.text = "Host (F10)"
-    hostBtn.pressed.connect(OnHostPressed)
+    hostBtn.pressed.connect(on_host_pressed)
     btnRow.add_child(hostBtn)
 
     var refreshBtn: Button = Button.new()
     refreshBtn.text = "Refresh"
-    refreshBtn.pressed.connect(OnRefreshLobbies)
+    refreshBtn.pressed.connect(on_refresh_lobbies)
     btnRow.add_child(refreshBtn)
 
     lobbyList = VBoxContainer.new()
@@ -131,14 +131,14 @@ func BuildUI() -> void:
 
         var joinBtn: Button = Button.new()
         joinBtn.text = "Direct Join"
-        joinBtn.pressed.connect(OnDirectJoinPressed)
+        joinBtn.pressed.connect(on_direct_join_pressed)
         vbox.add_child(joinBtn)
 
     vbox.add_child(HSeparator.new())
 
     var disconnectBtn: Button = Button.new()
     disconnectBtn.text = "Disconnect"
-    disconnectBtn.pressed.connect(OnDisconnectPressed)
+    disconnectBtn.pressed.connect(on_disconnect_pressed)
     vbox.add_child(disconnectBtn)
 
     vbox.add_child(HSeparator.new())
@@ -173,27 +173,27 @@ func _process(_delta: float) -> void:
         2:
             statusLabel.text = "Connected"
 
-    UpdatePlayerList()
+    update_player_list()
 
 
-func UpdatePlayerList() -> void:
+func update_player_list() -> void:
     var idx: int = 0
 
     if CoopManager.isActive:
-        var localLabel: Label = GetPooledPlayerLabel(idx)
+        var localLabel: Label = get_pooled_player_label(idx)
         idx += 1
-        localLabel.text = "  %s (You)" % CoopManager.GetLocalName()
+        localLabel.text = "  %s (You)" % CoopManager.get_local_name()
 
         for peerId: int in CoopManager.connectedPeers:
-            var label: Label = GetPooledPlayerLabel(idx)
+            var label: Label = get_pooled_player_label(idx)
             idx += 1
-            label.text = "  %s" % CoopManager.GetPeerName(peerId)
+            label.text = "  %s" % CoopManager.get_peer_name(peerId)
 
     for i: int in range(idx, playerLabelPool.size()):
         playerLabelPool[i].hide()
 
 
-func GetPooledPlayerLabel(idx: int) -> Label:
+func get_pooled_player_label(idx: int) -> Label:
     if idx < playerLabelPool.size():
         playerLabelPool[idx].show()
         return playerLabelPool[idx]
@@ -208,7 +208,7 @@ func GetPooledPlayerLabel(idx: int) -> Label:
 
 ## Returns true if the current scene is a gameplay map (has Core/Controller).
 ## Closes the panel, unfreezes the game, and recaptures the mouse.
-func ClosePanel() -> void:
+func close_panel() -> void:
     if !panelVisible:
         return
     panelVisible = false
@@ -217,36 +217,36 @@ func ClosePanel() -> void:
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 
-func IsInGameplay() -> bool:
+func is_in_gameplay() -> bool:
     var scene: Node = get_tree().current_scene
     return is_instance_valid(scene) && scene.get_node_or_null("Core/Controller") != null
 
 # ---------- Actions ----------
 
 
-func OnHostPressed() -> void:
-    CoopManager.HostGame()
+func on_host_pressed() -> void:
+    CoopManager.host_game()
 
 
-func OnDirectJoinPressed() -> void:
+func on_direct_join_pressed() -> void:
     var address: String = addressInput.text if addressInput != null && !addressInput.text.is_empty() else "127.0.0.1"
     var port: int = CoopManager.DEFAULT_PORT
     if portInput != null && portInput.text.is_valid_int():
         port = clampi(portInput.text.to_int(), 1024, 65535)
-    CoopManager.JoinGame(address, port)
+    CoopManager.join_game(address, port)
 
 
-func OnDisconnectPressed() -> void:
-    CoopManager.Disconnect()
+func on_disconnect_pressed() -> void:
+    CoopManager.disconnect_session()
 
 
-func OnRefreshLobbies() -> void:
-    if !CoopManager.steamBridge.IsReady():
+func on_refresh_lobbies() -> void:
+    if !CoopManager.steamBridge.is_ready():
         return
-    CoopManager.steamBridge.ListLobbies(OnLobbyListReceived)
+    CoopManager.steamBridge.list_lobbies(on_lobby_list_received)
 
 
-func OnLobbyListReceived(response: Dictionary) -> void:
+func on_lobby_list_received(response: Dictionary) -> void:
     for i: int in range(lobbyLabelPool.size()):
         lobbyLabelPool[i].hide()
 
@@ -256,7 +256,7 @@ func OnLobbyListReceived(response: Dictionary) -> void:
     var lobbies: Array = response.get("data", [])
     for i: int in range(lobbies.size()):
         var lobby: Dictionary = lobbies[i]
-        var btn: Button = GetPooledLobbyButton(i)
+        var btn: Button = get_pooled_lobby_button(i)
         var hostName: String = lobby.get("host_name", "Unknown")
         var players: int = lobby.get("players", 0)
         var maxPlayers: int = lobby.get("max_players", 0)
@@ -270,23 +270,23 @@ func OnLobbyListReceived(response: Dictionary) -> void:
         lobbyLabelPool[i].hide()
 
 
-func OnLobbyJoinPressed(lobbyID: String) -> void:
-    CoopManager.steamBridge.JoinLobby(lobbyID, OnLobbyJoined)
+func on_lobby_join_pressed(lobbyID: String) -> void:
+    CoopManager.steamBridge.join_lobby(lobbyID, on_lobby_joined)
 
 
-func OnLobbyJoined(response: Dictionary) -> void:
+func on_lobby_joined(response: Dictionary) -> void:
     if !response.get("ok", false):
         return
     var data: Dictionary = response.get("data", { })
     var hostSteamID: String = data.get("host_steam_id", "")
     if hostSteamID.is_empty():
-        CoopManager.Log("Lobby has no host Steam ID")
+        CoopManager._log("Lobby has no host Steam ID")
         return
-    CoopManager.Log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
-    CoopManager.steamBridge.StartP2PClient(hostSteamID, CoopManager.OnP2PTunnelReady)
+    CoopManager._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
+    CoopManager.steamBridge.start_p2p_client(hostSteamID, CoopManager.on_p2p_tunnel_ready)
 
 
-func GetPooledLobbyButton(idx: int) -> Button:
+func get_pooled_lobby_button(idx: int) -> Button:
     if idx < lobbyLabelPool.size():
         lobbyLabelPool[idx].show()
         return lobbyLabelPool[idx]

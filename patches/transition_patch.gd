@@ -4,7 +4,7 @@
 extends "res://Scripts/Transition.gd"
 
 func Interact():
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         super.Interact()
         return
 
@@ -12,12 +12,12 @@ func Interact():
         # Broadcast to clients first, then defer own transition by one frame
         # so ENet has time to flush the reliable RPC before scene changes.
         var transitionPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.SyncTransition.rpc(transitionPath)
-        HostTransitionDeferred.call_deferred()
+        CoopManager.worldState.sync_transition.rpc(transitionPath)
+        host_transition_deferred.call_deferred()
     else:
         var transitionPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.RequestTransition.rpc_id(1, transitionPath)
+        CoopManager.worldState.request_transition.rpc_id(1, transitionPath)
 
 
-func HostTransitionDeferred() -> void:
+func host_transition_deferred() -> void:
     super.Interact()

@@ -5,7 +5,7 @@
 extends "res://Scripts/Pickup.gd"
 
 func Interact():
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         super.Interact()
         return
 
@@ -14,12 +14,12 @@ func Interact():
         if TryPickup():
             var pickupPath: String = get_tree().current_scene.get_path_to(self)
             remove_from_group(&"Item")
-            CoopManager.worldState.SyncPickupConsumed.rpc(pickupPath)
+            CoopManager.worldState.sync_pickup_consumed.rpc(pickupPath)
             queue_free()
     else:
         # Client requests the host to validate
         var pickupPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.RequestPickupInteract.rpc_id(1, pickupPath)
+        CoopManager.worldState.request_pickup_interact.rpc_id(1, pickupPath)
 
 
 ## Attempts to add this pickup's item to the local player's inventory.

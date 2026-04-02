@@ -5,7 +5,7 @@
 extends "res://Scripts/Switch.gd"
 
 func Interact():
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         super.Interact()
         return
 
@@ -13,8 +13,8 @@ func Interact():
         # Host runs original logic and broadcasts
         super.Interact()
         var switchPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.SyncSwitchState.rpc(switchPath, active)
+        CoopManager.worldState.sync_switch_state.rpc(switchPath, active)
     else:
         # Client requests the host to do it
         var switchPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.RequestSwitchInteract.rpc_id(1, switchPath)
+        CoopManager.worldState.request_switch_interact.rpc_id(1, switchPath)

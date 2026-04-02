@@ -3,7 +3,7 @@
 extends "res://Scripts/Door.gd"
 
 func Interact():
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         super.Interact()
         return
 
@@ -12,23 +12,23 @@ func Interact():
         super.Interact()
         # Broadcast the resulting state to all clients
         var doorPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.SyncDoorState.rpc(doorPath, isOpen)
+        CoopManager.worldState.sync_door_state.rpc(doorPath, isOpen)
     else:
         # Client requests the host to do it
         var doorPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.RequestDoorInteract.rpc_id(1, doorPath)
+        CoopManager.worldState.request_door_interact.rpc_id(1, doorPath)
 
 
 func CheckKey():
     super.CheckKey()
 
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         return
 
     # If the key check succeeded (locked is now false), broadcast the unlock
     if !locked && CoopManager.isHost:
         var doorPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.SyncDoorUnlock.rpc(doorPath)
+        CoopManager.worldState.sync_door_unlock.rpc(doorPath)
         if linked:
             var linkedPath: String = get_tree().current_scene.get_path_to(linked)
-            CoopManager.worldState.SyncDoorUnlock.rpc(linkedPath)
+            CoopManager.worldState.sync_door_unlock.rpc(linkedPath)

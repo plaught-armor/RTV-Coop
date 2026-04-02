@@ -30,19 +30,19 @@ var connecting: bool = false
 
 
 ## Extracts the helper binary to user://, launches it, and begins TCP connection.
-func Launch() -> void:
+func launch() -> void:
     if helperPID >= 0:
         return
 
-    var helperSrc: String = GetHelperResPath()
-    var helperDst: String = GetHelperUserPath()
-    var libSrc: String = GetSteamLibResPath()
-    var libDst: String = GetSteamLibUserPath()
+    var helperSrc: String = get_helper_res_path()
+    var helperDst: String = get_helper_user_path()
+    var libSrc: String = get_steam_lib_res_path()
+    var libDst: String = get_steam_lib_user_path()
 
     # Extract helper binary + Steam SDK lib + appid to user://
-    ExtractFile(helperSrc, helperDst)
-    ExtractFile(libSrc, libDst)
-    ExtractFile("res://mod/bin/steam_appid.txt", "user://steam_appid.txt")
+    extract_file(helperSrc, helperDst)
+    extract_file(libSrc, libDst)
+    extract_file("res://mod/bin/steam_appid.txt", "user://steam_appid.txt")
 
     # Make executable on Linux
     if OS.get_name() == "Linux":
@@ -63,7 +63,7 @@ func Launch() -> void:
 
 func _process(delta: float) -> void:
     if connecting:
-        PollConnect(delta)
+        poll_connect(delta)
         return
 
     if !connected:
@@ -75,11 +75,11 @@ func _process(delta: float) -> void:
         Log("Steam helper TCP disconnected")
         return
 
-    ReadResponses()
+    read_responses()
 
 
 ## Attempts TCP connection to the helper with retries.
-func PollConnect(delta: float) -> void:
+func poll_connect(delta: float) -> void:
     connectTimer += delta
 
     if connectTimer >= CONNECT_TIMEOUT:
@@ -98,22 +98,22 @@ func PollConnect(delta: float) -> void:
             connected = true
             Log("Steam helper TCP connected")
             # Immediately fetch user info
-            GetUser(OnInitialUser)
+            GetUser(on_initial_user)
         StreamPeerTCP.STATUS_ERROR:
             # Retry
             tcp = StreamPeerTCP.new()
 
 
-func OnInitialUser(response: Dictionary) -> void:
+func on_initial_user(response: Dictionary) -> void:
     var data: Dictionary = response.get("data", { })
     localSteamName = data.get("name", "")
     localSteamID = data.get("steam_id", "")
     Log("Steam user: %s (%s)" % [localSteamName, localSteamID])
     # Chain ownership check now that we know who we are
-    CheckOwnership(OnOwnershipResult)
+    CheckOwnership(on_ownership_result)
 
 
-func OnOwnershipResult(response: Dictionary) -> void:
+func on_ownership_result(response: Dictionary) -> void:
     var data: Dictionary = response.get("data", { })
     ownsGame = data.get("owns", false)
     if ownsGame:
@@ -123,7 +123,7 @@ func OnOwnershipResult(response: Dictionary) -> void:
 
 
 ## Reads complete JSON lines from TCP and dispatches to pending callbacks.
-func ReadResponses() -> void:
+func read_responses() -> void:
     var available: int = tcp.get_available_bytes()
     if available <= 0:
         return
@@ -152,7 +152,7 @@ func ReadResponses() -> void:
 
 
 ## Sends a JSON command to the helper and registers a callback for the response.
-func SendCommand(cmd: String, params: Dictionary, callback: Callable) -> void:
+func send_command(cmd: String, params: Dictionary, callback: Callable) -> void:
     if !connected:
         if callback.is_valid():
             callback.call({ "ok": false, "cmd": cmd, "error": "not connected" })
@@ -167,7 +167,7 @@ func SendCommand(cmd: String, params: Dictionary, callback: Callable) -> void:
 
 
 ## Shuts down the helper process and TCP connection.
-func Shutdown() -> void:
+func shutdown() -> void:
     if connected:
         tcp.disconnect_from_host()
         connected = false
@@ -183,52 +183,52 @@ func _exit_tree() -> void:
 
 
 ## Returns true if the helper is running, connected, and user info is cached.
-func IsReady() -> bool:
+func is_ready() -> bool:
     return connected && !localSteamID.is_empty()
 
 # ---------- Command API ----------
 
 
-func GetUser(callback: Callable) -> void:
-    SendCommand("get_user", { }, callback)
+func get_user(callback: Callable) -> void:
+    send_command("get_user", { }, callback)
 
 
-func CheckOwnership(callback: Callable) -> void:
-    SendCommand("check_ownership", { }, callback)
+func check_ownership(callback: Callable) -> void:
+    send_command("check_ownership", { }, callback)
 
 
-func CreateLobby(maxPlayers: int, callback: Callable) -> void:
-    SendCommand("create_lobby", { "max_players": maxPlayers }, callback)
+func create_lobby(maxPlayers: int, callback: Callable) -> void:
+    send_command("create_lobby", { "max_players": maxPlayers }, callback)
 
 
-func ListLobbies(callback: Callable) -> void:
-    SendCommand("list_lobbies", { }, callback)
+func list_lobbies(callback: Callable) -> void:
+    send_command("list_lobbies", { }, callback)
 
 
-func JoinLobby(lobbyID: String, callback: Callable) -> void:
-    SendCommand("join_lobby", { "lobby_id": lobbyID }, callback)
+func join_lobby(lobbyID: String, callback: Callable) -> void:
+    send_command("join_lobby", { "lobby_id": lobbyID }, callback)
 
 
-func LeaveLobby() -> void:
+func leave_lobby() -> void:
     if connected:
-        SendCommand("leave_lobby", { }, Callable())
+        send_command("leave_lobby", { }, Callable())
 
 
 ## Starts a Steam Networking Sockets P2P listen socket on the host.
 ## Incoming Steam peers are relayed to the local ENet server on [param enetPort].
-func StartP2PHost(callback: Callable, enetPort: int = 9050) -> void:
-    SendCommand("start_p2p_host", { "enet_port": enetPort }, callback)
+func start_p2p_host(callback: Callable, enetPort: int = 9050) -> void:
+    send_command("start_p2p_host", { "enet_port": enetPort }, callback)
 
 
 ## Connects to a host via Steam P2P and creates a local UDP tunnel.
 ## Returns the [code]tunnel_port[/code] that the game's ENet client should connect to.
-func StartP2PClient(hostSteamID: String, callback: Callable) -> void:
-    SendCommand("start_p2p_client", { "host_steam_id": hostSteamID }, callback)
+func start_p2p_client(hostSteamID: String, callback: Callable) -> void:
+    send_command("start_p2p_client", { "host_steam_id": hostSteamID }, callback)
 
 # ---------- File Extraction ----------
 
 
-func ExtractFile(resPath: String, userPath: String) -> void:
+func extract_file(resPath: String, userPath: String) -> void:
     if FileAccess.file_exists(userPath):
         return
     var src: FileAccess = FileAccess.open(resPath, FileAccess.READ)
@@ -247,7 +247,7 @@ func ExtractFile(resPath: String, userPath: String) -> void:
 # ---------- Platform Paths ----------
 
 
-func GetHelperResPath() -> String:
+func get_helper_res_path() -> String:
     match OS.get_name():
         "Windows":
             return "res://mod/bin/steam_helper.exe"
@@ -255,7 +255,7 @@ func GetHelperResPath() -> String:
             return "res://mod/bin/steam_helper_linux"
 
 
-func GetHelperUserPath() -> String:
+func get_helper_user_path() -> String:
     match OS.get_name():
         "Windows":
             return "user://steam_helper.exe"
@@ -263,7 +263,7 @@ func GetHelperUserPath() -> String:
             return "user://steam_helper"
 
 
-func GetSteamLibResPath() -> String:
+func get_steam_lib_res_path() -> String:
     match OS.get_name():
         "Windows":
             return "res://mod/bin/steam_api64.dll"
@@ -271,7 +271,7 @@ func GetSteamLibResPath() -> String:
             return "res://mod/bin/libsteam_api.so"
 
 
-func GetSteamLibUserPath() -> String:
+func get_steam_lib_user_path() -> String:
     match OS.get_name():
         "Windows":
             return "user://steam_api64.dll"
@@ -279,6 +279,6 @@ func GetSteamLibUserPath() -> String:
             return "user://libsteam_api.so"
 
 
-func Log(msg: String) -> void:
+func _log(msg: String) -> void:
     if CoopManager.DEBUG:
         print("[SteamBridge] %s" % msg)

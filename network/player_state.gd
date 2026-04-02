@@ -49,8 +49,8 @@ var peerBuffers: Dictionary[int, PeerBuffer] = { }
 
 
 ## Called by the controller patch every physics tick. Throttles to 20 Hz before sending.
-func BroadcastPosition(position: Vector3, rot: Vector3, flags: int) -> void:
-    if !CoopManager.IsConnected():
+func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
+    if !CoopManager.is_connected():
         return
 
     sendTickCounter += 1
@@ -59,7 +59,7 @@ func BroadcastPosition(position: Vector3, rot: Vector3, flags: int) -> void:
     sendTickCounter = 0
     sequenceNumber += 1
 
-    ReceivePosition.rpc(sequenceNumber, position, rot, flags)
+    receive_position.rpc(sequenceNumber, position, rot, flags)
 
 # ---------- RPC Receive ----------
 
@@ -67,7 +67,7 @@ func BroadcastPosition(position: Vector3, rot: Vector3, flags: int) -> void:
 ## Receives a remote player's position update. Sender is verified via
 ## [method MultiplayerAPI.get_remote_sender_id], not a caller-provided argument.
 @rpc("any_peer", "call_remote", "unreliable")
-func ReceivePosition(seq: int, position: Vector3, rot: Vector3, flags: int) -> void:
+func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
     var buf: PeerBuffer
 
@@ -91,7 +91,7 @@ func ReceivePosition(seq: int, position: Vector3, rot: Vector3, flags: int) -> v
 ## Interpolates buffered snapshots for each remote peer and applies them to
 ## the corresponding [code]RemotePlayer[/code] node every physics tick.
 func _physics_process(_delta: float) -> void:
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         return
 
     var currentTime: float = Time.get_ticks_msec() / 1000.0
@@ -100,14 +100,14 @@ func _physics_process(_delta: float) -> void:
     for peerId: int in peerBuffers:
         var buf: PeerBuffer = peerBuffers[peerId]
         var count: int = buf.states.size()
-        var remoteNode: Node3D = CoopManager.GetRemotePlayerNode(peerId)
+        var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
         if remoteNode == null:
             continue
 
         if count < 2:
             if count == 1:
                 var s: Snapshot = buf.states[0]
-                remoteNode.UpdateState(s.position, s.rotation, s.flags)
+                remoteNode.update_state(s.position, s.rotation, s.flags)
             continue
 
         var from: Snapshot
@@ -138,7 +138,7 @@ func _physics_process(_delta: float) -> void:
         if timeDiff > 0.0:
             t = clampf((renderTime - from.timestamp) / timeDiff, 0.0, 1.0)
 
-        remoteNode.UpdateState(
+        remoteNode.update_state(
             from.position.lerp(to.position, t),
             from.rotation.lerp(to.rotation, t),
             to.flags,
@@ -149,23 +149,23 @@ func _physics_process(_delta: float) -> void:
 
 ## Broadcasts a footstep sound to all remote peers. Called by the controller patch.
 ## [param audioPath] is the resource path of the [AudioEvent] to play.
-func BroadcastFootstep(audioPath: String) -> void:
-    if !CoopManager.IsConnected():
+func broadcast_footstep(audioPath: String) -> void:
+    if !CoopManager.is_connected():
         return
-    ReceiveFootstep.rpc(audioPath)
+    receive_footstep.rpc(audioPath)
 
 
 ## Receives a remote player's footstep event and plays it spatially.
 @rpc("any_peer", "call_remote", "unreliable")
-func ReceiveFootstep(audioPath: String) -> void:
-    var remoteNode: Node3D = CoopManager.GetRemotePlayerNode(multiplayer.get_remote_sender_id())
+func receive_footstep(audioPath: String) -> void:
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
-    remoteNode.PlayRemoteAudio(audioPath)
+    remoteNode.play_remote_audio(audioPath)
 
 
 ## Encodes [param data] movement booleans into a [enum MoveFlag] bitfield.
-static func EncodeFlags(data: GameData) -> int:
+static func encode_flags(data: GameData) -> int:
     var flags: int = 0
     if data.isMoving:
         flags |= MoveFlag.MOVING
@@ -181,5 +181,5 @@ static func EncodeFlags(data: GameData) -> int:
 
 
 ## Removes all buffered state for [param peerId].
-func ClearPeer(peerId: int) -> void:
+func clear_peer(peerId: int) -> void:
     peerBuffers.erase(peerId)

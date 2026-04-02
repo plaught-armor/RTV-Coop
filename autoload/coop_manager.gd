@@ -52,9 +52,9 @@ const SCENE_CHECK_INTERVAL: float = 0.5
 
 func _ready() -> void:
     if DEV_WINDOWED:
-        ForceWindowed()
+        force_windowed()
 
-    RegisterPatches()
+    register_patches()
 
     playerState = load("res://mod/network/player_state.gd").new()
     playerState.name = "PlayerState"
@@ -80,14 +80,14 @@ func _ready() -> void:
     coopHUD.name = "CoopHUD"
     uiLayer.add_child(coopHUD)
 
-    multiplayer.peer_connected.connect(OnPeerConnected)
-    multiplayer.peer_disconnected.connect(OnPeerDisconnected)
-    multiplayer.connected_to_server.connect(OnConnectedToServer)
-    multiplayer.connection_failed.connect(OnConnectionFailed)
-    multiplayer.server_disconnected.connect(OnServerDisconnected)
+    multiplayer.peer_connected.connect(on_peer_connected)
+    multiplayer.peer_disconnected.connect(on_peer_disconnected)
+    multiplayer.connected_to_server.connect(on_connected_to_server)
+    multiplayer.connection_failed.connect(on_connection_failed)
+    multiplayer.server_disconnected.connect(on_server_disconnected)
 
     # Always launch Steam helper
-    steamBridge.Launch()
+    steamBridge.launch()
 
     Log("Initialized (debug: %s)" % str(DEBUG))
 
@@ -103,14 +103,14 @@ func _physics_process(delta: float) -> void:
     var currentPath: String = get_tree().current_scene.scene_file_path
     if currentPath != lastScenePath:
         lastScenePath = currentPath
-        call_deferred("OnSceneChanged")
+        call_deferred("on_scene_changed")
     elif isActive:
-        EnsureAllSpawned()
+        ensure_all_spawned()
 
 
 ## Applies [code]take_over_path[/code] patches to game scripts.
 ## Checks file hashes before patching and warns if the game has been updated.
-func RegisterPatches() -> void:
+func register_patches() -> void:
     for pair: Array in [
         ["res://Scripts/Controller.gd", CONTROLLER_HASH, "res://mod/patches/controller_patch.gd"],
         ["res://Scripts/Door.gd", DOOR_HASH, "res://mod/patches/door_patch.gd"],
@@ -120,20 +120,20 @@ func RegisterPatches() -> void:
         # LootContainer patch disabled — conflicts with TraderDisplay.gd type checks
         # ["res://Scripts/LootContainer.gd", LOOT_CONTAINER_HASH, "res://mod/patches/loot_container_patch.gd"],
     ]:
-        if !VerifyHash(pair[0], pair[1]):
+        if !verify_hash(pair[0], pair[1]):
             Log("WARNING: %s has changed — skipping patch to avoid crashes" % pair[0])
             continue
-        PatchScript(pair[2], pair[0])
+        patch_script(pair[2], pair[0])
     Log("Patches registered")
 
 
-func PatchScript(patchPath: String, targetPath: String) -> void:
+func patch_script(patchPath: String, targetPath: String) -> void:
     var patch: Script = load(patchPath)
     patch.reload()
     patch.take_over_path(targetPath)
 
 
-func VerifyHash(path: String, expectedHash: String) -> bool:
+func verify_hash(path: String, expectedHash: String) -> bool:
     var fileHash: String = FileAccess.get_md5(path)
     return fileHash == expectedHash
 
@@ -141,8 +141,8 @@ func VerifyHash(path: String, expectedHash: String) -> bool:
 
 
 ## Creates an ENet server and a Steam P2P listen socket + lobby.
-func HostGame(port: int = DEFAULT_PORT) -> void:
-    if IsConnected():
+func host_game(port: int = DEFAULT_PORT) -> void:
+    if is_connected():
         Log("Already connected, disconnect first")
         return
     if !DEBUG && !steamBridge.ownsGame:
@@ -157,20 +157,20 @@ func HostGame(port: int = DEFAULT_PORT) -> void:
     localPeerId = multiplayer.get_unique_id()
     isHost = true
     isActive = true
-    peerNames[localPeerId] = steamBridge.localSteamName if steamBridge.IsReady() else "Host"
+    peerNames[localPeerId] = steamBridge.localSteamName if steamBridge.is_ready() else "Host"
 
-    if steamBridge.IsReady():
-        steamBridge.StartP2PHost(OnP2PHostReady, port)
-        steamBridge.CreateLobby(MAX_CLIENTS + 1, OnLobbyCreated)
+    if steamBridge.is_ready():
+        steamBridge.start_p2p_host(on_p2p_host_ready, port)
+        steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
     Log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
 
 ## Connects to a host at [param address]:[param port] as a client.
-## Called internally by [method OnP2PTunnelReady] with the tunnel's localhost port,
+## Called internally by [method on_p2p_tunnel_ready] with the tunnel's localhost port,
 ## or directly in DEBUG mode for ENet direct-connect.
-func JoinGame(address: String, port: int = DEFAULT_PORT) -> void:
-    if IsConnected():
+func join_game(address: String, port: int = DEFAULT_PORT) -> void:
+    if is_connected():
         Log("Already connected, disconnect first")
         return
     if !steamBridge.ownsGame && !DEBUG:
@@ -187,11 +187,11 @@ func JoinGame(address: String, port: int = DEFAULT_PORT) -> void:
 
 
 ## Tears down the multiplayer session and cleans up all remote players.
-func Disconnect() -> void:
-    if !IsConnected():
+func disconnect_session() -> void:
+    if !is_connected():
         return
     for peerId: int in connectedPeers:
-        playerState.ClearPeer(peerId)
+        playerState.clear_peer(peerId)
     for peerId: int in remoteNodes:
         var node: Node3D = remoteNodes[peerId]
         if is_instance_valid(node):
@@ -203,30 +203,30 @@ func Disconnect() -> void:
     localPeerId = 0
     isHost = false
     isActive = false
-    steamBridge.LeaveLobby()
+    steamBridge.leave_lobby()
     Log("Disconnected")
 
 # ---------- Signal Handlers ----------
 
 
-func OnPeerConnected(peerId: int) -> void:
+func on_peer_connected(peerId: int) -> void:
     Log("Peer connected: %d" % peerId)
     connectedPeers.append(peerId)
-    SpawnRemotePlayer.call_deferred(peerId)
-    SyncName.rpc_id(peerId, GetLocalName())
+    spawn_remote_player.call_deferred(peerId)
+    sync_name.rpc_id(peerId, get_local_name())
     # Set generous timeout on the new peer connection
-    SetPeerTimeout(peerId)
+    set_peer_timeout(peerId)
     # Send current world state to the new peer
     if isHost:
-        worldState.SendFullState.call_deferred(peerId)
+        worldState.send_full_state.call_deferred(peerId)
 
 
-func OnPeerDisconnected(peerId: int) -> void:
+func on_peer_disconnected(peerId: int) -> void:
     Log("Peer disconnected: %d" % peerId)
     var idx: int = connectedPeers.find(peerId)
     if idx >= 0:
         connectedPeers.remove_at(idx)
-    playerState.ClearPeer(peerId)
+    playerState.clear_peer(peerId)
     peerNames.erase(peerId)
     if peerId in remoteNodes:
         var node: Node3D = remoteNodes[peerId]
@@ -235,29 +235,29 @@ func OnPeerDisconnected(peerId: int) -> void:
         remoteNodes.erase(peerId)
 
 
-func OnConnectedToServer() -> void:
+func on_connected_to_server() -> void:
     localPeerId = multiplayer.get_unique_id()
     isActive = true
-    peerNames[localPeerId] = GetLocalName()
-    SetPeerTimeout(1) # Server is always peer ID 1
+    peerNames[localPeerId] = get_local_name()
+    set_peer_timeout(1) # Server is always peer ID 1
     Log("Connected to server (id: %d)" % localPeerId)
-    SyncName.rpc(GetLocalName())
+    sync_name.rpc(get_local_name())
 
 
-func OnConnectionFailed() -> void:
+func on_connection_failed() -> void:
     Log("Connection failed")
     multiplayer.multiplayer_peer = null
     isActive = false
 
 
-func OnServerDisconnected() -> void:
+func on_server_disconnected() -> void:
     Log("Server disconnected")
     Disconnect()
 
 # ---------- Steam Callbacks ----------
 
 
-func OnLobbyCreated(response: Dictionary) -> void:
+func on_lobby_created(response: Dictionary) -> void:
     if !response.get("ok", false):
         Log("Lobby creation failed: %s" % response.get("error", "unknown"))
         return
@@ -265,14 +265,14 @@ func OnLobbyCreated(response: Dictionary) -> void:
     Log("Steam lobby created: %s" % lobbyID)
 
 
-func OnP2PHostReady(response: Dictionary) -> void:
+func on_p2p_host_ready(response: Dictionary) -> void:
     if !response.get("ok", false):
         Log("P2P host failed: %s" % response.get("error", "unknown"))
         return
     Log("P2P host listening for Steam peers")
 
 
-func OnP2PTunnelReady(response: Dictionary) -> void:
+func on_p2p_tunnel_ready(response: Dictionary) -> void:
     if !response.get("ok", false):
         Log("P2P tunnel failed: %s" % response.get("error", "unknown"))
         return
@@ -281,33 +281,33 @@ func OnP2PTunnelReady(response: Dictionary) -> void:
         Log("P2P tunnel returned invalid port")
         return
     Log("P2P tunnel ready on 127.0.0.1:%d — connecting ENet" % tunnelPort)
-    JoinGame("127.0.0.1", tunnelPort)
+    join_game("127.0.0.1", tunnelPort)
 
 # ---------- Name Sync ----------
 
 
 ## Returns the local player's display name.
-func GetLocalName() -> String:
-    if steamBridge.IsReady():
+func get_local_name() -> String:
+    if steamBridge.is_ready():
         return steamBridge.localSteamName
     return "Player_%d" % localPeerId
 
 
 ## Returns the display name for [param peerId], or a fallback.
-func GetPeerName(peerId: int) -> String:
+func get_peer_name(peerId: int) -> String:
     return peerNames.get(peerId, "Player_%d" % peerId)
 
 
 ## RPC: receives a peer's display name. Clamped to 64 chars, control chars stripped.
 @rpc("any_peer", "call_remote", "reliable")
-func SyncName(peerName: String) -> void:
+func sync_name(peerName: String) -> void:
     var senderId: int = multiplayer.get_remote_sender_id()
-    var sanitized: String = SanitizeName(peerName)
+    var sanitized: String = sanitize_name(peerName)
     peerNames[senderId] = sanitized
     Log("Peer %d name: %s" % [senderId, sanitized])
 
 
-func SanitizeName(rawName: String) -> String:
+func sanitize_name(rawName: String) -> String:
     var truncated: String = rawName.substr(0, 64)
     var clean: String = ""
     for i: int in truncated.length():
@@ -319,7 +319,7 @@ func SanitizeName(rawName: String) -> String:
 # ---------- Remote Player Management ----------
 
 
-func SpawnRemotePlayer(peerId: int) -> void:
+func spawn_remote_player(peerId: int) -> void:
     if peerId in remoteNodes:
         return
     var mapNode: Node = get_tree().current_scene
@@ -328,42 +328,42 @@ func SpawnRemotePlayer(peerId: int) -> void:
     if mapNode.get_node_or_null("Core/Controller") == null:
         return
 
-    playerState.ClearPeer(peerId)
+    playerState.clear_peer(peerId)
 
     var remote: Node3D = remotePlayerScene.instantiate()
     remote.name = "RemotePlayer_%d" % peerId
     remote.set_meta("peer_id", peerId)
-    remote.tree_exiting.connect(OnRemoteNodeExiting.bind(peerId))
+    remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
     remoteNodes[peerId] = remote
     Log("Spawned remote player for peer %d" % peerId)
 
 
-func OnRemoteNodeExiting(peerId: int) -> void:
+func on_remote_node_exiting(peerId: int) -> void:
     remoteNodes.erase(peerId)
 
 
-func GetRemotePlayerNode(peerId: int) -> Node3D:
+func get_remote_player_node(peerId: int) -> Node3D:
     return remoteNodes.get(peerId)
 
 
-func EnsureAllSpawned() -> void:
+func ensure_all_spawned() -> void:
     for peerId: int in connectedPeers:
         if peerId not in remoteNodes:
-            SpawnRemotePlayer(peerId)
+            spawn_remote_player(peerId)
 
 # ---------- Scene Change Handling ----------
 
 
-func OnSceneChanged() -> void:
-    if !IsConnected():
+func on_scene_changed() -> void:
+    if !is_connected():
         return
-    EnsureAllSpawned()
+    ensure_all_spawned()
     # Host sends spawn position to clients after scene loads
     if isHost:
         var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
         if controller != null:
-            worldState.SyncSpawnPosition.call_deferred(controller.global_position)
+            worldState.sync_spawn_position.call_deferred(controller.global_position)
     Log("Scene changed, remote players respawned")
 
 # ---------- Utility ----------
@@ -383,7 +383,7 @@ func _input(event: InputEvent) -> void:
             Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 
-func ForceWindowed() -> void:
+func force_windowed() -> void:
     var prefs: Preferences = Preferences.Load() as Preferences
     if prefs == null:
         prefs = Preferences.new()
@@ -393,7 +393,7 @@ func ForceWindowed() -> void:
 
 
 ## Sets generous ENet timeout to survive scene loads but still detect dead peers.
-func SetPeerTimeout(peerId: int) -> void:
+func set_peer_timeout(peerId: int) -> void:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if !(peer is ENetMultiplayerPeer):
         return
@@ -403,14 +403,14 @@ func SetPeerTimeout(peerId: int) -> void:
         enetPeer.set_timeout(0, 5000, 30000)
 
 
-func IsConnected() -> bool:
+func is_connected() -> bool:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if peer == null || peer is OfflineMultiplayerPeer:
         return false
     return peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED
 
 
-func GetLocalIP() -> String:
+func get_local_ip() -> String:
     for addr: String in IP.get_local_addresses():
         if addr.begins_with("127.") || addr.begins_with("::") || ":" in addr:
             continue
@@ -418,6 +418,6 @@ func GetLocalIP() -> String:
     return "127.0.0.1"
 
 
-func Log(msg: String) -> void:
+func _log(msg: String) -> void:
     if DEBUG:
         print("[CoopManager] %s" % msg)

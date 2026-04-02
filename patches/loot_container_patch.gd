@@ -4,7 +4,7 @@
 extends "res://Scripts/LootContainer.gd"
 
 func Interact():
-    if !CoopManager.IsConnected():
+    if !CoopManager.is_connected():
         super.Interact()
         return
 
@@ -12,9 +12,9 @@ func Interact():
         super.Interact()
         # After opening, broadcast the current loot state
         var containerPath: String = get_tree().current_scene.get_path_to(self)
-        var packedLoot: Array = SlotSerializer.PackArray(loot)
-        CoopManager.worldState.SyncContainerState.rpc(containerPath, packedLoot)
+        var packedLoot: Array = SlotSerializer.pack_array(loot)
+        CoopManager.worldState.sync_container_state.rpc(containerPath, packedLoot)
     else:
         # Client requests to open the container
         var containerPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.RequestContainerOpen.rpc_id(1, containerPath)
+        CoopManager.worldState.request_container_open.rpc_id(1, containerPath)
