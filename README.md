@@ -2,8 +2,6 @@
 
 A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/2141300/Road_to_Vostok/). Play the hardcore survival FPS with friends.
 
-> **Status:** Phase 1 — players can see each other and move together. World state sync (doors, loot, AI) is in progress.
-
 ## Features
 
 - **2-4 player co-op** via ENet networking with 20Hz position sync and interpolation
