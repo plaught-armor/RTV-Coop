@@ -40,12 +40,11 @@ func _input(event: InputEvent) -> void:
             panelVisible = !panelVisible
             panel.visible = panelVisible
             var gd: GameData = preload("res://Resources/GameData.tres")
+            gd.freeze = panelVisible
             if panelVisible:
                 Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-                gd.freeze = true
             else:
                 Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-                gd.freeze = false
         KEY_F10:
             OnHostPressed()
         KEY_F11:
@@ -209,6 +208,17 @@ func GetPooledPlayerLabel(idx: int) -> Label:
 
 
 ## Returns true if the current scene is a gameplay map (has Core/Controller).
+## Closes the panel, unfreezes the game, and recaptures the mouse.
+func ClosePanel() -> void:
+    if !panelVisible:
+        return
+    panelVisible = false
+    panel.visible = false
+    var gd: GameData = preload("res://Resources/GameData.tres")
+    gd.freeze = false
+    Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+
 func IsInGameplay() -> bool:
     var scene: Node = get_tree().current_scene
     return is_instance_valid(scene) && scene.get_node_or_null("Core/Controller") != null
@@ -217,6 +227,7 @@ func IsInGameplay() -> bool:
 
 
 func OnHostPressed() -> void:
+    ClosePanel()
     CoopManager.HostGame()
 
 
@@ -225,10 +236,12 @@ func OnDirectJoinPressed() -> void:
     var port: int = CoopManager.DEFAULT_PORT
     if portInput != null && portInput.text.is_valid_int():
         port = clampi(portInput.text.to_int(), 1024, 65535)
+    ClosePanel()
     CoopManager.JoinGame(address, port)
 
 
 func OnDisconnectPressed() -> void:
+    ClosePanel()
     CoopManager.Disconnect()
 
 
@@ -263,6 +276,7 @@ func OnLobbyListReceived(response: Dictionary) -> void:
 
 
 func OnLobbyJoinPressed(lobbyID: String) -> void:
+    ClosePanel()
     CoopManager.steamBridge.JoinLobby(lobbyID, OnLobbyJoined)
 
 
