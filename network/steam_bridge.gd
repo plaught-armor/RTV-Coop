@@ -108,6 +108,17 @@ func OnInitialUser(response: Dictionary) -> void:
 	localSteamName = data.get("name", "")
 	localSteamID = data.get("steam_id", "")
 	Log("Steam user: %s (%s)" % [localSteamName, localSteamID])
+	# Chain ownership check now that we know who we are
+	CheckOwnership(OnOwnershipResult)
+
+
+func OnOwnershipResult(response: Dictionary) -> void:
+	var data: Dictionary = response.get("data", { })
+	ownsGame = data.get("owns", false)
+	if ownsGame:
+		Log("Ownership verified")
+	else:
+		Log("Ownership check FAILED — co-op disabled")
 
 
 ## Reads complete JSON lines from TCP and dispatches to pending callbacks.

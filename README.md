@@ -109,6 +109,21 @@ GOOS=windows GOARCH=amd64 go build -o bin/steam_helper.exe -ldflags="-s -w" .
 
 The build script copies the Steam helper binaries and `libsteam_api` into `mod/bin/` and packages everything into `rtv-coop.vmz`.
 
+## Compatibility
+
+### Known Mod Conflicts
+
+This mod patches `Controller.gd` via `take_over_path`. **Any other mod that also patches `Controller.gd` will conflict** — whichever loads last wins. Known conflicting mods:
+
+- Fly Mode mods (override Controller for flight)
+- Immersive Overhaul (overrides Controller for movement changes)
+
+If you need both, one would need to be ported as a patch on top of the other.
+
+### Game Version
+
+The mod checks a hash of `Controller.gd` at startup and logs a warning if the game has been updated since the mod was built. If you see `WARNING: Controller.gd has changed`, the mod may behave incorrectly — check for an updated release.
+
 ## Roadmap
 
 - [x] **Phase 1** — Position sync, ghost visuals, connection UI

@@ -94,9 +94,15 @@ func _physics_process(delta: float) -> void:
 	elif isActive:
 		EnsureAllSpawned()
 
+## Known MD5 hash of Controller.gd that this mod was built against.
+const CONTROLLER_HASH: String = "da2049367c3298a152dc0cb35217ad9a"
+
 
 ## Applies [code]take_over_path[/code] patches to game scripts.
+## Checks file hashes before patching and warns if the game has been updated.
 func RegisterPatches() -> void:
+	if !VerifyHash("res://Scripts/Controller.gd", CONTROLLER_HASH):
+		Log("WARNING: Controller.gd has changed — mod may be incompatible with this game version")
 	PatchScript("res://mod/patches/controller_patch.gd", "res://Scripts/Controller.gd")
 	Log("Patches registered")
 
@@ -106,6 +112,12 @@ func PatchScript(patchPath: String, targetPath: String) -> void:
 	patch.reload()
 	patch.take_over_path(targetPath)
 
+
+## Returns true if the file at [param path] matches the expected [param expectedHash] (MD5).
+func VerifyHash(path: String, expectedHash: String) -> bool:
+	var hash: String = FileAccess.get_md5(path)
+	return hash == expectedHash
+
 # ---------- Peer Lifecycle ----------
 
 
@@ -114,6 +126,9 @@ func PatchScript(patchPath: String, targetPath: String) -> void:
 func HostGame(port: int = DEFAULT_PORT) -> void:
 	if IsConnected():
 		Log("Already connected, disconnect first")
+		return
+	if useSteam && !steamBridge.ownsGame:
+		Log("Cannot host — game ownership not verified")
 		return
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
 	var error: Error = peer.create_server(port, MAX_CLIENTS)
@@ -141,6 +156,9 @@ func HostGame(port: int = DEFAULT_PORT) -> void:
 func JoinGame(address: String, port: int = DEFAULT_PORT) -> void:
 	if IsConnected():
 		Log("Already connected, disconnect first")
+		return
+	if useSteam && !steamBridge.ownsGame:
+		Log("Cannot join — game ownership not verified")
 		return
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
 	var error: Error = peer.create_client(address, port)
@@ -247,15 +265,6 @@ func OnP2PTunnelReady(response: Dictionary) -> void:
 	Log("P2P tunnel ready on 127.0.0.1:%d — connecting ENet" % tunnelPort)
 	JoinGame("127.0.0.1", tunnelPort)
 
-
-func OnOwnershipResult(response: Dictionary) -> void:
-	var data: Dictionary = response.get("data", { })
-	steamBridge.ownsGame = data.get("owns", false)
-	if !steamBridge.ownsGame:
-		Log("Game ownership check FAILED — co-op disabled")
-	else:
-		Log("Game ownership verified")
-
 # ---------- Name Sync ----------
 
 
@@ -271,12 +280,24 @@ func GetPeerName(peerId: int) -> String:
 	return peerNames.get(peerId, "Player_%d" % peerId)
 
 
-## RPC: receives a peer's display name.
+## RPC: receives a peer's display name. Clamped to 64 chars, control chars stripped.
 @rpc("any_peer", "call_remote", "reliable")
 func SyncName(peerName: String) -> void:
 	var senderId: int = multiplayer.get_remote_sender_id()
-	peerNames[senderId] = peerName
-	Log("Peer %d name: %s" % [senderId, peerName])
+	var sanitized: String = SanitizeName(peerName)
+	peerNames[senderId] = sanitized
+	Log("Peer %d name: %s" % [senderId, sanitized])
+
+
+## Clamps name length and strips control characters.
+func SanitizeName(rawName: String) -> String:
+	var name: String = rawName.substr(0, 64)
+	var clean: String = ""
+	for i: int in name.length():
+		var c: String = name[i]
+		if c.unicode_at(0) >= 32:
+			clean += c
+	return clean if !clean.is_empty() else "Unknown"
 
 # ---------- Remote Player Management ----------
 
