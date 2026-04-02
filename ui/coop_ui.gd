@@ -225,7 +225,6 @@ func IsInGameplay() -> bool:
 
 
 func OnHostPressed() -> void:
-    ClosePanel()
     CoopManager.HostGame()
 
 
@@ -234,12 +233,10 @@ func OnDirectJoinPressed() -> void:
     var port: int = CoopManager.DEFAULT_PORT
     if portInput != null && portInput.text.is_valid_int():
         port = clampi(portInput.text.to_int(), 1024, 65535)
-    ClosePanel()
     CoopManager.JoinGame(address, port)
 
 
 func OnDisconnectPressed() -> void:
-    ClosePanel()
     CoopManager.Disconnect()
 
 
@@ -274,7 +271,6 @@ func OnLobbyListReceived(response: Dictionary) -> void:
 
 
 func OnLobbyJoinPressed(lobbyID: String) -> void:
-    ClosePanel()
     CoopManager.steamBridge.JoinLobby(lobbyID, OnLobbyJoined)
 
 
