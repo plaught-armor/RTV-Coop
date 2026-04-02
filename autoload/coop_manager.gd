@@ -386,7 +386,7 @@ func ForceWindowed() -> void:
     prefs.Save()
 
 
-## Sets a generous ENet timeout on a specific peer to survive scene loading pauses.
+## Disables ENet timeout on a peer. Connection only drops on actual network failure.
 func SetPeerTimeout(peerId: int) -> void:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if !(peer is ENetMultiplayerPeer):
@@ -394,7 +394,7 @@ func SetPeerTimeout(peerId: int) -> void:
     var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
     var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
     if enetPeer != null:
-        enetPeer.set_timeout(0, 10000, 30000)
+        enetPeer.set_timeout(0, 0, 0)
 
 
 func IsConnected() -> bool:
