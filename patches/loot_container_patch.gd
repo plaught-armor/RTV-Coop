@@ -4,7 +4,7 @@
 extends "res://Scripts/LootContainer.gd"
 
 func Interact():
-    if !CoopManager.is_connected():
+    if !CoopManager.is_session_active():
         super.Interact()
         return
 

@@ -142,7 +142,7 @@ func verify_hash(path: String, expectedHash: String) -> bool:
 
 ## Creates an ENet server and a Steam P2P listen socket + lobby.
 func host_game(port: int = DEFAULT_PORT) -> void:
-    if is_connected():
+    if is_session_active():
         Log("Already connected, disconnect first")
         return
     if !DEBUG && !steamBridge.ownsGame:
@@ -170,7 +170,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
 ## Called internally by [method on_p2p_tunnel_ready] with the tunnel's localhost port,
 ## or directly in DEBUG mode for ENet direct-connect.
 func join_game(address: String, port: int = DEFAULT_PORT) -> void:
-    if is_connected():
+    if is_session_active():
         Log("Already connected, disconnect first")
         return
     if !steamBridge.ownsGame && !DEBUG:
@@ -188,7 +188,7 @@ func join_game(address: String, port: int = DEFAULT_PORT) -> void:
 
 ## Tears down the multiplayer session and cleans up all remote players.
 func disconnect_session() -> void:
-    if !is_connected():
+    if !is_session_active():
         return
     for peerId: int in connectedPeers:
         playerState.clear_peer(peerId)
@@ -356,7 +356,7 @@ func ensure_all_spawned() -> void:
 
 
 func on_scene_changed() -> void:
-    if !is_connected():
+    if !is_session_active():
         return
     ensure_all_spawned()
     # Host sends spawn position to clients after scene loads
@@ -403,7 +403,7 @@ func set_peer_timeout(peerId: int) -> void:
         enetPeer.set_timeout(0, 5000, 30000)
 
 
-func is_connected() -> bool:
+func is_session_active() -> bool:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if peer == null || peer is OfflineMultiplayerPeer:
         return false

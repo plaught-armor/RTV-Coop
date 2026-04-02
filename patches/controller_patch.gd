@@ -93,7 +93,7 @@ func _input(event: InputEvent) -> void:
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
-    if !CoopManager.is_connected():
+    if !CoopManager.is_session_active():
         return
 
     CoopManager.playerState.broadcast_position(
