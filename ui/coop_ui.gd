@@ -36,7 +36,7 @@ func _input(event: InputEvent) -> void:
         return
 
     match event.keycode:
-        KEY_F9:
+        KEY_INSERT:
             panelVisible = !panelVisible
             panel.visible = panelVisible
             CoopManager.panelOpen = panelVisible
