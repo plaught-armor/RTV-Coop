@@ -1,5 +1,6 @@
 ## Handles player position, rotation, and movement flag synchronisation over ENet.
 ## Owned by [code]CoopManager[/code] (added as a child node). All player-related RPCs live here.
+class_name PlayerState
 extends Node
 
 ## Bitfield values for encoding player movement state into a single [code]int[/code].
@@ -42,19 +43,14 @@ const MAX_BUFFER_SIZE: int = 20
 var sendTickCounter: int = 0
 var sequenceNumber: int = 0
 ## Per-peer interpolation buffers. Maps peer_id -> [PeerBuffer].
-var peerBuffers: Dictionary = { }
-var cachedCoopManager: Node = null
-
-
-func _ready() -> void:
-    cachedCoopManager = get_parent()
+var peerBuffers: Dictionary[int, PeerBuffer] = { }
 
 # ---------- Broadcast ----------
 
 
 ## Called by the controller patch every physics tick. Throttles to 20 Hz before sending.
 func BroadcastPosition(position: Vector3, rot: Vector3, flags: int) -> void:
-    if !cachedCoopManager.isActive:
+    if !CoopManager.isActive:
         return
 
     sendTickCounter += 1
@@ -95,7 +91,7 @@ func ReceivePosition(seq: int, position: Vector3, rot: Vector3, flags: int) -> v
 ## Interpolates buffered snapshots for each remote peer and applies them to
 ## the corresponding [code]RemotePlayer[/code] node every physics tick.
 func _physics_process(_delta: float) -> void:
-    if !cachedCoopManager.isActive:
+    if !CoopManager.isActive:
         return
 
     var currentTime: float = Time.get_ticks_msec() / 1000.0
@@ -103,14 +99,14 @@ func _physics_process(_delta: float) -> void:
 
     for peerId: int in peerBuffers:
         var buf: PeerBuffer = peerBuffers[peerId]
-        var states: Array[Snapshot] = buf.states
-        var remoteNode: Node3D = cachedCoopManager.GetRemotePlayerNode(peerId)
+        var count: int = buf.states.size()
+        var remoteNode: Node3D = CoopManager.GetRemotePlayerNode(peerId)
         if remoteNode == null:
             continue
 
-        if states.size() < 2:
-            if states.size() == 1:
-                var s: Snapshot = states[0]
+        if count < 2:
+            if count == 1:
+                var s: Snapshot = buf.states[0]
                 remoteNode.UpdateState(s.position, s.rotation, s.flags)
             continue
 
@@ -118,21 +114,25 @@ func _physics_process(_delta: float) -> void:
         var to: Snapshot
         var foundBracket: bool = false
 
-        for i: int in range(1, states.size()):
-            if states[i].timestamp >= renderTime:
-                from = states[i - 1]
-                to = states[i]
+        for i: int in range(1, count):
+            if buf.states[i].timestamp >= renderTime:
+                from = buf.states[i - 1]
+                to = buf.states[i]
                 foundBracket = true
                 break
 
-        # Hold latest position on packet loss instead of snapping to oldest.
         if !foundBracket:
-            from = states[-1]
+            from = buf.states[-1]
             to = from
 
-        # Prune consumed snapshots but keep at least one before renderTime.
-        while states.size() > 2 && states[1].timestamp < renderTime:
-            states.pop_front()
+        # Prune consumed snapshots with a single slice instead of N pop_front() calls.
+        var pruneCount: int = 0
+        while pruneCount < count - 2 && buf.states[pruneCount + 1].timestamp < renderTime:
+            pruneCount += 1
+        if pruneCount > 0:
+            var pruned: Array[Snapshot] = []
+            pruned.assign(buf.states.slice(pruneCount))
+            buf.states = pruned
 
         var timeDiff: float = to.timestamp - from.timestamp
         var t: float = 0.0
@@ -149,7 +149,7 @@ func _physics_process(_delta: float) -> void:
 
 
 ## Encodes [param data] movement booleans into a [enum MoveFlag] bitfield.
-static func EncodeFlags(data: Resource) -> int:
+static func EncodeFlags(data: GameData) -> int:
     var flags: int = 0
     if data.isMoving:
         flags |= MoveFlag.MOVING

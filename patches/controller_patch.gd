@@ -15,7 +15,6 @@ const PlayerStateScript = preload("res://mod/network/player_state.gd")
 ## Typed reference to the shared GameData resource. Shadows the parent's untyped
 ## [code]gameData[/code] to enable typed instructions in our overridden methods.
 var gd: GameData = preload("res://Resources/GameData.tres")
-var cachedCoopManager: Node = null
 
 ## Pool of [code]AudioInstance2D[/code] nodes to avoid per-sound instantiation.
 var audioPool: Array[AudioStreamPlayer] = []
@@ -96,13 +95,10 @@ func _input(event: InputEvent) -> void:
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
-    if cachedCoopManager == null:
-        cachedCoopManager = get_node("/root/CoopManager")
-
-    if !cachedCoopManager.isActive:
+    if !CoopManager.isActive:
         return
 
-    cachedCoopManager.playerState.BroadcastPosition(
+    CoopManager.playerState.BroadcastPosition(
         global_transform.origin,
         Vector3(rotation.y, head.rotation.x, 0.0),
         PlayerStateScript.EncodeFlags(gd),
@@ -116,13 +112,13 @@ func Inertia(delta: float) -> void:
         var backwardPenalty: float = 0.7 if gd.isRunning else 0.8
 
         if inputDirection.y > 0.5:
-            inertia = lerp(inertia, 0.6, delta * 2.0)
+            inertia = lerpf(inertia, 0.6, delta * 2.0)
         elif inputDirection.y >= 0:
-            inertia = lerp(inertia, backwardPenalty, delta * 2.0)
+            inertia = lerpf(inertia, backwardPenalty, delta * 2.0)
         else:
-            inertia = lerp(inertia, 1.0, delta * 2.0)
+            inertia = lerpf(inertia, 1.0, delta * 2.0)
     else:
-        inertia = lerp(inertia, 1.0, delta * 2.0)
+        inertia = lerpf(inertia, 1.0, delta * 2.0)
 
 # ---------- Surface Detection ----------
 
@@ -134,6 +130,7 @@ func SurfaceDetection(delta: float) -> void:
     scanTimer = 0.0
 
     if below.is_colliding():
+        gd.surface = "Generic"
         var collider: Object = below.get_collider()
         if collider is Surface:
             gd.surface = collider.surface
@@ -146,7 +143,7 @@ func SurfaceDetection(delta: float) -> void:
 
 ## Resolves the correct footstep audio event based on surface type, season, and
 ## whether the player is landing. Replaces the original's 3x duplicated elif chains.
-func ResolveFootstep(isLanding: bool) -> Variant:
+func ResolveFootstep(isLanding: bool) -> AudioEvent:
     match gd.surface:
         &"Grass":
             if gd.season == 2:

@@ -42,11 +42,11 @@ func _physics_process(delta: float) -> void:
 	)
 
 	if moveFlags & MoveFlag.CROUCHING:
-		body.scale.y = lerp(body.scale.y, 0.6, delta * 5.0)
-		headPivot.position.y = lerp(headPivot.position.y, 1.0, delta * 5.0)
+		body.scale.y = lerpf(body.scale.y, 0.6, delta * 5.0)
+		headPivot.position.y = lerpf(headPivot.position.y, 1.0, delta * 5.0)
 	else:
-		body.scale.y = lerp(body.scale.y, 1.0, delta * 5.0)
-		headPivot.position.y = lerp(headPivot.position.y, 1.6, delta * 5.0)
+		body.scale.y = lerpf(body.scale.y, 1.0, delta * 5.0)
+		headPivot.position.y = lerpf(headPivot.position.y, 1.6, delta * 5.0)
 
 
 ## Applies a network state snapshot. Called by the interpolation loop in [code]PlayerState[/code].
