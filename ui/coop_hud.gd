@@ -41,10 +41,13 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-    if !hudVisible:
+    if !hudVisible || !IsInGameplay():
+        if visible:
+            visible = false
         return
+    if !visible:
+        visible = true
 
-    # Always update hints (connection state may change)
     UpdateHints()
 
     if !CoopManager.isActive:
@@ -130,3 +133,8 @@ func GetPooledLabel(idx: int) -> Label:
 func HideAllPlayerLabels() -> void:
     for label: Label in labelPool:
         label.hide()
+
+
+func IsInGameplay() -> bool:
+    var scene: Node = get_tree().current_scene
+    return is_instance_valid(scene) && scene.get_node_or_null("Core/Controller") != null

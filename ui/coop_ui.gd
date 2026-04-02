@@ -31,6 +31,8 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
     if !(event is InputEventKey) || !event.pressed || event.echo:
         return
+    if !IsInGameplay():
+        return
 
     match event.keycode:
         KEY_F9:
@@ -200,6 +202,14 @@ func GetPooledPlayerLabel(idx: int) -> Label:
     playerList.add_child(label)
     playerLabelPool.append(label)
     return label
+
+# ---------- Helpers ----------
+
+
+## Returns true if the current scene is a gameplay map (has Core/Controller).
+func IsInGameplay() -> bool:
+    var scene: Node = get_tree().current_scene
+    return is_instance_valid(scene) && scene.get_node_or_null("Core/Controller") != null
 
 # ---------- Actions ----------
 
