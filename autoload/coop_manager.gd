@@ -84,10 +84,11 @@ func _ready() -> void:
     multiplayer.connection_failed.connect(OnConnectionFailed)
     multiplayer.server_disconnected.connect(OnServerDisconnected)
 
-    # Always launch Steam helper
-    steamBridge.Launch()
+    # Launch Steam helper (skip in DEBUG — use ENet direct-connect)
+    if !DEBUG:
+        steamBridge.Launch()
 
-    Log("Initialized")
+    Log("Initialized (debug: %s)" % str(DEBUG))
 
 
 func _physics_process(delta: float) -> void:
@@ -141,7 +142,7 @@ func HostGame(port: int = DEFAULT_PORT) -> void:
     if IsConnected():
         Log("Already connected, disconnect first")
         return
-    if !steamBridge.ownsGame:
+    if !DEBUG && !steamBridge.ownsGame:
         Log("Cannot host — game ownership not verified")
         return
     var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
