@@ -66,16 +66,16 @@ func _process(delta: float) -> void:
 ## Updates the keybind hints based on connection and Steam state.
 func UpdateHints() -> void:
     if CoopManager.isActive:
-        hintsLabel.text = "INS Panel  |  F12 Hide"
+        hintsLabel.text = "INS Multiplayer"
     elif !CoopManager.DEBUG && !CoopManager.steamBridge.IsReady():
         if CoopManager.steamBridge.connected:
-            hintsLabel.text = "Steam: verifying...  |  F12 Hide"
+            hintsLabel.text = "Steam: verifying..."
         elif CoopManager.steamBridge.connecting:
-            hintsLabel.text = "Steam: connecting...  |  F12 Hide"
+            hintsLabel.text = "Steam: connecting..."
         else:
-            hintsLabel.text = "Steam: offline  |  F12 Hide"
+            hintsLabel.text = "Steam: offline"
     else:
-        hintsLabel.text = "INS Panel  |  F10 Host  |  F12 Hide"
+        hintsLabel.text = "INS Multiplayer"
 
 
 func UpdatePings() -> void:
