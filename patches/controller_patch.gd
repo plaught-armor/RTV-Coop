@@ -142,64 +142,64 @@ func SurfaceDetection(delta: float) -> void:
 ## Resolves the correct footstep audio event based on surface type, season, and
 ## whether the player is landing. Replaces the original's 3x duplicated elif chains.
 func ResolveFootstep(isLanding: bool) -> AudioEvent:
-	match gd.surface:
-		&"Grass":
-			if gd.season == 2:
-				return audioLibrary.footstepSnowHardLand if isLanding else audioLibrary.footstepSnowHard
-			return audioLibrary.footstepGrassLand if isLanding else audioLibrary.footstepGrass
-		&"Dirt":
-			if gd.season == 2:
-				return audioLibrary.footstepSnowHardLand if isLanding else audioLibrary.footstepSnowHard
-			return audioLibrary.footstepDirtLand if isLanding else audioLibrary.footstepDirt
-		&"Asphalt":
-			return audioLibrary.footstepAsphaltLand if isLanding else audioLibrary.footstepAsphalt
-		&"Rock":
-			return audioLibrary.footstepRockLand if isLanding else audioLibrary.footstepRock
-		&"Wood":
-			return audioLibrary.footstepWoodLand if isLanding else audioLibrary.footstepWood
-		&"Metal":
-			return audioLibrary.footstepMetalLand if isLanding else audioLibrary.footstepMetal
-		&"Concrete":
-			return audioLibrary.footstepConcreteLand if isLanding else audioLibrary.footstepConcrete
-		_:
-			return audioLibrary.footstepGenericLand if isLanding else audioLibrary.footstepGeneric
+    match gd.surface:
+        &"Grass":
+            if gd.season == 2:
+                return audioLibrary.footstepSnowHardLand if isLanding else audioLibrary.footstepSnowHard
+            return audioLibrary.footstepGrassLand if isLanding else audioLibrary.footstepGrass
+        &"Dirt":
+            if gd.season == 2:
+                return audioLibrary.footstepSnowHardLand if isLanding else audioLibrary.footstepSnowHard
+            return audioLibrary.footstepDirtLand if isLanding else audioLibrary.footstepDirt
+        &"Asphalt":
+            return audioLibrary.footstepAsphaltLand if isLanding else audioLibrary.footstepAsphalt
+        &"Rock":
+            return audioLibrary.footstepRockLand if isLanding else audioLibrary.footstepRock
+        &"Wood":
+            return audioLibrary.footstepWoodLand if isLanding else audioLibrary.footstepWood
+        &"Metal":
+            return audioLibrary.footstepMetalLand if isLanding else audioLibrary.footstepMetal
+        &"Concrete":
+            return audioLibrary.footstepConcreteLand if isLanding else audioLibrary.footstepConcrete
+        _:
+            return audioLibrary.footstepGenericLand if isLanding else audioLibrary.footstepGeneric
 
 
 func PlayFootstep() -> void:
-	if character.heavyGear && randi_range(1, 2) == 1:
-		PlayMovementGear()
+    if character.heavyGear && randi_range(1, 2) == 1:
+        PlayMovementGear()
 
-	if gd.isWater:
-		PlayPooled(audioLibrary.footstepWater)
-	else:
-		PlayPooled(ResolveFootstep(false))
+    if gd.isWater:
+        PlayPooled(audioLibrary.footstepWater)
+    else:
+        PlayPooled(ResolveFootstep(false))
 
 
 func PlayFootstepJump() -> void:
-	PlayMovementCloth()
-	if character.heavyGear:
-		PlayMovementGear()
+    PlayMovementCloth()
+    if character.heavyGear:
+        PlayMovementGear()
 
-	if gd.isWater:
-		PlayPooled(audioLibrary.footstepWater)
-	else:
-		PlayPooled(ResolveFootstep(false))
+    if gd.isWater:
+        PlayPooled(audioLibrary.footstepWater)
+    else:
+        PlayPooled(ResolveFootstep(false))
 
 
 func PlayFootstepLand() -> void:
-	PlayMovementCloth()
-	if character.heavyGear:
-		PlayMovementGear()
+    PlayMovementCloth()
+    if character.heavyGear:
+        PlayMovementGear()
 
-	if gd.isWater:
-		PlayPooled(audioLibrary.footstepWaterLand)
-	else:
-		PlayPooled(ResolveFootstep(true))
+    if gd.isWater:
+        PlayPooled(audioLibrary.footstepWaterLand)
+    else:
+        PlayPooled(ResolveFootstep(true))
 
 
 func PlayMovementCloth() -> void:
-	PlayPooled(audioLibrary.movementCloth)
+    PlayPooled(audioLibrary.movementCloth)
 
 
 func PlayMovementGear() -> void:
-	PlayPooled(audioLibrary.movementGear)
+    PlayPooled(audioLibrary.movementGear)

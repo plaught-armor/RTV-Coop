@@ -20,7 +20,6 @@ class Snapshot extends RefCounted:
 	var rotation: Vector3
 	var flags: int
 
-
 	func _init(t: float, p: Vector3, r: Vector3, f: int) -> void:
 		timestamp = t
 		position = p
@@ -43,7 +42,7 @@ const MAX_BUFFER_SIZE: int = 20
 var sendTickCounter: int = 0
 var sequenceNumber: int = 0
 ## Per-peer interpolation buffers. Maps peer_id -> [PeerBuffer].
-var peerBuffers: Dictionary[int, PeerBuffer] = { }
+var peerBuffers: Dictionary[int, PeerBuffer] = {}
 
 # ---------- Broadcast ----------
 
@@ -125,7 +124,6 @@ func _physics_process(_delta: float) -> void:
 			from = buf.states[-1]
 			to = from
 
-		# Prune consumed snapshots with a single slice instead of N pop_front() calls.
 		var pruneCount: int = 0
 		while pruneCount < count - 2 && buf.states[pruneCount + 1].timestamp < renderTime:
 			pruneCount += 1

@@ -8,15 +8,15 @@ var simSyncTimer: float = 0.0
 
 
 func _physics_process(delta: float) -> void:
-	if !CoopManager.isActive || !CoopManager.isHost:
-		return
+    if !CoopManager.isActive || !CoopManager.isHost:
+        return
 
-	simSyncTimer += delta
-	if simSyncTimer < SIM_SYNC_INTERVAL:
-		return
-	simSyncTimer = 0.0
+    simSyncTimer += delta
+    if simSyncTimer < SIM_SYNC_INTERVAL:
+        return
+    simSyncTimer = 0.0
 
-	SyncSimulation.rpc(Simulation.time, Simulation.day, Simulation.weather)
+    SyncSimulation.rpc(Simulation.time, Simulation.day, Simulation.weather)
 
 # ---------- Door Sync ----------
 
@@ -24,13 +24,13 @@ func _physics_process(delta: float) -> void:
 ## Client requests the host to interact with a door.
 @rpc("any_peer", "call_remote", "reliable")
 func RequestDoorInteract(doorPath: String) -> void:
-	if !CoopManager.isHost:
-		return
-	if !IsValidInteractablePath(doorPath, &"Door"):
-		return
-	var door: Node = get_tree().current_scene.get_node(doorPath)
-	# Run the patched Interact() which handles host logic + broadcast
-	door.Interact()
+    if !CoopManager.isHost:
+        return
+    if !IsValidInteractablePath(doorPath, &"Door"):
+        return
+    var door: Node = get_tree().current_scene.get_node(doorPath)
+    # Run the patched Interact() which handles host logic + broadcast
+    door.Interact()
 
 
 ## Host broadcasts a door's state to peers. Clients animate accordingly.
@@ -123,28 +123,28 @@ func RequestContainerOpen(containerPath: String) -> void:
 ## Host broadcasts a container's loot state to all peers.
 @rpc("authority", "call_remote", "reliable")
 func SyncContainerState(containerPath: String, packedLoot: Array[Dictionary]) -> void:
-	var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
-	if container == null || !(container is LootContainer):
-		return
-	container.loot = SlotSerializer.UnpackArray(packedLoot)
+    var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
+    if container == null || !(container is LootContainer):
+        return
+    container.loot = SlotSerializer.UnpackArray(packedLoot)
 
 
 ## Client requests to take a specific item from a container by index.
 @rpc("any_peer", "call_remote", "reliable")
 func RequestContainerTakeItem(containerPath: String, itemIndex: int) -> void:
-	if !CoopManager.isHost:
-		return
-	if !IsValidInteractablePath(containerPath, &"Interactable"):
-		return
-	var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
-	if !is_instance_valid(container) || !(container is LootContainer):
-		return
-	if itemIndex < 0 || itemIndex >= container.loot.size():
-		return
-	var takenSlot: SlotData = container.loot[itemIndex]
-	if takenSlot == null:
-		return
-	# Remove from host's authoritative loot array
+    if !CoopManager.isHost:
+        return
+    if !IsValidInteractablePath(containerPath, &"Interactable"):
+        return
+    var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
+    if !is_instance_valid(container) || !(container is LootContainer):
+        return
+    if itemIndex < 0 || itemIndex >= container.loot.size():
+        return
+    var takenSlot: SlotData = container.loot[itemIndex]
+    if takenSlot == null:
+        return
+    # Remove from host's authoritative loot array
 	container.loot.remove_at(itemIndex)
 	# Send item to requesting client
 	var requesterId: int = multiplayer.get_remote_sender_id()
@@ -181,33 +181,33 @@ func RequestPickupInteract(pickupPath: String) -> void:
 ## The client adds it to their own inventory locally.
 @rpc("authority", "call_remote", "reliable")
 func GrantPickupToClient(packedSlot: Dictionary) -> void:
-	var slotData: SlotData = SlotSerializer.Unpack(packedSlot)
-	if slotData == null:
-		return
-	var iface: Node = get_tree().current_scene.get_node_or_null("/root/Map/Core/UI/Interface")
-	if iface == null:
-		return
-	if iface.AutoStack(slotData, iface.inventoryGrid):
-		iface.UpdateStats(false)
-	elif iface.Create(slotData, iface.inventoryGrid, false):
-		iface.UpdateStats(false)
+    var slotData: SlotData = SlotSerializer.Unpack(packedSlot)
+    if slotData == null:
+        return
+    var iface: Node = get_tree().current_scene.get_node_or_null("/root/Map/Core/UI/Interface")
+    if iface == null:
+        return
+    if iface.AutoStack(slotData, iface.inventoryGrid):
+        iface.UpdateStats(false)
+    elif iface.Create(slotData, iface.inventoryGrid, false):
+        iface.UpdateStats(false)
 
 
 ## Host broadcasts that a pickup was consumed (removed from world).
 @rpc("authority", "call_remote", "reliable")
 func SyncPickupConsumed(pickupPath: String) -> void:
-	var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
-	if is_instance_valid(pickup):
-		pickup.queue_free()
+    var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
+    if is_instance_valid(pickup):
+        pickup.queue_free()
 
 
 ## Host broadcasts a new pickup spawned in the world.
 @rpc("authority", "call_remote", "reliable")
 func SyncPickupSpawn(packedSlot: Dictionary, pos: Vector3, rot: Vector3, pickupName: String) -> void:
-	var slotData: SlotData = SlotSerializer.Unpack(packedSlot)
-	if slotData == null:
-		return
-	# Find the PackedScene from Database using the item's file key
+    var slotData: SlotData = SlotSerializer.Unpack(packedSlot)
+    if slotData == null:
+        return
+    # Find the PackedScene from Database using the item's file key
 	var scene: PackedScene = FindPickupScene(slotData.itemData.file)
 	if scene == null:
 		return
