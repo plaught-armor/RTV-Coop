@@ -169,10 +169,13 @@ func PlayFootstep() -> void:
     if character.heavyGear && randi_range(1, 2) == 1:
         PlayMovementGear()
 
+    var audio: AudioEvent
     if gd.isWater:
-        PlayPooled(audioLibrary.footstepWater)
+        audio = audioLibrary.footstepWater
     else:
-        PlayPooled(ResolveFootstep(false))
+        audio = ResolveFootstep(false)
+    PlayPooled(audio)
+    CoopManager.playerState.BroadcastFootstep(audio.resource_path)
 
 
 func PlayFootstepJump() -> void:
@@ -180,10 +183,13 @@ func PlayFootstepJump() -> void:
     if character.heavyGear:
         PlayMovementGear()
 
+    var audio: AudioEvent
     if gd.isWater:
-        PlayPooled(audioLibrary.footstepWater)
+        audio = audioLibrary.footstepWater
     else:
-        PlayPooled(ResolveFootstep(false))
+        audio = ResolveFootstep(false)
+    PlayPooled(audio)
+    CoopManager.playerState.BroadcastFootstep(audio.resource_path)
 
 
 func PlayFootstepLand() -> void:
@@ -191,10 +197,13 @@ func PlayFootstepLand() -> void:
     if character.heavyGear:
         PlayMovementGear()
 
+    var audio: AudioEvent
     if gd.isWater:
-        PlayPooled(audioLibrary.footstepWaterLand)
+        audio = audioLibrary.footstepWaterLand
     else:
-        PlayPooled(ResolveFootstep(true))
+        audio = ResolveFootstep(true)
+    PlayPooled(audio)
+    CoopManager.playerState.BroadcastFootstep(audio.resource_path)
 
 
 func PlayMovementCloth() -> void:

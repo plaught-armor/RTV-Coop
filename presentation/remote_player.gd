@@ -9,6 +9,9 @@ var targetRotationX: float = 0.0
 var moveFlags: int = 0
 var smoothSpeed: float = 15.0
 
+var audioLibrary = preload("res://Resources/AudioLibrary.tres")
+var audioPlayer: AudioStreamPlayer3D = null
+
 @onready var body: MeshInstance3D = $Body
 @onready var headPivot: Node3D = $HeadPivot
 @onready var headMesh: MeshInstance3D = $HeadPivot/HeadMesh
@@ -27,6 +30,11 @@ func _ready() -> void:
 
     nameLabel.text = name
     targetPosition = global_position
+
+    audioPlayer = AudioStreamPlayer3D.new()
+    audioPlayer.max_distance = 50.0
+    audioPlayer.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+    add_child(audioPlayer)
 
 
 func _physics_process(delta: float) -> void:
@@ -54,3 +62,18 @@ func UpdateState(pos: Vector3, rot: Vector3, flags: int) -> void:
     targetRotationY = rot.x
     targetRotationX = rot.y
     moveFlags = flags
+
+
+## Plays a spatial audio event at this remote player's position.
+func PlayRemoteAudio(audioPath: String) -> void:
+    if audioPlayer == null:
+        return
+    var audioEvent: Resource = load(audioPath)
+    if audioEvent == null || !audioEvent.has_method("get"):
+        return
+    if audioEvent.audioClips.is_empty():
+        return
+    audioPlayer.stream = audioEvent.audioClips.pick_random()
+    audioPlayer.volume_db = audioEvent.volume
+    audioPlayer.pitch_scale = randf_range(0.9, 1.0) if audioEvent.randomPitch else 1.0
+    audioPlayer.play()

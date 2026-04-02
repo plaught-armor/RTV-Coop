@@ -147,6 +147,24 @@ func _physics_process(_delta: float) -> void:
 # ---------- Utility ----------
 
 
+## Broadcasts a footstep sound to all remote peers. Called by the controller patch.
+## [param audioPath] is the resource path of the [AudioEvent] to play.
+func BroadcastFootstep(audioPath: String) -> void:
+    if !CoopManager.isActive:
+        return
+    ReceiveFootstep.rpc(multiplayer.get_unique_id(), audioPath)
+
+
+## Receives a remote player's footstep event and plays it spatially.
+@rpc("any_peer", "call_remote", "unreliable")
+func ReceiveFootstep(peerId: int, audioPath: String) -> void:
+    var actualSender: int = multiplayer.get_remote_sender_id()
+    var remoteNode: Node3D = CoopManager.GetRemotePlayerNode(actualSender)
+    if remoteNode == null:
+        return
+    remoteNode.PlayRemoteAudio(audioPath)
+
+
 ## Encodes [param data] movement booleans into a [enum MoveFlag] bitfield.
 static func EncodeFlags(data: GameData) -> int:
     var flags: int = 0
