@@ -19,7 +19,7 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 ### From Release (recommended)
 
-1. Install [VostokMods](https://github.com/Ryhon0/VostokMods) or the Metro Mod Loader
+1. Install the [Metro Mod Loader](https://modworkshop.net/mod/48937) (recommended) or [VostokMods](https://github.com/Ryhon0/VostokMods)
 2. Download `rtv-coop.vmz` from the [Releases](https://github.com/plaught-armor/mod/releases) page
 3. Place `rtv-coop.vmz` in the game's `mods/` folder:
    - **Windows:** `%APPDATA%\Road to Vostok Demo\mods\`
@@ -164,7 +164,7 @@ The mod checks MD5 hashes of all patched scripts at startup. If a hash doesn't m
 ## Requirements
 
 - [Road to Vostok](https://store.steampowered.com/app/2141300/Road_to_Vostok/) (Steam)
-- [VostokMods](https://github.com/Ryhon0/VostokMods) or Metro Mod Loader
+- [Metro Mod Loader](https://modworkshop.net/mod/48937) (recommended) or [VostokMods](https://github.com/Ryhon0/VostokMods)
 - Steam running (for lobbies and ownership verification)
 
 ## Credits
