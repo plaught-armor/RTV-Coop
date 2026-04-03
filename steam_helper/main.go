@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,7 +14,32 @@ import (
 	"syscall"
 	"time"
 
-	sw "github.com/assemblaj/purego-steamworks"
+	sw "github.com/badhex/go-steamworks"
+)
+
+// Callback result structs matching Steamworks SDK layout.
+type LobbyCreated struct {
+	Result       sw.EResult
+	_            uint32
+	SteamIDLobby uint64
+}
+
+type LobbyEnter struct {
+	SteamIDLobby          uint64
+	_                     uint32
+	_                     bool
+	ChatRoomEnterResponse uint32
+}
+
+type LobbyMatchList struct {
+	LobbiesMatching uint32
+}
+
+// Callback IDs from Steamworks SDK headers.
+const (
+	kLobbyCreated  int32 = 513
+	kLobbyEnter    int32 = 504
+	kLobbyMatchList int32 = 510
 )
 
 type Command struct {
@@ -32,7 +58,8 @@ var (
 	appID        uint32
 	port         int
 	mu           sync.Mutex
-	currentLobby sw.Uint64SteamID
+	currentLobby sw.CSteamID
+	done         chan struct{}
 )
 
 func main() {
@@ -45,6 +72,15 @@ func main() {
 	log.SetPrefix("[steam_helper] ")
 	log.SetFlags(log.Ltime)
 
+	// Listen FIRST so the game can connect and get status
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		log.Fatalf("Listen failed: %v", err)
+	}
+	defer listener.Close()
+	log.Printf("Listening on 127.0.0.1:%d", port)
+
+	// Init Steam
 	if sw.RestartAppIfNecessary(appID) {
 		log.Println("Steam requested restart via client")
 		os.Exit(0)
@@ -53,21 +89,12 @@ func main() {
 	if err := sw.Init(); err != nil {
 		log.Fatalf("SteamAPI_Init failed: %v", err)
 	}
-	defer sw.Shutdown()
 
 	name := sw.SteamFriends().GetPersonaName()
 	steamID := sw.SteamUser().GetSteamID()
-	log.Printf("Logged in as: %s (Steam64: %d)", name, steamID)
+	log.Printf("Logged in as: %s (Steam64: %d)", name, uint64(steamID))
 
-	done := make(chan struct{})
-	go callbackLoop(done)
-
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		log.Fatalf("Listen failed: %v", err)
-	}
-	defer listener.Close()
-	log.Printf("Listening on 127.0.0.1:%d", port)
+	done = make(chan struct{})
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -93,6 +120,17 @@ func main() {
 	}
 }
 
+var callbackLoopStarted bool
+
+func ensureCallbackLoop(done chan struct{}) {
+	if callbackLoopStarted {
+		return
+	}
+	callbackLoopStarted = true
+	go callbackLoop(done)
+	log.Println("Callback loop started")
+}
+
 func callbackLoop(done chan struct{}) {
 	ticker := time.NewTicker(33 * time.Millisecond)
 	defer ticker.Stop()
@@ -101,9 +139,16 @@ func callbackLoop(done chan struct{}) {
 		case <-done:
 			return
 		case <-ticker.C:
-			mu.Lock()
-			sw.RunCallbacks()
-			mu.Unlock()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("PANIC in RunCallbacks: %v", r)
+					}
+				}()
+				mu.Lock()
+				sw.RunCallbacks()
+				mu.Unlock()
+			}()
 		}
 	}
 }
@@ -123,7 +168,13 @@ func handleConn(conn net.Conn, done chan struct{}) {
 	}
 }
 
-func dispatch(cmd Command) Response {
+func dispatch(cmd Command) (resp Response) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in dispatch(%s): %v", cmd.Cmd, r)
+			resp = fail(cmd.Cmd, fmt.Sprintf("internal panic: %v", r))
+		}
+	}()
 	switch cmd.Cmd {
 	case "ping":
 		return ok(cmd.Cmd, "pong")
@@ -139,10 +190,6 @@ func dispatch(cmd Command) Response {
 		return joinLobby(cmd)
 	case "leave_lobby":
 		return leaveLobby(cmd)
-	case "start_p2p_host":
-		return cmdStartP2PHost(cmd)
-	case "start_p2p_client":
-		return cmdStartP2PClient(cmd)
 	default:
 		return fail(cmd.Cmd, "unknown command")
 	}
@@ -157,7 +204,7 @@ func getUser(_ Command) Response {
 	mu.Lock()
 	defer mu.Unlock()
 	return ok("get_user", map[string]any{
-		"steam_id": fmt.Sprintf("%d", sw.SteamUser().GetSteamID()),
+		"steam_id": fmt.Sprintf("%d", uint64(sw.SteamUser().GetSteamID())),
 		"name":     sw.SteamFriends().GetPersonaName(),
 	})
 }
@@ -173,77 +220,73 @@ func checkOwnership(_ Command) Response {
 
 func createLobby(cmd Command) Response {
 	var p struct {
-		MaxPlayers int32 `json:"max_players"`
+		MaxPlayers int `json:"max_players"`
 	}
 	p.MaxPlayers = 4
 	if cmd.Params != nil {
 		json.Unmarshal(cmd.Params, &p)
 	}
 
-	ch := make(chan sw.LobbyCreated, 1)
+	ensureCallbackLoop(done)
 	mu.Lock()
-	cr := sw.SteamMatchmaking().CreateLobby(sw.ELobbyType_FriendsOnly, p.MaxPlayers)
-	sw.RegisterCallResult(cr, func(result sw.LobbyCreated, failed bool) {
-		if failed {
-			result.Result = sw.EResultFail
-		}
-		ch <- result
-	})
+	call := sw.SteamMatchmaking().CreateLobby(sw.ELobbyType_FriendsOnly, p.MaxPlayers)
 	mu.Unlock()
 
-	select {
-	case result := <-ch:
-		mu.Lock()
-		defer mu.Unlock()
-		if result.Result != sw.EResultOK {
-			return fail("create_lobby", fmt.Sprintf("failed: result %d", result.Result))
-		}
-		currentLobby = sw.Uint64SteamID(result.SteamIDLobby)
-		mm := sw.SteamMatchmaking()
-		mm.SetLobbyData(currentLobby, "host_name", sw.SteamFriends().GetPersonaName())
-		mm.SetLobbyData(currentLobby, "mod", "rtv-coop")
-		mm.SetLobbyData(currentLobby, "host_steam_id", fmt.Sprintf("%d", sw.SteamUser().GetSteamID()))
-		return ok("create_lobby", map[string]any{
-			"lobby_id": fmt.Sprintf("%d", currentLobby),
-		})
-	case <-time.After(10 * time.Second):
-		return fail("create_lobby", "timeout")
+	cr := sw.NewCallResult[LobbyCreated](call, kLobbyCreated)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, failed, err := cr.Wait(ctx, 0)
+	if err != nil {
+		return fail("create_lobby", fmt.Sprintf("timeout: %v", err))
 	}
+	if failed || result.Result != sw.EResultOK {
+		return fail("create_lobby", fmt.Sprintf("failed: result %d", result.Result))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	currentLobby = sw.CSteamID(result.SteamIDLobby)
+	mm := sw.SteamMatchmaking()
+	mm.SetLobbyData(currentLobby, "host_name", sw.SteamFriends().GetPersonaName())
+	mm.SetLobbyData(currentLobby, "mod", "rtv-coop")
+	mm.SetLobbyData(currentLobby, "host_steam_id", fmt.Sprintf("%d", uint64(sw.SteamUser().GetSteamID())))
+	return ok("create_lobby", map[string]any{
+		"lobby_id": fmt.Sprintf("%d", result.SteamIDLobby),
+	})
 }
 
 func listLobbies(_ Command) Response {
-	ch := make(chan sw.LobbyMatchList, 1)
+	ensureCallbackLoop(done)
 	mu.Lock()
-	sw.SteamMatchmaking().AddRequestLobbyListStringFilter("mod", "rtv-coop", sw.ELobbyComparisonE_Equal)
-	cr := sw.SteamMatchmaking().RequestLobbyList()
-	sw.RegisterCallResult(cr, func(result sw.LobbyMatchList, failed bool) {
-		if failed {
-			result.LobbiesMatching = 0
-		}
-		ch <- result
-	})
+	sw.SteamMatchmaking().AddRequestLobbyListStringFilter("mod", "rtv-coop", sw.ELobbyComparisonEqual)
+	call := sw.SteamMatchmaking().RequestLobbyList()
 	mu.Unlock()
 
-	select {
-	case result := <-ch:
-		mu.Lock()
-		defer mu.Unlock()
-		mm := sw.SteamMatchmaking()
-		lobbies := make([]map[string]any, 0, result.LobbiesMatching)
-		for i := int32(0); i < int32(result.LobbiesMatching); i++ {
-			id := mm.GetLobbyByIndex(i)
-			lobbies = append(lobbies, map[string]any{
-				"lobby_id":      fmt.Sprintf("%d", id),
-				"host_name":     string(mm.GetLobbyData(id, "host_name")),
-				"host_steam_id": string(mm.GetLobbyData(id, "host_steam_id")),
-				"players":       mm.GetNumLobbyMembers(id),
-				"max_players":   mm.GetLobbyMemberLimit(id),
-			})
-		}
-		return ok("list_lobbies", lobbies)
-	case <-time.After(10 * time.Second):
-		return fail("list_lobbies", "timeout")
+	cr := sw.NewCallResult[LobbyMatchList](call, kLobbyMatchList)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, _, err := cr.Wait(ctx, 0)
+	if err != nil {
+		return fail("list_lobbies", fmt.Sprintf("timeout: %v", err))
 	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	mm := sw.SteamMatchmaking()
+	lobbies := make([]map[string]any, 0, result.LobbiesMatching)
+	for i := 0; i < int(result.LobbiesMatching); i++ {
+		id := mm.GetLobbyByIndex(i)
+		lobbies = append(lobbies, map[string]any{
+			"lobby_id":      fmt.Sprintf("%d", uint64(id)),
+			"host_name":     mm.GetLobbyData(id, "host_name"),
+			"host_steam_id": mm.GetLobbyData(id, "host_steam_id"),
+			"players":       mm.GetNumLobbyMembers(id),
+			"max_players":   mm.GetLobbyMemberLimit(id),
+		})
+	}
+	return ok("list_lobbies", lobbies)
 }
 
 func joinLobby(cmd Command) Response {
@@ -254,40 +297,40 @@ func joinLobby(cmd Command) Response {
 		return fail("join_lobby", "missing lobby_id")
 	}
 
-	var lobbyID sw.Uint64SteamID
+	var lobbyID uint64
 	fmt.Sscanf(p.LobbyID, "%d", &lobbyID)
 
-	ch := make(chan sw.LobbyEnter, 1)
+	ensureCallbackLoop(done)
 	mu.Lock()
-	cr := sw.SteamMatchmaking().JoinLobby(lobbyID)
-	sw.RegisterCallResult(cr, func(result sw.LobbyEnter, failed bool) {
-		ch <- result
-	})
+	call := sw.SteamMatchmaking().JoinLobby(sw.CSteamID(lobbyID))
 	mu.Unlock()
 
-	select {
-	case result := <-ch:
-		mu.Lock()
-		defer mu.Unlock()
-		if result.ChatRoomEnterResponse != 1 { // EChatRoomEnterResponse_Success
-			return fail("join_lobby", fmt.Sprintf("join denied: %d", result.ChatRoomEnterResponse))
-		}
-		currentLobby = sw.Uint64SteamID(result.SteamIDLobby)
-		mm := sw.SteamMatchmaking()
-		ownerID := mm.GetLobbyOwner(currentLobby)
-		return ok("join_lobby", map[string]any{
-			"lobby_id":      fmt.Sprintf("%d", currentLobby),
-			"host_steam_id": fmt.Sprintf("%d", ownerID),
-		})
-	case <-time.After(10 * time.Second):
-		return fail("join_lobby", "timeout")
+	cr := sw.NewCallResult[LobbyEnter](call, kLobbyEnter)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, _, err := cr.Wait(ctx, 0)
+	if err != nil {
+		return fail("join_lobby", fmt.Sprintf("timeout: %v", err))
 	}
+	if result.ChatRoomEnterResponse != 1 {
+		return fail("join_lobby", fmt.Sprintf("join denied: %d", result.ChatRoomEnterResponse))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	currentLobby = sw.CSteamID(result.SteamIDLobby)
+	ownerID := sw.SteamMatchmaking().GetLobbyOwner(currentLobby)
+	return ok("join_lobby", map[string]any{
+		"lobby_id":      fmt.Sprintf("%d", result.SteamIDLobby),
+		"host_steam_id": fmt.Sprintf("%d", uint64(ownerID)),
+	})
 }
 
 func leaveLobby(_ Command) Response {
 	mu.Lock()
 	defer mu.Unlock()
-	if currentLobby != 0 {
+	if uint64(currentLobby) != 0 {
 		sw.SteamMatchmaking().LeaveLobby(currentLobby)
 		currentLobby = 0
 	}

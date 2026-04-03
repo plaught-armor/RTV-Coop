@@ -5,6 +5,10 @@ extends VBoxContainer
 
 var _cm: Node
 
+
+func init_manager(manager: Node) -> void:
+    _cm = manager
+
 var pingTimer: float = 0.0
 var hudVisible: bool = true
 const PING_INTERVAL: float = 1.0
@@ -16,9 +20,6 @@ const PLAYER_COLOR: Color = Color(0.8, 1.0, 0.8, 0.8)
 
 
 func _ready() -> void:
-    _cm = get_node_or_null("/root/CoopManager")
-    if _cm == null:
-        _cm = get_parent().get_parent()
     anchor_left = 1.0
     anchor_right = 1.0
     anchor_top = 0.0

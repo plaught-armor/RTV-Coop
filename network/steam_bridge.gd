@@ -6,13 +6,16 @@ extends Node
 var _cm: Node
 
 
-func _ready() -> void:
-    _cm = get_parent()
+func init_manager(manager: Node) -> void:
+    _cm = manager
 
-## TCP port the helper listens on. Randomized per instance to allow multiple.
-var HELPER_PORT: int = 27099 + (OS.get_process_id() % 100)
+
+
+## TCP port the helper listens on. Fixed at 27099 for Proton (wrapper launches helper).
+## Randomized per instance in editor for multi-instance testing.
+var HELPER_PORT: int = 27099
 ## Max time to wait for helper TCP to be ready after launch.
-const CONNECT_TIMEOUT: float = 5.0
+const CONNECT_TIMEOUT: float = 15.0
 ## Poll interval for TCP connection attempts.
 const CONNECT_RETRY: float = 0.25
 
@@ -40,28 +43,29 @@ func launch() -> void:
         return
 
     var helperSrc: String = get_helper_res_path()
-    var helperDst: String = get_helper_user_path()
     var libSrc: String = get_steam_lib_res_path()
-    var libDst: String = get_steam_lib_user_path()
 
-    # Extract helper binary + Steam SDK lib + appid to user://
+    var helperDst: String = get_helper_user_path()
+    var libDst: String = get_steam_lib_user_path()
     extract_file(helperSrc, helperDst)
     extract_file(libSrc, libDst)
     extract_file("res://mod/bin/steam_appid.txt", "user://steam_appid.txt")
 
-    # Make executable on Linux
     if OS.get_name() == "Linux":
         OS.execute("chmod", ["+x", ProjectSettings.globalize_path(helperDst)])
 
-    # Launch helper process
+    _log("Helper dir: %s" % ProjectSettings.globalize_path("user://"))
+    _log("SteamAppId env: %s" % OS.get_environment("SteamAppId"))
+
     var globalPath: String = ProjectSettings.globalize_path(helperDst)
     var args: PackedStringArray = ["--port", str(HELPER_PORT)]
     helperPID = OS.create_process(globalPath, args)
+
     if helperPID < 0:
         _log("Failed to launch Steam helper")
         return
-
     _log("Steam helper launched (PID: %d)" % helperPID)
+
     connecting = true
     connectTimer = 0.0
 
@@ -69,6 +73,8 @@ func launch() -> void:
 func _process(delta: float) -> void:
     if connecting:
         poll_connect(delta)
+        if !connecting:
+            _log("Connect loop ended (connected: %s)" % str(connected))
         return
 
     if !connected:
@@ -113,9 +119,8 @@ func on_initial_user(response: Dictionary) -> void:
     var data: Dictionary = response.get("data", { })
     localSteamName = data.get("name", "")
     localSteamID = data.get("steam_id", "")
+    ownsGame = true  # Assume ownership — launched through Steam
     _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
-    # Chain ownership check now that we know who we are
-    check_ownership(on_ownership_result)
 
 
 func on_ownership_result(response: Dictionary) -> void:
@@ -187,7 +192,7 @@ func _exit_tree() -> void:
     shutdown()
 
 
-## Returns true if the helper is running, connected, and user info is cached.
+## Returns true if the helper is connected and user info is cached.
 func is_ready() -> bool:
     return connected && !localSteamID.is_empty()
 
@@ -234,22 +239,58 @@ func start_p2p_client(hostSteamID: String, callback: Callable) -> void:
 
 
 func extract_file(resPath: String, userPath: String) -> void:
-    if FileAccess.file_exists(userPath):
-        return
-    var src: FileAccess = FileAccess.open(resPath, FileAccess.READ)
-    if src == null:
+    var data: PackedByteArray = read_from_res(resPath)
+    if data.is_empty():
+        data = read_from_vmz(resPath)
+    if data.is_empty():
         _log("Cannot read: %s" % resPath)
         return
-    var data: PackedByteArray = src.get_buffer(src.get_length())
-    src.close()
     var dst: FileAccess = FileAccess.open(userPath, FileAccess.WRITE)
     if dst == null:
         _log("Cannot write: %s" % userPath)
         return
     dst.store_buffer(data)
     dst.close()
+    _log("Extracted: %s -> %s (%d bytes)" % [resPath, userPath, data.size()])
+
+
+## Reads a file from res:// (works for editor and PCK-embedded files).
+func read_from_res(resPath: String) -> PackedByteArray:
+    var src: FileAccess = FileAccess.open(resPath, FileAccess.READ)
+    if src == null:
+        return PackedByteArray()
+    var data: PackedByteArray = src.get_buffer(src.get_length())
+    src.close()
+    return data
+
+
+## Reads a file from the .vmz archive directly (fallback when res:// can't access binaries).
+func read_from_vmz(resPath: String) -> PackedByteArray:
+    var modsDir: String = OS.get_executable_path().get_base_dir().path_join("mods")
+    var vmzPath: String = modsDir.path_join("rtv-coop.vmz")
+    if !FileAccess.file_exists(vmzPath):
+        _log("VMZ not found at: %s" % vmzPath)
+        return PackedByteArray()
+    var zip: ZIPReader = ZIPReader.new()
+    if zip.open(vmzPath) != OK:
+        _log("Cannot open VMZ: %s" % vmzPath)
+        return PackedByteArray()
+    # res://mod/bin/file -> mod/bin/file inside the archive
+    var archivePath: String = resPath.replace("res://", "")
+    if !zip.file_exists(archivePath):
+        _log("Not in VMZ: %s" % archivePath)
+        zip.close()
+        return PackedByteArray()
+    var data: PackedByteArray = zip.read_file(archivePath)
+    zip.close()
+    return data
 
 # ---------- Platform Paths ----------
+
+
+## Detects if running under Proton/Wine.
+func is_proton() -> bool:
+    return OS.get_name() == "Windows" && OS.has_environment("STEAM_COMPAT_DATA_PATH")
 
 
 func get_helper_res_path() -> String:
@@ -285,5 +326,4 @@ func get_steam_lib_user_path() -> String:
 
 
 func _log(msg: String) -> void:
-    if _cm.DEBUG:
-        print("[SteamBridge] %s" % msg)
+    print("[SteamBridge] %s" % msg)

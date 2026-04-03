@@ -5,6 +5,10 @@ extends Control
 
 var _cm: Node
 
+
+func init_manager(manager: Node) -> void:
+    _cm = manager
+
 var panel: PanelContainer = null
 var statusLabel: Label = null
 var panelVisible: bool = false
@@ -25,10 +29,6 @@ var playerList: VBoxContainer = null
 
 
 func _ready() -> void:
-    _cm = get_node_or_null("/root/CoopManager")
-    if _cm == null:
-        # Fallback: walk up from CanvasLayer parent
-        _cm = get_parent().get_parent()
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     mouse_filter = Control.MOUSE_FILTER_IGNORE
     build_ui()

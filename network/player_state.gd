@@ -5,8 +5,10 @@ extends Node
 var _cm: Node
 
 
-func _ready() -> void:
-    _cm = get_parent()
+func init_manager(manager: Node) -> void:
+    _cm = manager
+
+
 
 ## Bitfield values for encoding player movement state into a single [code]int[/code].
 enum MoveFlag {

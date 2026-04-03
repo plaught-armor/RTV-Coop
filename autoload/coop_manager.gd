@@ -9,10 +9,8 @@ extends Node
 const DEFAULT_PORT: int = 9050
 ## Maximum number of clients that can connect to the host.
 const MAX_CLIENTS: int = 3
-## Enable debug logging and ENet direct-connect fallback.
-const DEBUG: bool = true
-## Force windowed mode on startup for multi-instance testing.
-const DEV_WINDOWED: bool = true
+## Debug mode — enabled automatically when running from the editor.
+var DEBUG: bool = OS.has_feature("editor")
 ## Known MD5 hashes of patched scripts that this mod was built against.
 const CONTROLLER_HASH: String = "da2049367c3298a152dc0cb35217ad9a"
 const DOOR_HASH: String = "2f7397b8801d17304a102661df6fd327"
@@ -44,14 +42,19 @@ var steamBridge: Node = null
 ## Reference to the co-op UI panel.
 var coopUI: Control = null
 
+## Consolidated preloads — children access these via [code]_cm.PropertyName[/code].
 var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
+var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
+var SlotSerializerScript: Script = preload("res://mod/network/slot_serializer.gd")
+var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
+var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
 var sceneCheckTimer: float = 0.0
 const SCENE_CHECK_INTERVAL: float = 0.5
 
 
 func _ready() -> void:
-    if DEV_WINDOWED:
+    if DEBUG:
         force_windowed()
 
     register_patches()
@@ -59,14 +62,17 @@ func _ready() -> void:
     playerState = load("res://mod/network/player_state.gd").new()
     playerState.name = "PlayerState"
     add_child(playerState)
+    playerState.init_manager(self)
 
     worldState = load("res://mod/network/world_state.gd").new()
     worldState.name = "WorldState"
     add_child(worldState)
+    worldState.init_manager(self)
 
     steamBridge = load("res://mod/network/steam_bridge.gd").new()
     steamBridge.name = "SteamBridge"
     add_child(steamBridge)
+    steamBridge.init_manager(self)
 
     var uiLayer: CanvasLayer = CanvasLayer.new()
     uiLayer.name = "CoopUILayer"
@@ -75,10 +81,12 @@ func _ready() -> void:
     coopUI = load("res://mod/ui/coop_ui.gd").new()
     coopUI.name = "CoopUI"
     uiLayer.add_child(coopUI)
+    coopUI.init_manager(self)
 
     var coopHUD: VBoxContainer = load("res://mod/ui/coop_hud.gd").new()
     coopHUD.name = "CoopHUD"
     uiLayer.add_child(coopHUD)
+    coopHUD.init_manager(self)
 
     multiplayer.peer_connected.connect(on_peer_connected)
     multiplayer.peer_disconnected.connect(on_peer_disconnected)
@@ -89,6 +97,7 @@ func _ready() -> void:
     # Always launch Steam helper
     steamBridge.launch()
 
+    inject_manager.call_deferred()
     _log("Initialized (debug: %s)" % str(DEBUG))
 
 
@@ -334,6 +343,7 @@ func spawn_remote_player(peerId: int) -> void:
     remote.set_meta("peer_id", peerId)
     remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
+    remote.init_manager(self)
     remoteNodes[peerId] = remote
     _log("Spawned remote player for peer %d" % peerId)
 
@@ -355,6 +365,7 @@ func ensure_all_spawned() -> void:
 
 
 func on_scene_changed() -> void:
+    inject_manager()
     if !is_session_active():
         return
     ensure_all_spawned()
@@ -365,10 +376,41 @@ func on_scene_changed() -> void:
             worldState.sync_spawn_position.call_deferred(controller.global_position)
     _log("Scene changed, remote players respawned")
 
+
+## Injects [code]_cm[/code] into all patched nodes in the current scene.
+## Called after every scene change so patches don't need [code]get_node_or_null[/code].
+func inject_manager() -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return
+
+    # Controller — known path
+    var controller: Node = scene.get_node_or_null("Core/Controller")
+    if controller != null && controller.has_method("init_manager"):
+        controller.init_manager(self)
+
+    # Interactables: Doors, Pickups, LootContainers
+    for node: Node in get_tree().get_nodes_in_group("Interactable"):
+        var obj: Node = node.owner if node.owner != null else node
+        if obj.has_method("init_manager"):
+            obj.init_manager(self)
+
+    # Switches
+    for node: Node in get_tree().get_nodes_in_group("Switch"):
+        var obj: Node = node.owner if node.owner != null else node
+        if obj.has_method("init_manager"):
+            obj.init_manager(self)
+
+    # Transitions
+    for node: Node in get_tree().get_nodes_in_group("Transition"):
+        var obj: Node = node.owner if node.owner != null else node
+        if obj.has_method("init_manager"):
+            obj.init_manager(self)
+
 # ---------- Utility ----------
 
 
-## Toggles mouse capture with backtick for debugging.
+## Toggles mouse capture with backtick for debugging (editor only).
 func _input(event: InputEvent) -> void:
     if !DEBUG:
         return

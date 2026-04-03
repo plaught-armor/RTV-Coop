@@ -3,7 +3,7 @@
 ## Never reads [code]GameData[/code] directly.
 extends Node3D
 
-const PlayerStateScript = preload("res://mod/network/player_state.gd")
+var _cm: Node
 
 var targetPosition: Vector3 = Vector3.ZERO
 var targetRotationY: float = 0.0
@@ -11,8 +11,11 @@ var targetRotationX: float = 0.0
 var moveFlags: int = 0
 var smoothSpeed: float = 15.0
 
-var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var audioPlayer: AudioStreamPlayer3D = null
+
+
+func init_manager(manager: Node) -> void:
+    _cm = manager
 
 @onready var body: MeshInstance3D = $Body
 @onready var headPivot: Node3D = $HeadPivot
@@ -49,7 +52,7 @@ func _physics_process(delta: float) -> void:
         delta * smoothSpeed,
     )
 
-    if moveFlags & PlayerStateScript.MoveFlag.CROUCHING:
+    if moveFlags & _cm.PlayerStateScript.MoveFlag.CROUCHING:
         body.scale.y = lerpf(body.scale.y, 0.6, delta * 5.0)
         headPivot.position.y = lerpf(headPivot.position.y, 1.0, delta * 5.0)
     else:

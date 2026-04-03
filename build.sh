@@ -32,7 +32,7 @@ if [ -f "${STEAM_HELPER_DIR}/bin/steam_helper.exe" ]; then
     echo "Included: steam_helper.exe"
 fi
 
-# Copy Steam SDK libs
+# Copy Steam SDK libs (Linux .so + Windows .dll for Proton compatibility)
 for lib in libsteam_api.so libsteam_api64.so steam_api64.dll; do
     if [ -f "${STEAM_HELPER_DIR}/bin/${lib}" ]; then
         cp -f "${STEAM_HELPER_DIR}/bin/${lib}" "${SCRIPT_DIR}/bin/"

@@ -6,26 +6,26 @@ extends "res://Scripts/Transition.gd"
 var _cm: Node
 
 
-func _get_cm() -> Node:
-    if _cm == null:
-        _cm = get_node("/root/CoopManager")
-    return _cm
+func init_manager(manager: Node) -> void:
+    _cm = manager
+
+
+func _ready():
+    super._ready()
 
 
 func Interact():
-    if !_get_cm().is_session_active():
+    if _cm == null || !_cm.is_session_active():
         super.Interact()
         return
 
-    if _get_cm().isHost:
-        # Broadcast to clients first, then defer own transition by one frame
-        # so ENet has time to flush the reliable RPC before scene changes.
+    if _cm.isHost:
         var transitionPath: String = get_tree().current_scene.get_path_to(self)
-        _get_cm().worldState.sync_transition.rpc(transitionPath)
+        _cm.worldState.sync_transition.rpc(transitionPath)
         host_transition_deferred.call_deferred()
     else:
         var transitionPath: String = get_tree().current_scene.get_path_to(self)
-        _get_cm().worldState.request_transition.rpc_id(1, transitionPath)
+        _cm.worldState.request_transition.rpc_id(1, transitionPath)
 
 
 func host_transition_deferred() -> void:
