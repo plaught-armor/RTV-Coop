@@ -3,6 +3,8 @@
 ## Added as a child of [code]CoopManager[/code]'s [code]CanvasLayer[/code].
 extends VBoxContainer
 
+var _cm: Node
+
 var pingTimer: float = 0.0
 var hudVisible: bool = true
 const PING_INTERVAL: float = 1.0
@@ -14,6 +16,7 @@ const PLAYER_COLOR: Color = Color(0.8, 1.0, 0.8, 0.8)
 
 
 func _ready() -> void:
+    _cm = get_node("/root/CoopManager")
     anchor_left = 1.0
     anchor_right = 1.0
     anchor_top = 0.0
@@ -50,7 +53,7 @@ func _process(delta: float) -> void:
 
     update_hints()
 
-    if !CoopManager.isActive:
+    if !_cm.isActive:
         hide_all_player_labels()
         return
 
@@ -65,12 +68,12 @@ func _process(delta: float) -> void:
 
 ## Updates the keybind hints based on connection and Steam state.
 func update_hints() -> void:
-    if CoopManager.isActive:
+    if _cm.isActive:
         hintsLabel.text = "INS Multiplayer"
-    elif !CoopManager.DEBUG && !CoopManager.steamBridge.is_ready():
-        if CoopManager.steamBridge.connected:
+    elif !_cm.DEBUG && !_cm.steamBridge.is_ready():
+        if _cm.steamBridge.connected:
             hintsLabel.text = "Steam: verifying..."
-        elif CoopManager.steamBridge.connecting:
+        elif _cm.steamBridge.connecting:
             hintsLabel.text = "Steam: connecting..."
         else:
             hintsLabel.text = "Steam: offline"
@@ -84,7 +87,7 @@ func update_pings() -> void:
         return
     var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
 
-    for peerId: int in CoopManager.connectedPeers:
+    for peerId: int in _cm.connectedPeers:
         var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
         if enetPeer != null:
             peerPings[peerId] = roundi(
@@ -92,7 +95,7 @@ func update_pings() -> void:
             )
 
     for peerId: int in peerPings.keys():
-        if peerId not in CoopManager.connectedPeers:
+        if peerId not in _cm.connectedPeers:
             peerPings.erase(peerId)
 
 
@@ -101,13 +104,13 @@ func update_player_labels() -> void:
 
     var localLabel: Label = get_pooled_label(idx)
     idx += 1
-    var localName: String = CoopManager.get_local_name()
-    localLabel.text = "%s (Host)" % localName if CoopManager.isHost else localName
+    var localName: String = _cm.get_local_name()
+    localLabel.text = "%s (Host)" % localName if _cm.isHost else localName
 
-    for peerId: int in CoopManager.connectedPeers:
+    for peerId: int in _cm.connectedPeers:
         var label: Label = get_pooled_label(idx)
         idx += 1
-        var peerName: String = CoopManager.get_peer_name(peerId)
+        var peerName: String = _cm.get_peer_name(peerId)
         var ping: int = peerPings.get(peerId, -1)
         label.text = "%s: %dms" % [peerName, ping] if ping >= 0 else "%s: ..." % peerName
 

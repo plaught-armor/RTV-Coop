@@ -3,6 +3,8 @@
 ## Primary UI is Steam lobby browser. ENet direct-connect shown only in DEBUG mode.
 extends Control
 
+var _cm: Node
+
 var panel: PanelContainer = null
 var statusLabel: Label = null
 var panelVisible: bool = false
@@ -23,6 +25,7 @@ var playerList: VBoxContainer = null
 
 
 func _ready() -> void:
+    _cm = get_node("/root/CoopManager")
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     mouse_filter = Control.MOUSE_FILTER_IGNORE
     build_ui()
@@ -39,7 +42,7 @@ func _input(event: InputEvent) -> void:
         KEY_INSERT:
             panelVisible = !panelVisible
             panel.visible = panelVisible
-            CoopManager.panelOpen = panelVisible
+            _cm.panelOpen = panelVisible
             if panelVisible:
                 Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
             else:
@@ -47,7 +50,7 @@ func _input(event: InputEvent) -> void:
         KEY_F10:
             on_host_pressed()
         KEY_F11:
-            if CoopManager.DEBUG:
+            if _cm.DEBUG:
                 on_direct_join_pressed()
 
 
@@ -96,7 +99,7 @@ func build_ui() -> void:
     vbox.add_child(lobbyList)
 
     # ENet debug section (DEBUG only)
-    if CoopManager.DEBUG:
+    if _cm.DEBUG:
         vbox.add_child(HSeparator.new())
 
         var debugLabel: Label = Label.new()
@@ -124,7 +127,7 @@ func build_ui() -> void:
         portRow.add_child(portLabel)
 
         portInput = LineEdit.new()
-        portInput.placeholder_text = str(CoopManager.DEFAULT_PORT)
+        portInput.placeholder_text = str(_cm.DEFAULT_PORT)
         portInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         portInput.mouse_filter = Control.MOUSE_FILTER_STOP
         portRow.add_child(portInput)
@@ -156,9 +159,9 @@ func _process(_delta: float) -> void:
         return
     var currentState: int = 0
     var currentPeerCount: int = 0
-    if CoopManager.isActive:
-        currentPeerCount = CoopManager.connectedPeers.size()
-        currentState = 1 if CoopManager.isHost else 2
+    if _cm.isActive:
+        currentPeerCount = _cm.connectedPeers.size()
+        currentState = 1 if _cm.isHost else 2
 
     if currentState == lastConnectionState && currentPeerCount == lastPeerCount:
         return
@@ -179,15 +182,15 @@ func _process(_delta: float) -> void:
 func update_player_list() -> void:
     var idx: int = 0
 
-    if CoopManager.isActive:
+    if _cm.isActive:
         var localLabel: Label = get_pooled_player_label(idx)
         idx += 1
-        localLabel.text = "  %s (You)" % CoopManager.get_local_name()
+        localLabel.text = "  %s (You)" % _cm.get_local_name()
 
-        for peerId: int in CoopManager.connectedPeers:
+        for peerId: int in _cm.connectedPeers:
             var label: Label = get_pooled_player_label(idx)
             idx += 1
-            label.text = "  %s" % CoopManager.get_peer_name(peerId)
+            label.text = "  %s" % _cm.get_peer_name(peerId)
 
     for i: int in range(idx, playerLabelPool.size()):
         playerLabelPool[i].hide()
@@ -213,7 +216,7 @@ func close_panel() -> void:
         return
     panelVisible = false
     panel.visible = false
-    CoopManager.panelOpen = false
+    _cm.panelOpen = false
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 
@@ -225,25 +228,25 @@ func is_in_gameplay() -> bool:
 
 
 func on_host_pressed() -> void:
-    CoopManager.host_game()
+    _cm.host_game()
 
 
 func on_direct_join_pressed() -> void:
     var address: String = addressInput.text if addressInput != null && !addressInput.text.is_empty() else "127.0.0.1"
-    var port: int = CoopManager.DEFAULT_PORT
+    var port: int = _cm.DEFAULT_PORT
     if portInput != null && portInput.text.is_valid_int():
         port = clampi(portInput.text.to_int(), 1024, 65535)
-    CoopManager.join_game(address, port)
+    _cm.join_game(address, port)
 
 
 func on_disconnect_pressed() -> void:
-    CoopManager.disconnect_session()
+    _cm.disconnect_session()
 
 
 func on_refresh_lobbies() -> void:
-    if !CoopManager.steamBridge.is_ready():
+    if !_cm.steamBridge.is_ready():
         return
-    CoopManager.steamBridge.list_lobbies(on_lobby_list_received)
+    _cm.steamBridge.list_lobbies(on_lobby_list_received)
 
 
 func on_lobby_list_received(response: Dictionary) -> void:
@@ -271,7 +274,7 @@ func on_lobby_list_received(response: Dictionary) -> void:
 
 
 func on_lobby_join_pressed(lobbyID: String) -> void:
-    CoopManager.steamBridge.join_lobby(lobbyID, on_lobby_joined)
+    _cm.steamBridge.join_lobby(lobbyID, on_lobby_joined)
 
 
 func on_lobby_joined(response: Dictionary) -> void:
@@ -280,10 +283,10 @@ func on_lobby_joined(response: Dictionary) -> void:
     var data: Dictionary = response.get("data", { })
     var hostSteamID: String = data.get("host_steam_id", "")
     if hostSteamID.is_empty():
-        CoopManager._log("Lobby has no host Steam ID")
+        _cm._log("Lobby has no host Steam ID")
         return
-    CoopManager._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
-    CoopManager.steamBridge.start_p2p_client(hostSteamID, CoopManager.on_p2p_tunnel_ready)
+    _cm._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
+    _cm.steamBridge.start_p2p_client(hostSteamID, _cm.on_p2p_tunnel_ready)
 
 
 func get_pooled_lobby_button(idx: int) -> Button:

@@ -121,8 +121,7 @@ func register_patches() -> void:
         # ["res://Scripts/LootContainer.gd", LOOT_CONTAINER_HASH, "res://mod/patches/loot_container_patch.gd"],
     ]:
         if !verify_hash(pair[0], pair[1]):
-            _log("WARNING: %s has changed — skipping patch to avoid crashes" % pair[0])
-            continue
+            _log("WARNING: %s hash mismatch — patch may be incompatible" % pair[0])
         patch_script(pair[2], pair[0])
     _log("Patches registered")
 

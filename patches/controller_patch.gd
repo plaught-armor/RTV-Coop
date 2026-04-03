@@ -10,6 +10,15 @@
 ## Original behaviour is 100% preserved. The networking hook is a no-op when not connected.
 extends "res://Scripts/Controller.gd"
 
+var _cm: Node
+
+
+func _get_cm() -> Node:
+    if _cm == null:
+        _cm = get_node("/root/CoopManager")
+    return _cm
+
+
 const PlayerStateScript = preload("res://mod/network/player_state.gd")
 
 ## Typed reference to the shared GameData resource. Shadows the parent's untyped
@@ -69,7 +78,7 @@ func play_pooled(audioEvent: AudioEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
-    if gd.freeze || gd.isCaching || CoopManager.panelOpen:
+    if gd.freeze || gd.isCaching || _get_cm().panelOpen:
         return
     if !(event is InputEventMouseMotion):
         return
@@ -95,10 +104,10 @@ func _input(event: InputEvent) -> void:
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
-    if !CoopManager.is_session_active():
+    if !_get_cm().is_session_active():
         return
 
-    CoopManager.playerState.broadcast_position(
+    _get_cm().playerState.broadcast_position(
         global_transform.origin,
         Vector3(rotation.y, head.rotation.x, 0.0),
         PlayerStateScript.encode_flags(gd),
@@ -177,7 +186,7 @@ func PlayFootstep() -> void:
     else:
         audio = ResolveFootstep(false)
     play_pooled(audio)
-    CoopManager.playerState.broadcast_footstep(audio.resource_path)
+    _get_cm().playerState.broadcast_footstep(audio.resource_path)
 
 
 func PlayFootstepJump() -> void:
@@ -191,7 +200,7 @@ func PlayFootstepJump() -> void:
     else:
         audio = ResolveFootstep(false)
     play_pooled(audio)
-    CoopManager.playerState.broadcast_footstep(audio.resource_path)
+    _get_cm().playerState.broadcast_footstep(audio.resource_path)
 
 
 func PlayFootstepLand() -> void:
@@ -205,7 +214,7 @@ func PlayFootstepLand() -> void:
     else:
         audio = ResolveFootstep(true)
     play_pooled(audio)
-    CoopManager.playerState.broadcast_footstep(audio.resource_path)
+    _get_cm().playerState.broadcast_footstep(audio.resource_path)
 
 
 func PlayMovementCloth() -> void:

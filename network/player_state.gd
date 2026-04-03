@@ -2,6 +2,12 @@
 ## Owned by [code]CoopManager[/code] (added as a child node). All player-related RPCs live here.
 extends Node
 
+var _cm: Node
+
+
+func _ready() -> void:
+    _cm = get_parent()
+
 ## Bitfield values for encoding player movement state into a single [code]int[/code].
 enum MoveFlag {
     MOVING = 1,
@@ -49,7 +55,7 @@ var peerBuffers: Dictionary[int, PeerBuffer] = { }
 
 ## Called by the controller patch every physics tick. Throttles to 20 Hz before sending.
 func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
-    if !CoopManager.is_session_active():
+    if !_cm.is_session_active():
         return
 
     sendTickCounter += 1
@@ -90,7 +96,7 @@ func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> 
 ## Interpolates buffered snapshots for each remote peer and applies them to
 ## the corresponding [code]RemotePlayer[/code] node every physics tick.
 func _physics_process(_delta: float) -> void:
-    if !CoopManager.is_session_active():
+    if !_cm.is_session_active():
         return
 
     var currentTime: float = Time.get_ticks_msec() / 1000.0
@@ -99,7 +105,7 @@ func _physics_process(_delta: float) -> void:
     for peerId: int in peerBuffers:
         var buf: PeerBuffer = peerBuffers[peerId]
         var count: int = buf.states.size()
-        var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
+        var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
         if remoteNode == null:
             continue
 
@@ -149,7 +155,7 @@ func _physics_process(_delta: float) -> void:
 ## Broadcasts a footstep sound to all remote peers. Called by the controller patch.
 ## [param audioPath] is the resource path of the [AudioEvent] to play.
 func broadcast_footstep(audioPath: String) -> void:
-    if !CoopManager.is_session_active():
+    if !_cm.is_session_active():
         return
     receive_footstep.rpc(audioPath)
 
@@ -157,7 +163,7 @@ func broadcast_footstep(audioPath: String) -> void:
 ## Receives a remote player's footstep event and plays it spatially.
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_footstep(audioPath: String) -> void:
-    var remoteNode: Node3D = CoopManager.get_remote_player_node(multiplayer.get_remote_sender_id())
+    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     remoteNode.play_remote_audio(audioPath)

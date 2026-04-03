@@ -3,6 +3,12 @@
 ## an async command API for Steam operations (user info, ownership, lobbies).
 extends Node
 
+var _cm: Node
+
+
+func _ready() -> void:
+    _cm = get_parent()
+
 ## TCP port the helper listens on. Randomized per instance to allow multiple.
 var HELPER_PORT: int = 27099 + (OS.get_process_id() % 100)
 ## Max time to wait for helper TCP to be ready after launch.
@@ -279,5 +285,5 @@ func get_steam_lib_user_path() -> String:
 
 
 func _log(msg: String) -> void:
-    if CoopManager.DEBUG:
+    if _cm.DEBUG:
         print("[SteamBridge] %s" % msg)

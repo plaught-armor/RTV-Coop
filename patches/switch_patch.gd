@@ -4,17 +4,26 @@
 ## directly (not via this patch) to avoid double-broadcast.
 extends "res://Scripts/Switch.gd"
 
+var _cm: Node
+
+
+func _get_cm() -> Node:
+    if _cm == null:
+        _cm = get_node("/root/CoopManager")
+    return _cm
+
+
 func Interact():
-    if !CoopManager.is_session_active():
+    if !_get_cm().is_session_active():
         super.Interact()
         return
 
-    if CoopManager.isHost:
+    if _get_cm().isHost:
         # Host runs original logic and broadcasts
         super.Interact()
         var switchPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.sync_switch_state.rpc(switchPath, active)
+        _get_cm().worldState.sync_switch_state.rpc(switchPath, active)
     else:
         # Client requests the host to do it
         var switchPath: String = get_tree().current_scene.get_path_to(self)
-        CoopManager.worldState.request_switch_interact.rpc_id(1, switchPath)
+        _get_cm().worldState.request_switch_interact.rpc_id(1, switchPath)

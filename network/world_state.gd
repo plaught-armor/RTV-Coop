@@ -2,13 +2,20 @@
 ## Host is authoritative. Clients send interaction requests, host validates and broadcasts.
 extends Node
 
+var _cm: Node
+
+
+func _ready() -> void:
+    _cm = get_parent()
+
+
 const SlotSerializerScript = preload("res://mod/network/slot_serializer.gd")
 const SIM_SYNC_INTERVAL: float = 2.0
 var simSyncTimer: float = 0.0
 
 
 func _physics_process(delta: float) -> void:
-    if !CoopManager.isActive || !CoopManager.isHost:
+    if !_cm.isActive || !_cm.isHost:
         return
 
     simSyncTimer += delta
@@ -24,7 +31,7 @@ func _physics_process(delta: float) -> void:
 ## Client requests the host to interact with a door.
 @rpc("any_peer", "call_remote", "reliable")
 func request_door_interact(doorPath: String) -> void:
-    if !CoopManager.isHost:
+    if !_cm.isHost:
         return
     if !is_valid_path(doorPath):
         return
@@ -62,7 +69,7 @@ func sync_door_unlock(doorPath: String) -> void:
 ## Client requests the host to interact with a switch.
 @rpc("any_peer", "call_remote", "reliable")
 func request_switch_interact(switchPath: String) -> void:
-    if !CoopManager.isHost:
+    if !_cm.isHost:
         return
     if !is_valid_path(switchPath):
         return
@@ -98,7 +105,7 @@ func sync_switch_state(switchPath: String, active: bool) -> void:
 ## Client requests the host to trigger a map transition.
 @rpc("any_peer", "call_remote", "reliable")
 func request_transition(transitionPath: String) -> void:
-    if !CoopManager.isHost:
+    if !_cm.isHost:
         return
     if !is_valid_path(transitionPath):
         return
@@ -145,7 +152,7 @@ func teleport_client(pos: Vector3) -> void:
 ## Client requests to open a loot container.
 @rpc("any_peer", "call_remote", "reliable")
 func request_container_open(containerPath: String) -> void:
-    if !CoopManager.isHost:
+    if !_cm.isHost:
         return
     if !is_valid_path(containerPath):
         return
@@ -167,7 +174,7 @@ func sync_container_state(containerPath: String, packedLoot: Array[Dictionary]) 
 ## Client requests to take a specific item from a container by index.
 @rpc("any_peer", "call_remote", "reliable")
 func request_container_take_item(containerPath: String, itemIndex: int) -> void:
-    if !CoopManager.isHost:
+    if !_cm.isHost:
         return
     if !is_valid_path(containerPath):
         return
@@ -194,7 +201,7 @@ func request_container_take_item(containerPath: String, itemIndex: int) -> void:
 ## sends the item data back to the requester, and broadcasts removal to all.
 @rpc("any_peer", "call_remote", "reliable")
 func request_pickup_interact(pickupPath: String) -> void:
-    if !CoopManager.isHost:
+    if !_cm.isHost:
         return
     if !is_valid_path(pickupPath):
         return
@@ -290,7 +297,7 @@ func sync_simulation_reliable(syncTime: float, syncDay: int, syncWeather: String
 
 ## Sends the current world state to a specific peer (called by host on peer connect).
 func send_full_state(peerId: int) -> void:
-    if !CoopManager.isHost:
+    if !_cm.isHost:
         return
 
     # Sync all doors via Interactable group
