@@ -78,7 +78,10 @@ func play_pooled(audioEvent: AudioEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
-    if gd.freeze || gd.isCaching || _get_cm().panelOpen:
+    if gd.freeze || gd.isCaching:
+        return
+    var cm: Node = _get_cm()
+    if cm != null && cm.panelOpen:
         return
     if !(event is InputEventMouseMotion):
         return
