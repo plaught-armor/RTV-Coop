@@ -1,8 +1,8 @@
 ## Handles world state synchronisation: doors, switches, simulation time/weather.
 ## Host is authoritative. Clients send interaction requests, host validates and broadcasts.
-class_name WorldState
 extends Node
 
+const SlotSerializerScript = preload("res://mod/network/slot_serializer.gd")
 const SIM_SYNC_INTERVAL: float = 2.0
 var simSyncTimer: float = 0.0
 
@@ -161,7 +161,7 @@ func sync_container_state(containerPath: String, packedLoot: Array[Dictionary]) 
     var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
     if container == null || !(container is LootContainer):
         return
-    container.loot = SlotSerializer.unpack_array(packedLoot)
+    container.loot = SlotSerializerScript.unpack_array(packedLoot)
 
 
 ## Client requests to take a specific item from a container by index.
@@ -183,9 +183,9 @@ func request_container_take_item(containerPath: String, itemIndex: int) -> void:
     container.loot.remove_at(itemIndex)
     # Send item to requesting client
     var requesterId: int = multiplayer.get_remote_sender_id()
-    grant_pickup_to_client.rpc_id(requesterId, SlotSerializer.pack(takenSlot))
+    grant_pickup_to_client.rpc_id(requesterId, SlotSerializerScript.pack(takenSlot))
     # Broadcast updated loot to all peers
-    sync_container_state.rpc(containerPath, SlotSerializer.pack_array(container.loot))
+    sync_container_state.rpc(containerPath, SlotSerializerScript.pack_array(container.loot))
 
 # ---------- Pickup Sync ----------
 
@@ -205,7 +205,7 @@ func request_pickup_interact(pickupPath: String) -> void:
     pickup.remove_from_group(&"Item")
     # Send item data to the requesting client so they add it to their own inventory
     var requesterId: int = multiplayer.get_remote_sender_id()
-    var packedSlot: Dictionary = SlotSerializer.pack(pickup.slotData)
+    var packedSlot: Dictionary = SlotSerializerScript.pack(pickup.slotData)
     grant_pickup_to_client.rpc_id(requesterId, packedSlot)
     # Broadcast removal to all peers
     sync_pickup_consumed.rpc(pickupPath)
@@ -216,7 +216,7 @@ func request_pickup_interact(pickupPath: String) -> void:
 ## The client adds it to their own inventory locally.
 @rpc("authority", "call_remote", "reliable")
 func grant_pickup_to_client(packedSlot: Dictionary) -> void:
-    var slotData: SlotData = SlotSerializer.unpack(packedSlot)
+    var slotData: SlotData = SlotSerializerScript.unpack(packedSlot)
     if slotData == null:
         return
     var iface: Node = get_tree().current_scene.get_node_or_null("/root/Map/Core/UI/Interface")
@@ -239,7 +239,7 @@ func sync_pickup_consumed(pickupPath: String) -> void:
 ## Host broadcasts a new pickup spawned in the world.
 @rpc("authority", "call_remote", "reliable")
 func sync_pickup_spawn(packedSlot: Dictionary, pos: Vector3, rot: Vector3, pickupName: String) -> void:
-    var slotData: SlotData = SlotSerializer.unpack(packedSlot)
+    var slotData: SlotData = SlotSerializerScript.unpack(packedSlot)
     if slotData == null:
         return
     # Find the PackedScene from Database using the item's file key

@@ -36,11 +36,11 @@ var remoteNodes: Dictionary[int, Node3D] = { }
 ## Maps multiplayer peer ID -> display name (Steam persona or fallback).
 var peerNames: Dictionary[int, String] = { }
 ## Reference to the [code]PlayerState[/code] child node handling position sync.
-var playerState: PlayerState = null
+var playerState: Node = null
 ## Reference to the [code]WorldState[/code] child node handling world sync.
-var worldState: WorldState = null
+var worldState: Node = null
 ## Reference to the [code]SteamBridge[/code] child node for Steam helper IPC.
-var steamBridge: SteamBridge = null
+var steamBridge: Node = null
 ## Reference to the co-op UI panel.
 var coopUI: Control = null
 

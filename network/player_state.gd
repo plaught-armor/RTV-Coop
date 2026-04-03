@@ -1,6 +1,5 @@
 ## Handles player position, rotation, and movement flag synchronisation over ENet.
 ## Owned by [code]CoopManager[/code] (added as a child node). All player-related RPCs live here.
-class_name PlayerState
 extends Node
 
 ## Bitfield values for encoding player movement state into a single [code]int[/code].

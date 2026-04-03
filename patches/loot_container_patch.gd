@@ -3,6 +3,9 @@
 ## In single-player, falls through to the original [method Interact].
 extends "res://Scripts/LootContainer.gd"
 
+const SlotSerializerScript = preload("res://mod/network/slot_serializer.gd")
+
+
 func Interact():
     if !CoopManager.is_session_active():
         super.Interact()
@@ -12,7 +15,7 @@ func Interact():
         super.Interact()
         # After opening, broadcast the current loot state
         var containerPath: String = get_tree().current_scene.get_path_to(self)
-        var packedLoot: Array = SlotSerializer.pack_array(loot)
+        var packedLoot: Array = SlotSerializerScript.pack_array(loot)
         CoopManager.worldState.sync_container_state.rpc(containerPath, packedLoot)
     else:
         # Client requests to open the container

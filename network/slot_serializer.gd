@@ -1,7 +1,6 @@
 ## Serializes [SlotData] to/from [Dictionary] for network transmission.
 ## Uses [code]itemData.resource_path[/code] to identify items across peers.
 ## Both peers have the same game resources, so paths resolve identically.
-class_name SlotSerializer
 extends RefCounted
 
 ## Allowed resource path prefixes for [method load] calls. Rejects arbitrary paths.

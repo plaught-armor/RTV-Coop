@@ -1,7 +1,6 @@
 ## Manages the Steam helper binary lifecycle and TCP communication.
 ## Launches the Go helper process, connects via localhost TCP, and provides
 ## an async command API for Steam operations (user info, ownership, lobbies).
-class_name SteamBridge
 extends Node
 
 ## TCP port the helper listens on. Randomized per instance to allow multiple.
