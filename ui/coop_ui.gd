@@ -25,7 +25,10 @@ var playerList: VBoxContainer = null
 
 
 func _ready() -> void:
-    _cm = get_node("/root/CoopManager")
+    _cm = get_node_or_null("/root/CoopManager")
+    if _cm == null:
+        # Fallback: walk up from CanvasLayer parent
+        _cm = get_parent().get_parent()
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     mouse_filter = Control.MOUSE_FILTER_IGNORE
     build_ui()
@@ -155,7 +158,7 @@ func build_ui() -> void:
 
 
 func _process(_delta: float) -> void:
-    if !panelVisible:
+    if !panelVisible || _cm == null:
         return
     var currentState: int = 0
     var currentPeerCount: int = 0

@@ -16,7 +16,9 @@ const PLAYER_COLOR: Color = Color(0.8, 1.0, 0.8, 0.8)
 
 
 func _ready() -> void:
-    _cm = get_node("/root/CoopManager")
+    _cm = get_node_or_null("/root/CoopManager")
+    if _cm == null:
+        _cm = get_parent().get_parent()
     anchor_left = 1.0
     anchor_right = 1.0
     anchor_top = 0.0
@@ -44,7 +46,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-    if !hudVisible || !is_in_gameplay():
+    if _cm == null || !hudVisible || !is_in_gameplay():
         if visible:
             visible = false
         return
