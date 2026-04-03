@@ -1,9 +1,16 @@
 #!/bin/bash
-# Packages the co-op mod into a .vmz archive for the VostokMods loader.
+# Packages the co-op mod into a .vmz archive for the Metro Mod Loader.
 # Usage: ./build.sh [output_name]
 # Output: rtv-coop.vmz (or custom name)
 #
-# Requires: steam_helper binaries pre-built in ../steam_helper/bin/
+# Archive structure:
+#   mod.txt              <- root (mod loader reads this)
+#   mod/autoload/...     <- res://mod/ prefix (matches preload paths)
+#   mod/network/...
+#   mod/patches/...
+#   mod/presentation/...
+#   mod/ui/...
+#   mod/bin/...
 
 set -e
 
@@ -28,7 +35,7 @@ fi
 # Copy Steam SDK libs
 for lib in libsteam_api.so libsteam_api64.so steam_api64.dll; do
     if [ -f "${STEAM_HELPER_DIR}/bin/${lib}" ]; then
-        cp "${STEAM_HELPER_DIR}/bin/${lib}" "${SCRIPT_DIR}/bin/"
+        cp -f "${STEAM_HELPER_DIR}/bin/${lib}" "${SCRIPT_DIR}/bin/"
         echo "Included: ${lib}"
     fi
 done
@@ -36,10 +43,26 @@ done
 # Clean previous build
 rm -f "$OUTPUT_FILE"
 
-# Zip mod contents — paths must match res:// structure
+# Zip from parent directory:
+# - mod.txt at root (mod loader needs this)
+# - mod/* with prefix (matches res://mod/ paths in scripts)
 cd "$SCRIPT_DIR/.."
+
+# First add mod.txt at root by copying it temporarily
+cp mod/mod.txt mod_txt_root_temp
+zip "$OUTPUT_FILE" mod_txt_root_temp
+# Rename inside the archive to mod.txt
+printf "@ mod_txt_root_temp\n@=mod.txt\n" | zipnote -w "$OUTPUT_FILE" 2>/dev/null || {
+    # zipnote not available — rebuild with correct name
+    rm "$OUTPUT_FILE"
+    cd "$SCRIPT_DIR"
+    zip "$OUTPUT_FILE" -j mod.txt
+    cd "$SCRIPT_DIR/.."
+}
+rm -f mod_txt_root_temp
+
+# Now add all mod/* files
 zip -r "$OUTPUT_FILE" \
-    mod/mod.txt \
     mod/autoload/ \
     mod/network/ \
     mod/patches/ \
@@ -50,6 +73,9 @@ zip -r "$OUTPUT_FILE" \
     -x "mod/.gitignore" \
     -x "mod/build.sh" \
     -x "mod/*.vmz" \
-    -x "mod/**/*.uid"
+    -x "mod/**/*.uid" \
+    -x "mod/steam_helper/*" \
+    -x "mod/README.md" \
+    -x "mod/mod.txt"
 
 echo "Built: $OUTPUT_FILE ($(du -h "$OUTPUT_FILE" | cut -f1))"
