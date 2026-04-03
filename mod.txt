@@ -4,4 +4,4 @@ id="rtv-coop"
 version="0.1.0"
 
 [autoload]
-CoopManager=res://mod/autoload/coop_manager.gd
+CoopManager="res://mod/autoload/coop_manager.gd"
