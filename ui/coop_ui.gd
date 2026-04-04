@@ -203,9 +203,7 @@ func update_player_list() -> void:
     if _cm.isActive:
         var localRow: HBoxContainer = get_pooled_player_row(idx)
         idx += 1
-        var localAvatar: TextureRect = localRow.get_child(0)
-        var localLabel: Label = localRow.get_child(1)
-        localLabel.text = "%s (You)" % _cm.get_local_name()
+        var localAvatar: TextureRect = localRow.get_child(0)        var localLabel: Label = localRow.get_child(1)        localLabel.text = "%s (You)" % _cm.get_local_name()
         var localTex: ImageTexture = _cm.avatarCache.get(_cm.steamBridge.localSteamID)
         if localTex != null:
             localAvatar.texture = localTex
@@ -216,9 +214,7 @@ func update_player_list() -> void:
         for peerId: int in _cm.connectedPeers:
             var row: HBoxContainer = get_pooled_player_row(idx)
             idx += 1
-            var avatar: TextureRect = row.get_child(0)
-            var label: Label = row.get_child(1)
-            label.text = _cm.get_peer_name(peerId)
+            var avatar: TextureRect = row.get_child(0)            var label: Label = row.get_child(1)            label.text = _cm.get_peer_name(peerId)
             var tex: ImageTexture = _cm.get_peer_avatar(peerId)
             if tex != null:
                 avatar.texture = tex
@@ -355,10 +351,7 @@ func on_friends_received(response: Dictionary) -> void:
     for i: int in range(friends.size()):
         var friend: Dictionary = friends[i]
         var row: HBoxContainer = get_pooled_friend_row(i)
-        var avatar: TextureRect = row.get_child(0)
-        var nameLabel: Label = row.get_child(1)
-        var btn: Button = row.get_child(2)
-
+        var avatar: TextureRect = row.get_child(0)        var nameLabel: Label = row.get_child(1)        var btn: Button = row.get_child(2)
         var friendName: String = friend.get("name", "Unknown")
         var state: int = friend.get("state", 0)
         var stateText: String = ""

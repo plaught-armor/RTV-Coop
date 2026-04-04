@@ -107,9 +107,7 @@ func update_player_labels() -> void:
 
     var localRow: HBoxContainer = get_pooled_row(idx)
     idx += 1
-    var localAvatar: TextureRect = localRow.get_child(0)
-    var localLabel: Label = localRow.get_child(1)
-    var localName: String = _cm.get_local_name()
+    var localAvatar: TextureRect = localRow.get_child(0)    var localLabel: Label = localRow.get_child(1)    var localName: String = _cm.get_local_name()
     localLabel.text = "%s (Host)" % localName if _cm.isHost else localName
     var localTex: ImageTexture = _cm.avatarCache.get(_cm.steamBridge.localSteamID)
     if localTex != null:
@@ -121,9 +119,7 @@ func update_player_labels() -> void:
     for peerId: int in _cm.connectedPeers:
         var row: HBoxContainer = get_pooled_row(idx)
         idx += 1
-        var avatar: TextureRect = row.get_child(0)
-        var label: Label = row.get_child(1)
-        var peerName: String = _cm.get_peer_name(peerId)
+        var avatar: TextureRect = row.get_child(0)        var label: Label = row.get_child(1)        var peerName: String = _cm.get_peer_name(peerId)
         var ping: int = peerPings.get(peerId, -1)
         label.text = "%s: %dms" % [peerName, ping] if ping >= 0 else "%s: ..." % peerName
         var tex: ImageTexture = _cm.get_peer_avatar(peerId)

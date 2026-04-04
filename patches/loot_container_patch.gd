@@ -22,7 +22,7 @@ func Interact():
 	if _cm.isHost:
 		super.Interact()
 		var containerPath: String = get_tree().current_scene.get_path_to(self)
-		var packedLoot: Array = _cm.SlotSerializerScript.pack_array(loot)
+		var packedLoot: Array[Dictionary] = _cm.SlotSerializerScript.pack_array(loot)
 		_cm.worldState.sync_container_state.rpc(containerPath, packedLoot)
 	else:
 		var containerPath: String = get_tree().current_scene.get_path_to(self)
