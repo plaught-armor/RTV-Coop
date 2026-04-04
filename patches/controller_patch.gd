@@ -175,21 +175,24 @@ func ResolveFootstep(isLanding: bool) -> AudioEvent:
             return audioLibrary.footstepGenericLand if isLanding else audioLibrary.footstepGeneric
 
 
+func play_footstep_and_broadcast(isLanding: bool) -> void:
+    var audio: AudioEvent
+    if _cm.gd.isWater:
+        audio = audioLibrary.footstepWaterLand if isLanding else audioLibrary.footstepWater
+    else:
+        audio = ResolveFootstep(isLanding)
+    play_pooled(audio)
+    if _cm.is_session_active():
+        _cm.playerState.broadcast_footstep(audio.resource_path)
+
+
 func PlayFootstep() -> void:
     if _cm == null:
         super.PlayFootstep()
         return
     if character.heavyGear && randi_range(1, 2) == 1:
         PlayMovementGear()
-
-    var audio: AudioEvent
-    if _cm.gd.isWater:
-        audio = audioLibrary.footstepWater
-    else:
-        audio = ResolveFootstep(false)
-    play_pooled(audio)
-    if _cm != null && _cm.is_session_active():
-        _cm.playerState.broadcast_footstep(audio.resource_path)
+    play_footstep_and_broadcast(false)
 
 
 func PlayFootstepJump() -> void:
@@ -199,15 +202,7 @@ func PlayFootstepJump() -> void:
     PlayMovementCloth()
     if character.heavyGear:
         PlayMovementGear()
-
-    var audio: AudioEvent
-    if _cm.gd.isWater:
-        audio = audioLibrary.footstepWater
-    else:
-        audio = ResolveFootstep(false)
-    play_pooled(audio)
-    if _cm != null && _cm.is_session_active():
-        _cm.playerState.broadcast_footstep(audio.resource_path)
+    play_footstep_and_broadcast(false)
 
 
 func PlayFootstepLand() -> void:
@@ -217,15 +212,7 @@ func PlayFootstepLand() -> void:
     PlayMovementCloth()
     if character.heavyGear:
         PlayMovementGear()
-
-    var audio: AudioEvent
-    if _cm.gd.isWater:
-        audio = audioLibrary.footstepWaterLand
-    else:
-        audio = ResolveFootstep(true)
-    play_pooled(audio)
-    if _cm != null && _cm.is_session_active():
-        _cm.playerState.broadcast_footstep(audio.resource_path)
+    play_footstep_and_broadcast(true)
 
 
 func PlayMovementCloth() -> void:
