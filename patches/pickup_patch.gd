@@ -20,14 +20,13 @@ func Interact():
 		super.Interact()
 		return
 
+	var pickupPath: String = get_tree().current_scene.get_path_to(self)
 	if _cm.isHost:
 		if TryPickup():
-			var pickupPath: String = get_tree().current_scene.get_path_to(self)
 			remove_from_group(&"Item")
 			_cm.worldState.sync_pickup_consumed.rpc(pickupPath)
 			queue_free()
 	else:
-		var pickupPath: String = get_tree().current_scene.get_path_to(self)
 		_cm.worldState.request_pickup_interact.rpc_id(1, pickupPath)
 
 

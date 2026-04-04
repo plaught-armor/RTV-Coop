@@ -18,12 +18,11 @@ func Interact():
         super.Interact()
         return
 
+    var doorPath: String = get_tree().current_scene.get_path_to(self)
     if _cm.isHost:
         super.Interact()
-        var doorPath: String = get_tree().current_scene.get_path_to(self)
         _cm.worldState.sync_door_state.rpc(doorPath, isOpen)
     else:
-        var doorPath: String = get_tree().current_scene.get_path_to(self)
         _cm.worldState.request_door_interact.rpc_id(1, doorPath)
 
 
