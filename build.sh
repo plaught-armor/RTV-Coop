@@ -1,7 +1,7 @@
 #!/bin/bash
 # Packages the co-op mod into a .vmz archive for the Metro Mod Loader.
 # Usage: ./build.sh [output_name]
-# Output: rtv-coop.vmz (or custom name)
+# Output: vmp.vmz (or custom name)
 #
 # Archive structure:
 #   mod.txt              <- root (mod loader reads this)
@@ -16,7 +16,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STEAM_HELPER_DIR="${SCRIPT_DIR}/steam_helper"
-OUTPUT_NAME="${1:-rtv-coop}"
+OUTPUT_NAME="${1:-vmp}"
 OUTPUT_FILE="${SCRIPT_DIR}/${OUTPUT_NAME}.vmz"
 
 # Ensure bin/ directory exists for helper binaries

@@ -299,7 +299,7 @@ func read_from_res(resPath: String) -> PackedByteArray:
 ## Reads a file from the .vmz archive directly (fallback when res:// can't access binaries).
 func read_from_vmz(resPath: String) -> PackedByteArray:
     var modsDir: String = OS.get_executable_path().get_base_dir().path_join("mods")
-    var vmzPath: String = modsDir.path_join("rtv-coop.vmz")
+    var vmzPath: String = modsDir.path_join("vmp.vmz")
     if !FileAccess.file_exists(vmzPath):
         _log("VMZ not found at: %s" % vmzPath)
         return PackedByteArray()
