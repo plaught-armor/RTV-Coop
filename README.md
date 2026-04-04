@@ -18,6 +18,8 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 ## Installation
 
+> **Detailed guide:** See [INSTALLATION.md](INSTALLATION.md) for step-by-step instructions including Metro Mod Loader setup, Linux/Proton paths, and troubleshooting.
+
 ### Requirements
 
 - [Road to Vostok](https://store.steampowered.com/app/2141300/Road_to_Vostok/) (Steam)
