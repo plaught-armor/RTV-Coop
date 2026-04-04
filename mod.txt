@@ -1,6 +1,6 @@
 [mod]
-name="Vostok Multiplayer"
-id="vmp"
+name="Road to Vostok Co-op"
+id="rtv-coop"
 version="0.1.0"
 
 [autoload]

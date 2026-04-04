@@ -331,7 +331,7 @@ func createLobby(cmd Command) Response {
 	currentLobby = sw.CSteamID(result.SteamIDLobby)
 	mm := sw.SteamMatchmaking()
 	mm.SetLobbyData(currentLobby, "host_name", sw.SteamFriends().GetPersonaName())
-	mm.SetLobbyData(currentLobby, "mod", "vmp")
+	mm.SetLobbyData(currentLobby, "mod", "rtv-coop")
 	mm.SetLobbyData(currentLobby, "host_steam_id", fmt.Sprintf("%d", uint64(sw.SteamUser().GetSteamID())))
 	return ok("create_lobby", map[string]any{
 		"lobby_id": fmt.Sprintf("%d", result.SteamIDLobby),
@@ -339,7 +339,7 @@ func createLobby(cmd Command) Response {
 }
 
 func listLobbies(_ Command) Response {
-	sw.SteamMatchmaking().AddRequestLobbyListStringFilter("mod", "vmp", sw.ELobbyComparisonEqual)
+	sw.SteamMatchmaking().AddRequestLobbyListStringFilter("mod", "rtv-coop", sw.ELobbyComparisonEqual)
 	call := sw.SteamMatchmaking().RequestLobbyList()
 
 	cr := sw.NewCallResult[LobbyMatchList](call, kLobbyMatchList)

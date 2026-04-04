@@ -35,7 +35,7 @@ Road to Vostok Demo/
   RTV.pck
   override.cfg          <- from Metro Mod Loader
   mods/                 <- you create this
-    vmp.vmz        <- VMP mod goes here
+    rtv-coop.vmz        <- VMP mod goes here
 
 # AppData (separate location)
 %APPDATA%\Road to Vostok Demo/
@@ -72,7 +72,7 @@ Your folders should look like:
   RTV.pck
   override.cfg          <- from Metro Mod Loader
   mods/                 <- you create this
-    vmp.vmz        <- VMP mod goes here
+    rtv-coop.vmz        <- VMP mod goes here
 
 # Proton AppData (separate location)
 ~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/
@@ -86,20 +86,20 @@ Your folders should look like:
 
 ### Windows
 
-1. Download `vmp.vmz` from the [Releases](https://github.com/plaught-armor/mod/releases) page
+1. Download `rtv-coop.vmz` from the [Releases](https://github.com/plaught-armor/mod/releases) page
 2. Place it in the `mods` folder in the **game install directory**:
    ```
-   C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok Demo\mods\vmp.vmz
+   C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok Demo\mods\rtv-coop.vmz
    ```
 3. Launch the game through Steam
 4. You should see **INS Multiplayer** in the top-right corner
 
 ### Linux (Proton)
 
-1. Download `vmp.vmz` from Releases
+1. Download `rtv-coop.vmz` from Releases
 2. Place it in the `mods` folder in the **game install directory**:
    ```
-   ~/.local/share/Steam/steamapps/common/Road to Vostok Demo/mods/vmp.vmz
+   ~/.local/share/Steam/steamapps/common/Road to Vostok Demo/mods/rtv-coop.vmz
    ```
 3. Launch the game through Steam
 4. You should see **INS Multiplayer** in the top-right corner
@@ -124,14 +124,14 @@ If the HUD shows `Steam: offline` or `Steam: connecting...`:
 
 ## Updating the Mod
 
-To update VMP, simply replace `vmp.vmz` in the `mods` folder with the new version and relaunch the game.
+To update VMP, simply replace `rtv-coop.vmz` in the `mods` folder with the new version and relaunch the game.
 
 ---
 
 ## Uninstalling
 
 ### Remove VMP only
-Delete `vmp.vmz` from the `mods` folder.
+Delete `rtv-coop.vmz` from the `mods` folder.
 
 ### Remove Metro Mod Loader entirely
 Delete `override.cfg` from the game install directory and `modloader.gd` from the AppData folder.
@@ -177,8 +177,8 @@ The Proton prefix (`~/.local/share/Steam/steamapps/compatdata/2141300/`) is crea
 ### Game won't start after installing the mod
 
 - Verify `override.cfg` is in the game install directory (next to `RTV.exe`) and `modloader.gd` is in the AppData folder
-- Make sure `vmp.vmz` is in the `mods` subfolder, not the root
-- Try removing the mod (`vmp.vmz`) to confirm the game starts without it
+- Make sure `rtv-coop.vmz` is in the `mods` subfolder, not the root
+- Try removing the mod (`rtv-coop.vmz`) to confirm the game starts without it
 
 ### Mouse stuck / can't look around
 
