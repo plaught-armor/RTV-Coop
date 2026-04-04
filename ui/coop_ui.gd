@@ -14,11 +14,17 @@ var statusLabel: Label = null
 var panelVisible: bool = false
 var lastPeerCount: int = -1
 var lastConnectionState: int = -1
-var playerLabelPool: Array[Label] = []
+var playerLabelPool: Array[HBoxContainer] = []
 
 # Steam lobby widgets
 var lobbyList: VBoxContainer = null
 var lobbyLabelPool: Array[Button] = []
+
+# Friend invite widgets
+var friendList: VBoxContainer = null
+var friendLabelPool: Array[HBoxContainer] = []
+var inviteBtn: Button = null
+var friendsVisible: bool = false
 
 # ENet debug widgets (only created in DEBUG mode)
 var addressInput: LineEdit = null
@@ -98,8 +104,17 @@ func build_ui() -> void:
     refreshBtn.pressed.connect(on_refresh_lobbies)
     btnRow.add_child(refreshBtn)
 
+    inviteBtn = Button.new()
+    inviteBtn.text = "Invite"
+    inviteBtn.pressed.connect(on_invite_pressed)
+    btnRow.add_child(inviteBtn)
+
     lobbyList = VBoxContainer.new()
     vbox.add_child(lobbyList)
+
+    friendList = VBoxContainer.new()
+    friendList.hide()
+    vbox.add_child(friendList)
 
     # ENet debug section (DEBUG only)
     if _cm.DEBUG:
@@ -186,28 +201,54 @@ func update_player_list() -> void:
     var idx: int = 0
 
     if _cm.isActive:
-        var localLabel: Label = get_pooled_player_label(idx)
+        var localRow: HBoxContainer = get_pooled_player_row(idx)
         idx += 1
-        localLabel.text = "  %s (You)" % _cm.get_local_name()
+        var localAvatar: TextureRect = localRow.get_child(0)
+        var localLabel: Label = localRow.get_child(1)
+        localLabel.text = "%s (You)" % _cm.get_local_name()
+        var localTex: ImageTexture = _cm.avatarCache.get(_cm.steamBridge.localSteamID)
+        if localTex != null:
+            localAvatar.texture = localTex
+            localAvatar.show()
+        else:
+            localAvatar.hide()
 
         for peerId: int in _cm.connectedPeers:
-            var label: Label = get_pooled_player_label(idx)
+            var row: HBoxContainer = get_pooled_player_row(idx)
             idx += 1
-            label.text = "  %s" % _cm.get_peer_name(peerId)
+            var avatar: TextureRect = row.get_child(0)
+            var label: Label = row.get_child(1)
+            label.text = _cm.get_peer_name(peerId)
+            var tex: ImageTexture = _cm.get_peer_avatar(peerId)
+            if tex != null:
+                avatar.texture = tex
+                avatar.show()
+            else:
+                avatar.hide()
 
     for i: int in range(idx, playerLabelPool.size()):
         playerLabelPool[i].hide()
 
 
-func get_pooled_player_label(idx: int) -> Label:
+func get_pooled_player_row(idx: int) -> HBoxContainer:
     if idx < playerLabelPool.size():
         playerLabelPool[idx].show()
         return playerLabelPool[idx]
 
+    var row: HBoxContainer = HBoxContainer.new()
+    var avatar: TextureRect = TextureRect.new()
+    avatar.custom_minimum_size = Vector2(24, 24)
+    avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+    avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+    row.add_child(avatar)
+
     var label: Label = Label.new()
-    playerList.add_child(label)
-    playerLabelPool.append(label)
-    return label
+    label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_child(label)
+
+    playerList.add_child(row)
+    playerLabelPool.append(row)
+    return row
 
 # ---------- Helpers ----------
 
@@ -290,6 +331,109 @@ func on_lobby_joined(response: Dictionary) -> void:
         return
     _cm._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
     _cm.steamBridge.start_p2p_client(hostSteamID, _cm.on_p2p_tunnel_ready)
+
+
+func on_invite_pressed() -> void:
+    if !_cm.steamBridge.is_ready():
+        return
+    if !_cm.isActive:
+        return
+    friendsVisible = !friendsVisible
+    friendList.visible = friendsVisible
+    if friendsVisible:
+        _cm.steamBridge.get_friends(on_friends_received)
+
+
+func on_friends_received(response: Dictionary) -> void:
+    for i: int in range(friendLabelPool.size()):
+        friendLabelPool[i].hide()
+
+    if !response.get("ok", false):
+        return
+
+    var friends: Array = response.get("data", [])
+    for i: int in range(friends.size()):
+        var friend: Dictionary = friends[i]
+        var row: HBoxContainer = get_pooled_friend_row(i)
+        var avatar: TextureRect = row.get_child(0)
+        var nameLabel: Label = row.get_child(1)
+        var btn: Button = row.get_child(2)
+
+        var friendName: String = friend.get("name", "Unknown")
+        var state: int = friend.get("state", 0)
+        var stateText: String = ""
+        match state:
+            1:
+                stateText = ""
+            2:
+                stateText = " (Busy)"
+            3:
+                stateText = " (Away)"
+            4:
+                stateText = " (Snooze)"
+            _:
+                stateText = " (Online)"
+
+        nameLabel.text = "%s%s" % [friendName, stateText]
+
+        # Decode avatar if available
+        var avatarData: String = friend.get("avatar", "")
+        if !avatarData.is_empty():
+            var avatarW: int = friend.get("avatar_w", 32)
+            var avatarH: int = friend.get("avatar_h", 32)
+            var raw: PackedByteArray = Marshalls.base64_to_raw(avatarData)
+            var img: Image = Image.create_from_data(avatarW, avatarH, false, Image.FORMAT_RGBA8, raw)
+            avatar.texture = ImageTexture.create_from_image(img)
+            avatar.show()
+        else:
+            avatar.texture = null
+            avatar.hide()
+
+        var steamID: String = friend.get("steam_id", "")
+        for conn: Dictionary in btn.pressed.get_connections():
+            btn.pressed.disconnect(conn["callable"])
+        btn.pressed.connect(on_invite_friend_pressed.bind(steamID, friendName))
+
+    for i: int in range(friends.size(), friendLabelPool.size()):
+        friendLabelPool[i].hide()
+
+
+func on_invite_friend_pressed(steamID: String, friendName: String) -> void:
+    _cm.steamBridge.invite_friend(steamID, on_invite_sent.bind(friendName))
+
+
+func on_invite_sent(response: Dictionary, friendName: String) -> void:
+    if response.get("ok", false):
+        _cm._log("Invite sent to %s" % friendName)
+    else:
+        _cm._log("Invite failed: %s" % response.get("error", "unknown"))
+
+
+func get_pooled_friend_row(idx: int) -> HBoxContainer:
+    if idx < friendLabelPool.size():
+        friendLabelPool[idx].show()
+        return friendLabelPool[idx]
+
+    var row: HBoxContainer = HBoxContainer.new()
+
+    var avatar: TextureRect = TextureRect.new()
+    avatar.custom_minimum_size = Vector2(24, 24)
+    avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+    avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+    row.add_child(avatar)
+
+    var nameLabel: Label = Label.new()
+    nameLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_child(nameLabel)
+
+    var btn: Button = Button.new()
+    btn.text = "Invite"
+    btn.mouse_filter = Control.MOUSE_FILTER_STOP
+    row.add_child(btn)
+
+    friendList.add_child(row)
+    friendLabelPool.append(row)
+    return row
 
 
 func get_pooled_lobby_button(idx: int) -> Button:

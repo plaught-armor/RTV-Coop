@@ -121,6 +121,11 @@ func on_initial_user(response: Dictionary) -> void:
     localSteamID = data.get("steam_id", "")
     ownsGame = true  # Assume ownership — launched through Steam
     _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
+    # Cache our own avatar
+    if !localSteamID.is_empty():
+        _cm.fetch_avatar(localSteamID)
+    # Check if launched via Steam invite
+    check_launch_invite(on_launch_invite_checked)
 
 
 func on_ownership_result(response: Dictionary) -> void:
@@ -222,6 +227,33 @@ func join_lobby(lobbyID: String, callback: Callable) -> void:
 func leave_lobby() -> void:
     if connected:
         send_command("leave_lobby", { }, Callable())
+
+
+func get_friends(callback: Callable) -> void:
+    send_command("get_friends", { }, callback)
+
+
+func invite_friend(steamID: String, callback: Callable) -> void:
+    send_command("invite_friend", { "steam_id": steamID }, callback)
+
+
+func open_invite_dialog(callback: Callable) -> void:
+    send_command("open_invite_dialog", { }, callback)
+
+
+func check_launch_invite(callback: Callable) -> void:
+    send_command("check_launch_invite", { }, callback)
+
+
+func on_launch_invite_checked(response: Dictionary) -> void:
+    if !response.get("ok", false):
+        return
+    var data: Dictionary = response.get("data", { })
+    var lobbyID: String = data.get("lobby_id", "")
+    if lobbyID.is_empty():
+        return
+    _log("Launch invite detected — joining lobby %s" % lobbyID)
+    _cm.coopUI.on_lobby_join_pressed(lobbyID)
 
 
 ## Starts a Steam Networking Sockets P2P listen socket on the host.

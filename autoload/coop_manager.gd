@@ -33,6 +33,10 @@ var connectedPeers: PackedInt32Array = []
 var remoteNodes: Dictionary[int, Node3D] = { }
 ## Maps multiplayer peer ID -> display name (Steam persona or fallback).
 var peerNames: Dictionary[int, String] = { }
+## Maps multiplayer peer ID -> Steam ID string.
+var peerSteamIDs: Dictionary[int, String] = { }
+## Cached avatar textures keyed by Steam ID string.
+var avatarCache: Dictionary[String, ImageTexture] = { }
 ## Reference to the [code]PlayerState[/code] child node handling position sync.
 var playerState: Node = null
 ## Reference to the [code]WorldState[/code] child node handling world sync.
@@ -207,6 +211,7 @@ func disconnect_session() -> void:
     remoteNodes.clear()
     connectedPeers.clear()
     peerNames.clear()
+    peerSteamIDs.clear()
     multiplayer.multiplayer_peer = null
     localPeerId = 0
     isHost = false
@@ -221,7 +226,8 @@ func on_peer_connected(peerId: int) -> void:
     _log("Peer connected: %d" % peerId)
     connectedPeers.append(peerId)
     spawn_remote_player.call_deferred(peerId)
-    sync_name.rpc_id(peerId, get_local_name())
+    var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
+    sync_name.rpc_id(peerId, get_local_name(), localSteamID)
     # Set generous timeout on the new peer connection
     set_peer_timeout(peerId)
     # Send current world state to the new peer
@@ -236,6 +242,7 @@ func on_peer_disconnected(peerId: int) -> void:
         connectedPeers.remove_at(idx)
     playerState.clear_peer(peerId)
     peerNames.erase(peerId)
+    peerSteamIDs.erase(peerId)
     if peerId in remoteNodes:
         var node: Node3D = remoteNodes[peerId]
         if is_instance_valid(node):
@@ -249,7 +256,8 @@ func on_connected_to_server() -> void:
     peerNames[localPeerId] = get_local_name()
     set_peer_timeout(1) # Server is always peer ID 1
     _log("Connected to server (id: %d)" % localPeerId)
-    sync_name.rpc(get_local_name())
+    var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
+    sync_name.rpc(get_local_name(), localSteamID)
 
 
 func on_connection_failed() -> void:
@@ -306,13 +314,16 @@ func get_peer_name(peerId: int) -> String:
     return peerNames.get(peerId, "Player_%d" % peerId)
 
 
-## RPC: receives a peer's display name. Clamped to 64 chars, control chars stripped.
+## RPC: receives a peer's display name and Steam ID.
 @rpc("any_peer", "call_remote", "reliable")
-func sync_name(peerName: String) -> void:
+func sync_name(peerName: String, steamID: String = "") -> void:
     var senderId: int = multiplayer.get_remote_sender_id()
     var sanitized: String = sanitize_name(peerName)
     peerNames[senderId] = sanitized
-    _log("Peer %d name: %s" % [senderId, sanitized])
+    if !steamID.is_empty():
+        peerSteamIDs[senderId] = steamID
+        fetch_avatar(steamID)
+    _log("Peer %d name: %s (steam: %s)" % [senderId, sanitized, steamID])
 
 
 func sanitize_name(rawName: String) -> String:
@@ -323,6 +334,39 @@ func sanitize_name(rawName: String) -> String:
         if c.unicode_at(0) >= 32:
             clean += c
     return clean if !clean.is_empty() else "Unknown"
+
+
+## Fetches and caches a Steam avatar by Steam ID. Skips if already cached.
+func fetch_avatar(steamID: String) -> void:
+    if steamID.is_empty() || steamID in avatarCache:
+        return
+    if !steamBridge.is_ready():
+        return
+    steamBridge.send_command("get_avatar", { "steam_id": steamID }, on_avatar_received)
+
+
+func on_avatar_received(response: Dictionary) -> void:
+    if !response.get("ok", false):
+        return
+    var data: Dictionary = response.get("data", { })
+    var steamID: String = data.get("steam_id", "")
+    var avatarB64: String = data.get("avatar", "")
+    if steamID.is_empty() || avatarB64.is_empty():
+        return
+    var w: int = data.get("avatar_w", 32)
+    var h: int = data.get("avatar_h", 32)
+    var raw: PackedByteArray = Marshalls.base64_to_raw(avatarB64)
+    var img: Image = Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, raw)
+    avatarCache[steamID] = ImageTexture.create_from_image(img)
+
+
+## Returns the cached avatar texture for a peer, or null.
+func get_peer_avatar(peerId: int) -> ImageTexture:
+    var steamID: String = peerSteamIDs.get(peerId, "")
+    if steamID.is_empty():
+        return null
+    return avatarCache.get(steamID)
+
 
 # ---------- Remote Player Management ----------
 
@@ -460,5 +504,4 @@ func get_local_ip() -> String:
 
 
 func _log(msg: String) -> void:
-    if DEBUG:
-        print("[CoopManager] %s" % msg)
+    print("[CoopManager] %s" % msg)
