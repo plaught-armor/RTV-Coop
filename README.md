@@ -1,4 +1,4 @@
-# Vostok Multiplayer (VMP)
+# Road to Vostok Co-op
 
 A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/2141300/Road_to_Vostok/). Play the hardcore survival FPS with up to 4 friends.
 

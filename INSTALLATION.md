@@ -35,7 +35,7 @@ Road to Vostok Demo/
   RTV.pck
   override.cfg          <- from Metro Mod Loader
   mods/                 <- you create this
-    rtv-coop.vmz        <- VMP mod goes here
+    rtv-coop.vmz        <- co-op mod goes here
 
 # AppData (separate location)
 %APPDATA%\Road to Vostok Demo/
@@ -72,7 +72,7 @@ Your folders should look like:
   RTV.pck
   override.cfg          <- from Metro Mod Loader
   mods/                 <- you create this
-    rtv-coop.vmz        <- VMP mod goes here
+    rtv-coop.vmz        <- co-op mod goes here
 
 # Proton AppData (separate location)
 ~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/
@@ -82,7 +82,7 @@ Your folders should look like:
 
 ---
 
-## Step 2: Install VMP (Vostok Multiplayer)
+## Step 2: Install the Co-op Mod
 
 ### Windows
 
@@ -124,13 +124,13 @@ If the HUD shows `Steam: offline` or `Steam: connecting...`:
 
 ## Updating the Mod
 
-To update VMP, simply replace `rtv-coop.vmz` in the `mods` folder with the new version and relaunch the game.
+To update the mod, simply replace `rtv-coop.vmz` in the `mods` folder with the new version and relaunch the game.
 
 ---
 
 ## Uninstalling
 
-### Remove VMP only
+### Remove the mod only
 Delete `rtv-coop.vmz` from the `mods` folder.
 
 ### Remove Metro Mod Loader entirely
