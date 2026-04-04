@@ -58,7 +58,6 @@ func play_pooled(audioEvent: AudioEvent) -> void:
         player.pitch_scale = 1.0
     player.play()
 
-
 # ---------- Input ----------
 
 
@@ -87,7 +86,6 @@ func _input(event: InputEvent) -> void:
     head.rotate_x(deg_to_rad(ySign * event.relative.y * factor))
     head.rotation.x = clamp(head.rotation.x, deg_to_rad(-90), deg_to_rad(90))
 
-
 # ---------- Movement ----------
 
 
@@ -102,7 +100,6 @@ func Movement(delta: float) -> void:
         Vector3(rotation.y, head.rotation.x, 0.0),
         _cm.PlayerStateScript.encode_flags(_cm.gd),
     )
-
 
 # ---------- Inertia ----------
 
@@ -122,7 +119,6 @@ func Inertia(delta: float) -> void:
             inertia = lerpf(inertia, 1.0, delta * 2.0)
     else:
         inertia = lerpf(inertia, 1.0, delta * 2.0)
-
 
 # ---------- Surface Detection ----------
 
@@ -144,7 +140,6 @@ func SurfaceDetection(delta: float) -> void:
 
     _cm.gd.leanLBlocked = left.is_colliding()
     _cm.gd.leanRBlocked = right.is_colliding()
-
 
 # ---------- Footstep Audio ----------
 

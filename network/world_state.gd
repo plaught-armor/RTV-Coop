@@ -8,9 +8,6 @@ var _cm: Node
 func init_manager(manager: Node) -> void:
     _cm = manager
 
-
-
-
 ## Sync simulation every 240 physics frames (~2s at 120Hz).
 const SIM_SYNC_FRAMES: int = 240
 

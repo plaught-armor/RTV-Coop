@@ -344,7 +344,6 @@ func get_peer_avatar(peerId: int) -> ImageTexture:
         return null
     return avatarCache.get(steamID)
 
-
 # ---------- Remote Player Management ----------
 
 

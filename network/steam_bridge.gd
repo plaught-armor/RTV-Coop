@@ -9,8 +9,6 @@ var _cm: Node
 func init_manager(manager: Node) -> void:
     _cm = manager
 
-
-
 ## TCP port the helper listens on. Fixed at 27099 for Proton (wrapper launches helper).
 ## Randomized per instance in editor for multi-instance testing.
 var HELPER_PORT: int = 27099
@@ -119,7 +117,7 @@ func on_initial_user(response: Dictionary) -> void:
     var data: Dictionary = response.get("data", { })
     localSteamName = data.get("name", "")
     localSteamID = data.get("steam_id", "")
-    ownsGame = true  # Assume ownership — launched through Steam
+    ownsGame = true # Assume ownership — launched through Steam
     _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
     # Cache our own avatar
     if !localSteamID.is_empty():

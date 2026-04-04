@@ -17,6 +17,7 @@ var audioPlayer: AudioStreamPlayer3D = null
 func init_manager(manager: Node) -> void:
     _cm = manager
 
+
 @onready var body: MeshInstance3D = $Body
 @onready var headPivot: Node3D = $HeadPivot
 @onready var headMesh: MeshInstance3D = $HeadPivot/HeadMesh

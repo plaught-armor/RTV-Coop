@@ -8,8 +8,6 @@ var _cm: Node
 func init_manager(manager: Node) -> void:
     _cm = manager
 
-
-
 ## Bitfield values for encoding player movement state into a single [code]int[/code].
 enum MoveFlag {
     MOVING = 1,
