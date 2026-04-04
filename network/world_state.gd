@@ -11,18 +11,16 @@ func init_manager(manager: Node) -> void:
 
 
 
-const SIM_SYNC_INTERVAL: float = 2.0
-var simSyncTimer: float = 0.0
+## Sync simulation every 240 physics frames (~2s at 120Hz).
+const SIM_SYNC_FRAMES: int = 240
 
 
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
     if !_cm.isActive || !_cm.isHost:
         return
 
-    simSyncTimer += delta
-    if simSyncTimer < SIM_SYNC_INTERVAL:
+    if Engine.get_physics_frames() % SIM_SYNC_FRAMES != 0:
         return
-    simSyncTimer = 0.0
 
     sync_simulation.rpc(Simulation.time, Simulation.day, Simulation.weather)
 

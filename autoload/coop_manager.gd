@@ -45,8 +45,8 @@ var SlotSerializerScript: Script = preload("res://mod/network/slot_serializer.gd
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
-var sceneCheckTimer: float = 0.0
-const SCENE_CHECK_INTERVAL: float = 0.5
+## Check scene every 60 physics frames (~0.5s at 120Hz).
+const SCENE_CHECK_FRAMES: int = 60
 
 
 func _ready() -> void:
@@ -97,11 +97,9 @@ func _ready() -> void:
     _log("Initialized (debug: %s)" % str(DEBUG))
 
 
-func _physics_process(delta: float) -> void:
-    sceneCheckTimer += delta
-    if sceneCheckTimer < SCENE_CHECK_INTERVAL:
+func _physics_process(_delta: float) -> void:
+    if Engine.get_physics_frames() % SCENE_CHECK_FRAMES != 0:
         return
-    sceneCheckTimer = 0.0
 
     if !is_instance_valid(get_tree().current_scene):
         return

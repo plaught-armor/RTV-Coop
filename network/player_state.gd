@@ -47,7 +47,6 @@ const INTERP_DELAY: float = 0.1
 ## Maximum buffered snapshots per peer before oldest is discarded.
 const MAX_BUFFER_SIZE: int = 20
 
-var sendTickCounter: int = 0
 var sequenceNumber: int = 0
 ## Per-peer interpolation buffers. Maps peer_id -> [PeerBuffer].
 var peerBuffers: Dictionary[int, PeerBuffer] = { }
@@ -60,10 +59,8 @@ func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
     if !_cm.is_session_active():
         return
 
-    sendTickCounter += 1
-    if sendTickCounter < SEND_EVERY_N_TICKS:
+    if Engine.get_physics_frames() % SEND_EVERY_N_TICKS != 0:
         return
-    sendTickCounter = 0
     sequenceNumber += 1
 
     receive_position.rpc(sequenceNumber, position, rot, flags)
