@@ -171,6 +171,4 @@ The Proton prefix (`~/.local/share/Steam/steamapps/compatdata/2141300/`) is crea
 
 Press **INS** to close the multiplayer panel. The panel captures the mouse when open.
 
-### "Hash mismatch" warnings in the log
 
-The game was updated and patched scripts changed. The mod still applies patches but they may cause issues. Check for a mod update.

@@ -11,7 +11,7 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 - **Remote player audio** -- footsteps, jumps, and landings play spatially
 - **Host-authoritative pickups** -- prevents item duplication
 - **Zero game file modifications** -- installs as a `.vmz` mod archive
-- **Version safety** -- MD5 hash check on patched scripts; warns if game has updated
+- **Non-destructive** -- patches game scripts at runtime, no game files modified
 - **Ping overlay** -- always-visible HUD showing connected players, avatars, and round-trip times
 
 ---
@@ -141,10 +141,6 @@ Look for `[SteamBridge]` and `[CoopManager]` lines to diagnose issues.
 
 Press **INS** to close the multiplayer panel. The panel captures the mouse when open.
 
-### "Hash mismatch" warnings in console
-
-The game was updated and a patched script changed. The patch still applies but may cause issues. Check for a mod update that matches the new game version.
-
 ### Can't see other player
 
 Both players must be on the same map. Remote players appear as translucent green capsules. If you transitioned to a different map, the other player needs to transition too (transitions are synced when hosted).
@@ -163,7 +159,7 @@ The mod is packaged as a `.vmz` archive (ZIP) loaded by the Metro Mod Loader at 
 
 ### Script Patching
 
-Game scripts are patched using Godot's `take_over_path()`. Each patch extends the original script and overrides specific methods to add networking hooks. Original behavior is preserved via `super.Method()` calls. All patches verify MD5 hashes at startup and log a warning if the game has been updated.
+Game scripts are patched using Godot's `take_over_path()`. Each patch extends the original script and overrides specific methods to add networking hooks. Original behavior is preserved via `super.Method()` calls.
 
 | Script | What's Patched |
 |--------|----------------|
@@ -287,7 +283,7 @@ This mod patches game scripts via `take_over_path()`. Any other mod patching the
 
 ### Game Updates
 
-The mod checks script hashes at startup. If the game updates and scripts change, patches still apply but may cause issues. Check the console for `WARNING: hash mismatch` and look for a mod update.
+When Road to Vostok updates, patched scripts may change and cause issues. Check for a mod update after game updates.
 
 ---
 
