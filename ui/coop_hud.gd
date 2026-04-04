@@ -12,6 +12,8 @@ func init_manager(manager: Node) -> void:
 
 var pingTimer: float = 0.0
 var hudVisible: bool = true
+var inGameplay: bool = false
+var lastScenePath: String = ""
 const PING_INTERVAL: float = 1.0
 var peerPings: Dictionary[int, int] = { }
 var labelPool: Array[HBoxContainer] = []
@@ -48,7 +50,18 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-    if _cm == null || !hudVisible || !is_in_gameplay():
+    if _cm == null || !hudVisible:
+        if visible:
+            visible = false
+        return
+
+    # Cache is_in_gameplay on scene change instead of calling get_node_or_null every frame
+    var scenePath: String = get_tree().current_scene.scene_file_path if is_instance_valid(get_tree().current_scene) else ""
+    if scenePath != lastScenePath:
+        lastScenePath = scenePath
+        inGameplay = is_instance_valid(get_tree().current_scene) && get_tree().current_scene.get_node_or_null("Core/Controller") != null
+
+    if !inGameplay:
         if visible:
             visible = false
         return
@@ -72,17 +85,20 @@ func _process(delta: float) -> void:
 
 ## Updates the keybind hints based on connection and Steam state.
 func update_hints() -> void:
+    var hint: String
     if _cm.isActive:
-        hintsLabel.text = "INS Multiplayer"
+        hint = "INS Multiplayer"
     elif !_cm.DEBUG && !_cm.steamBridge.is_ready():
         if _cm.steamBridge.connected:
-            hintsLabel.text = "Steam: verifying..."
+            hint = "Steam: verifying..."
         elif _cm.steamBridge.connecting:
-            hintsLabel.text = "Steam: connecting..."
+            hint = "Steam: connecting..."
         else:
-            hintsLabel.text = "Steam: offline"
+            hint = "Steam: offline"
     else:
-        hintsLabel.text = "INS Multiplayer"
+        hint = "INS Multiplayer"
+    if hintsLabel.text != hint:
+        hintsLabel.text = hint
 
 
 func update_pings() -> void:
@@ -171,6 +187,3 @@ func hide_all_player_labels() -> void:
         row.hide()
 
 
-func is_in_gameplay() -> bool:
-    var scene: Node = get_tree().current_scene
-    return is_instance_valid(scene) && scene.get_node_or_null("Core/Controller") != null

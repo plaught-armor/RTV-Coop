@@ -480,4 +480,5 @@ func get_local_ip() -> String:
 
 
 func _log(msg: String) -> void:
-    print("[CoopManager] %s" % msg)
+    if DEBUG:
+        print("[CoopManager] %s" % msg)

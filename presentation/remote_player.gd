@@ -44,14 +44,11 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-    global_position = global_position.lerp(targetPosition, delta * smoothSpeed)
-
-    rotation.y = lerp_angle(rotation.y, targetRotationY, delta * smoothSpeed)
-    headPivot.rotation.x = lerp_angle(
-        headPivot.rotation.x,
-        targetRotationX,
-        delta * smoothSpeed,
-    )
+    # Position and rotation are already interpolated by PlayerState's buffer.
+    # Apply directly to avoid double-smoothing latency.
+    global_position = targetPosition
+    rotation.y = targetRotationY
+    headPivot.rotation.x = targetRotationX
 
     if moveFlags & _cm.PlayerStateScript.MoveFlag.CROUCHING:
         body.scale.y = lerpf(body.scale.y, 0.6, delta * 5.0)
@@ -72,7 +69,7 @@ func update_state(pos: Vector3, rot: Vector3, flags: int) -> void:
 
 ## Plays a spatial audio event at this remote player's position.
 func play_remote_audio(audioPath: String) -> void:
-    if audioPlayer == null:
+    if !is_instance_valid(audioPlayer):
         return
     if !audioPath.begins_with("res://Resources/") && !audioPath.begins_with("res://Audio/"):
         return

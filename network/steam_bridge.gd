@@ -356,4 +356,5 @@ func get_steam_lib_user_path() -> String:
 
 
 func _log(msg: String) -> void:
-    print("[SteamBridge] %s" % msg)
+    if _cm == null || _cm.DEBUG:
+        print("[SteamBridge] %s" % msg)
