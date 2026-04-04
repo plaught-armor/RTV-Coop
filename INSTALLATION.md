@@ -14,61 +14,70 @@ The mod requires the [Metro Mod Loader](https://modworkshop.net/mod/48937) to lo
 ### Windows
 
 1. Download Metro Mod Loader from [modworkshop.net](https://modworkshop.net/mod/48937)
-2. Open your game's `AppData` folder:
-   - Press `Win+R`, type `%APPDATA%\Road to Vostok Demo`, press Enter
-   - Or navigate manually to `C:\Users\<YourName>\AppData\Roaming\Road to Vostok Demo\`
-3. Copy the Metro Mod Loader files into this folder:
-   - `override.cfg`
-   - `modloader.gd`
-4. Create a `mods` folder inside the same directory if it doesn't exist:
+2. Copy `override.cfg` into the **game install directory**:
    ```
-   C:\Users\<YourName>\AppData\Roaming\Road to Vostok Demo\mods\
+   C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok Demo\
+   ```
+   > Your Steam library path may differ. Right-click the game in Steam > Manage > Browse Local Files.
+3. Copy `modloader.gd` into the **AppData** folder:
+   - Press `Win+R`, type `%APPDATA%\Road to Vostok Demo`, press Enter
+   - Or navigate to `C:\Users\<YourName>\AppData\Roaming\Road to Vostok Demo\`
+4. Create a `mods` folder in the **game install directory** if it doesn't exist:
+   ```
+   C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok Demo\mods\
    ```
 
-Your folder should look like:
+Your folders should look like:
 ```
+# Game install directory
 Road to Vostok Demo/
+  RTV.exe
+  RTV.pck
   override.cfg          <- from Metro Mod Loader
-  modloader.gd          <- from Metro Mod Loader
   mods/                 <- you create this
+    rtv-coop.vmz        <- VMP mod goes here
+
+# AppData (separate location)
+%APPDATA%\Road to Vostok Demo/
+  modloader.gd          <- from Metro Mod Loader
+  logs/                 <- created by the game
 ```
 
 ### Linux (Proton)
 
-Road to Vostok runs under Proton on Linux. Proton creates a virtual Windows filesystem where `AppData/Roaming` is mapped to a folder inside the Proton prefix. The Metro Mod Loader installs the same way — you just need to find the right path.
+Road to Vostok runs under Proton on Linux. The file layout mirrors Windows — `override.cfg` goes in the game directory, `modloader.gd` goes in the Proton AppData equivalent.
+
+> **First time?** Launch the game once through Steam and close it. This creates the Proton prefix and AppData folders.
 
 1. Download Metro Mod Loader from [modworkshop.net](https://modworkshop.net/mod/48937)
-2. Find the game's app ID folder in your Proton compatibility data:
+2. Copy `override.cfg` into the **game install directory**:
    ```
-   ~/.local/share/Steam/steamapps/compatdata/
+   ~/.local/share/Steam/steamapps/common/Road to Vostok Demo/
    ```
-   Road to Vostok Demo's app ID is **2141300**, so the folder is:
-   ```
-   ~/.local/share/Steam/steamapps/compatdata/2141300/
-   ```
-3. Navigate to the `AppData/Roaming` equivalent:
+3. Copy `modloader.gd` into the **Proton AppData** folder:
    ```
    ~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/
    ```
-   > **Note:** This folder is created by Proton the first time you launch the game. If it doesn't exist, launch the game once through Steam and close it.
-
-4. Copy the Metro Mod Loader files into this folder:
-   - `override.cfg`
-   - `modloader.gd`
-5. Create a `mods` folder inside the same directory:
+   > The app ID for Road to Vostok Demo is **2141300**. You can find your compatdata folder at `~/.local/share/Steam/steamapps/compatdata/`.
+4. Create a `mods` folder in the **game install directory**:
    ```bash
-   mkdir -p ~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road\ to\ Vostok\ Demo/mods
+   mkdir -p ~/.local/share/Steam/steamapps/common/Road\ to\ Vostok\ Demo/mods
    ```
 
-Your folder should look like:
+Your folders should look like:
 ```
-Road to Vostok Demo/
-  override.cfg
-  modloader.gd
-  mods/
+# Game install directory
+~/.local/share/Steam/steamapps/common/Road to Vostok Demo/
+  RTV.exe
+  RTV.pck
+  override.cfg          <- from Metro Mod Loader
+  mods/                 <- you create this
+    rtv-coop.vmz        <- VMP mod goes here
+
+# Proton AppData (separate location)
+~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/
+  modloader.gd          <- from Metro Mod Loader
   logs/                 <- created by the game
-  Preferences.tres      <- created by the game
-  ...
 ```
 
 ---
@@ -78,22 +87,22 @@ Road to Vostok Demo/
 ### Windows
 
 1. Download `rtv-coop.vmz` from the [Releases](https://github.com/plaught-armor/mod/releases) page
-2. Place it in the `mods` folder you created in Step 1:
+2. Place it in the `mods` folder in the **game install directory**:
    ```
-   %APPDATA%\Road to Vostok Demo\mods\rtv-coop.vmz
+   C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok Demo\mods\rtv-coop.vmz
    ```
 3. Launch the game through Steam
-4. You should see **INS Multiplayer** in the top-right corner of the screen
+4. You should see **INS Multiplayer** in the top-right corner
 
 ### Linux (Proton)
 
 1. Download `rtv-coop.vmz` from Releases
-2. Place it in the `mods` folder you created in Step 1:
+2. Place it in the `mods` folder in the **game install directory**:
    ```
-   ~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/mods/rtv-coop.vmz
+   ~/.local/share/Steam/steamapps/common/Road to Vostok Demo/mods/rtv-coop.vmz
    ```
 3. Launch the game through Steam
-4. You should see **INS Multiplayer** in the top-right corner of the screen
+4. You should see **INS Multiplayer** in the top-right corner
 
 ---
 
@@ -125,7 +134,7 @@ To update VMP, simply replace `rtv-coop.vmz` in the `mods` folder with the new v
 Delete `rtv-coop.vmz` from the `mods` folder.
 
 ### Remove Metro Mod Loader entirely
-Delete `override.cfg` and `modloader.gd` from the game's `AppData/Roaming` folder.
+Delete `override.cfg` from the game install directory and `modloader.gd` from the AppData folder.
 
 ---
 
@@ -167,7 +176,7 @@ The Proton prefix (`~/.local/share/Steam/steamapps/compatdata/2141300/`) is crea
 
 ### Game won't start after installing the mod
 
-- Verify `override.cfg` and `modloader.gd` are in the correct folder (AppData/Roaming, NOT the game install directory)
+- Verify `override.cfg` is in the game install directory (next to `RTV.exe`) and `modloader.gd` is in the AppData folder
 - Make sure `rtv-coop.vmz` is in the `mods` subfolder, not the root
 - Try removing the mod (`rtv-coop.vmz`) to confirm the game starts without it
 
