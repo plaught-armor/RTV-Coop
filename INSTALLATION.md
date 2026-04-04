@@ -145,7 +145,11 @@ The Steam helper also writes its own log:
 | **Windows** | The game's install directory (next to `RTV.exe`): `steam_helper.log` |
 | **Linux (Proton)** | `~/.local/share/Steam/steamapps/common/Road to Vostok Demo/steam_helper.log` |
 
-Look for `[SteamBridge]` and `[CoopManager]` lines in the Godot log, and `[steam_helper]` lines in the helper log.
+**What's in each log:**
+- **Godot log** (`godot.log`) -- mod loading, script patching, connection events, RPC activity. Lines prefixed with `[CoopManager]` and `[SteamBridge]`.
+- **Helper log** (`steam_helper.log`) -- Steam API init, lobby creation, friend list, P2P tunnel, RunCallbacks status. Lines prefixed with `[steam_helper]`.
+
+> **Reporting bugs:** When reporting an issue, include **both** log files. The Godot log shows what the game is doing, the helper log shows what Steam is doing. Without both, it's hard to diagnose.
 
 ### "Steam: offline"
 

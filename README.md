@@ -131,11 +131,22 @@ The Steam helper binary couldn't connect. Common causes:
 
 ### Where are the logs?
 
-- **Windows:** `%APPDATA%\Road to Vostok Demo\logs\godot.log`
-- **Linux (Proton):** `~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/logs/godot.log`
-- **Linux (Native):** `~/.local/share/godot/app_userdata/Road to Vostok/logs/godot.log`
+There are two log files. **Both are needed when reporting bugs.**
 
-Look for `[SteamBridge]` and `[CoopManager]` lines to diagnose issues.
+**Godot log** (game events, mod loading, connections):
+
+| Platform | Path |
+|----------|------|
+| Windows | `%APPDATA%\Road to Vostok Demo\logs\godot.log` |
+| Linux (Proton) | `~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/logs/godot.log` |
+| Linux (Native) | `~/.local/share/godot/app_userdata/Road to Vostok/logs/godot.log` |
+
+**Steam helper log** (Steam API, lobbies, P2P tunnel):
+
+| Platform | Path |
+|----------|------|
+| Windows | Game install directory: `steam_helper.log` (next to `RTV.exe`) |
+| Linux (Proton) | `~/.local/share/Steam/steamapps/common/Road to Vostok Demo/steam_helper.log` |
 
 ### Mouse stuck / can't look around
 
