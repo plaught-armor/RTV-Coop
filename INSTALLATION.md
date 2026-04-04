@@ -9,11 +9,11 @@
 
 ## Step 1: Install Metro Mod Loader
 
-The mod requires the [Metro Mod Loader](https://modworkshop.net/mod/48937) to load `.vmz` mod archives.
+The mod requires the [Metro Mod Loader](https://modworkshop.net/mod/55623) to load `.vmz` mod archives.
 
 ### Windows
 
-1. Download Metro Mod Loader from [modworkshop.net](https://modworkshop.net/mod/48937)
+1. Download Metro Mod Loader from [modworkshop.net](https://modworkshop.net/mod/55623)
 2. Copy `override.cfg` into the **game install directory**:
    ```
    C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok Demo\
@@ -49,7 +49,7 @@ Road to Vostok runs under Proton on Linux. The file layout mirrors Windows — `
 
 > **First time?** Launch the game once through Steam and close it. This creates the Proton prefix and AppData folders.
 
-1. Download Metro Mod Loader from [modworkshop.net](https://modworkshop.net/mod/48937)
+1. Download Metro Mod Loader from [modworkshop.net](https://modworkshop.net/mod/55623)
 2. Copy `override.cfg` into the **game install directory**:
    ```
    ~/.local/share/Steam/steamapps/common/Road to Vostok Demo/

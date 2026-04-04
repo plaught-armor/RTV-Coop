@@ -21,7 +21,7 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 ### Quick Start
 
-1. Install the [Metro Mod Loader](https://modworkshop.net/mod/48937)
+1. Install the [Metro Mod Loader](https://modworkshop.net/mod/55623)
 2. Download `rtv-coop.vmz` from [Releases](https://github.com/plaught-armor/mod/releases)
 3. Place it in the `mods/` folder (see [INSTALLATION.md](INSTALLATION.md) for your platform's path)
 4. Launch the game through Steam
@@ -164,7 +164,7 @@ Steamworks SDK 1.64 redistributable binaries (`libsteam_api.so`, `steam_api64.dl
 ## Credits
 
 - **Game**: [Road to Vostok](https://roadtovostok.com/) by Antti Vare
-- **Mod Loader**: [Metro Mod Loader](https://modworkshop.net/mod/48937)
+- **Mod Loader**: [Metro Mod Loader](https://modworkshop.net/mod/55623)
 - **Steam Bindings**: [go-steamworks](https://github.com/badhex/go-steamworks) by badhex
 - **VostokMods**: [Ryhon0](https://github.com/Ryhon0/VostokMods)
 
