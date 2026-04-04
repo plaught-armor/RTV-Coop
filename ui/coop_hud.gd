@@ -85,20 +85,17 @@ func _process(delta: float) -> void:
 
 ## Updates the keybind hints based on connection and Steam state.
 func update_hints() -> void:
-    var hint: String
     if _cm.isActive:
-        hint = "INS Multiplayer"
+        hintsLabel.text = "[Ins] Multiplayer"
     elif !_cm.DEBUG && !_cm.steamBridge.is_ready():
         if _cm.steamBridge.connected:
-            hint = "Steam: verifying..."
+            hintsLabel.text = "Steam: verifying..."
         elif _cm.steamBridge.connecting:
-            hint = "Steam: connecting..."
+            hintsLabel.text = "Steam: connecting..."
         else:
-            hint = "Steam: offline"
+            hintsLabel.text = "Steam: offline"
     else:
-        hint = "INS Multiplayer"
-    if hintsLabel.text != hint:
-        hintsLabel.text = hint
+        hintsLabel.text = "[Ins] Multiplayer"
 
 
 func update_pings() -> void:

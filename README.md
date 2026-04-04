@@ -25,7 +25,7 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 2. Download `rtv-coop.vmz` from [Releases](https://github.com/plaught-armor/mod/releases)
 3. Place it in the `mods/` folder (see [INSTALLATION.md](INSTALLATION.md) for your platform's path)
 4. Launch the game through Steam
-5. You should see **INS Multiplayer** in the top-right corner
+5. You should see **[Ins] Multiplayer** in the top-right corner
 
 ---
 

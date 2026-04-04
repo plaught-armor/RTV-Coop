@@ -92,7 +92,7 @@ Your folders should look like:
    C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok Demo\mods\rtv-coop.vmz
    ```
 3. Launch the game through Steam
-4. You should see **INS Multiplayer** in the top-right corner
+4. You should see **[Ins] Multiplayer** in the top-right corner
 
 ### Linux (Proton)
 
@@ -102,7 +102,7 @@ Your folders should look like:
    ~/.local/share/Steam/steamapps/common/Road to Vostok Demo/mods/rtv-coop.vmz
    ```
 3. Launch the game through Steam
-4. You should see **INS Multiplayer** in the top-right corner
+4. You should see **[Ins] Multiplayer** in the top-right corner
 
 ---
 
@@ -110,7 +110,7 @@ Your folders should look like:
 
 Once in-game and loaded into a map:
 
-1. **Top-right corner** shows `INS Multiplayer` -- Steam is connected
+1. **Top-right corner** shows `[Ins] Multiplayer` -- Steam is connected
 2. Press **INS** (Insert key) to open the multiplayer panel
 3. You should see **Host**, **Refresh**, and **Invite** buttons
 4. Your Steam profile picture should appear in the player list when hosting
