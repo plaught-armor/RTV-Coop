@@ -420,11 +420,9 @@ func getFriends(_ Command) Response {
 			"name":     name,
 			"state":    int(state),
 		}
-		if !isProton() {
-			gameInfo, inGame := friends.GetFriendGamePlayed(id)
-			if inGame {
-				entry["game_id"] = fmt.Sprintf("%d", gameInfo.GameID)
-			}
+		gameInfo, inGame := friends.GetFriendGamePlayed(id)
+		if inGame {
+			entry["game_id"] = fmt.Sprintf("%d", gameInfo.GameID)
 		}
 		// Avatar
 		avatarHandle := friends.GetSmallFriendAvatar(id)

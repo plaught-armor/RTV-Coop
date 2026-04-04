@@ -367,20 +367,34 @@ func on_friends_received(response: Dictionary) -> void:
         var btn: Button = row.get_child(2)
         var friendName: String = friend.get("name", "Unknown")
         var state: int = friend.get("state", 0)
+        var gameID: String = friend.get("game_id", "")
+        var inGame: bool = !gameID.is_empty()
+
         var stateText: String = ""
-        match state:
-            1:
-                stateText = ""
-            2:
-                stateText = " (Busy)"
-            3:
-                stateText = " (Away)"
-            4:
-                stateText = " (Snooze)"
-            _:
-                stateText = " (Online)"
+        var nameColor: Color
+        if inGame:
+            stateText = " (In-Game)"
+            nameColor = Color("#90ba3c")
+        else:
+            match state:
+                1:
+                    stateText = ""
+                    nameColor = Color("#57cbde")
+                2:
+                    stateText = " (Busy)"
+                    nameColor = Color("#57cbde", 0.5)
+                3:
+                    stateText = " (Away)"
+                    nameColor = Color("#57cbde", 0.5)
+                4:
+                    stateText = " (Snooze)"
+                    nameColor = Color("#57cbde", 0.4)
+                _:
+                    stateText = ""
+                    nameColor = Color("#57cbde")
 
         nameLabel.text = "%s%s" % [friendName, stateText]
+        nameLabel.add_theme_color_override("font_color", nameColor)
 
         # Decode avatar if available
         var avatarData: String = friend.get("avatar", "")
