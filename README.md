@@ -186,6 +186,9 @@ A Go binary (`steam_helper`) runs alongside the game, communicating via localhos
 - Lobby creation, discovery, and joining
 - Friend list with online status and 32x32 avatars
 - Game invites via Steam's `InviteUserToLobby`
+- P2P NAT traversal via Steam Networking Sockets
+
+All Steam API calls run on a single OS-locked goroutine (`runtime.LockOSThread`) as required by the Steamworks SDK. Commands from the game are dispatched via a channel. This architecture is critical for Proton/Wine compatibility — multi-threaded Steam API access causes segfaults under Wine.
 
 The binary is bundled inside the `.vmz` and extracted to the user data directory on first launch. Platform-specific versions are included (`.exe` for Windows/Proton, native binary for Linux).
 
@@ -292,7 +295,7 @@ The mod checks script hashes at startup. If the game updates and scripts change,
 - **No combat sync** -- weapons, hits, and damage are local only
 - **No AI awareness** -- enemies only detect the host player
 - **Ghost capsule model** -- remote players shown as translucent capsules (full model planned)
-- **Steam P2P tunnel** -- NAT traversal via Steam Networking Sockets is available; players connect through Steam's relay network without port forwarding
+
 
 ---
 
