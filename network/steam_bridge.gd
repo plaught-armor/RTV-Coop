@@ -157,6 +157,12 @@ func read_responses() -> void:
             continue
 
         var cmd: String = response.get("cmd", "")
+
+        # Handle push events from the helper (no pending callback)
+        if cmd == "invite_received":
+            on_invite_received(response)
+            continue
+
         if cmd in pendingCallbacks:
             var cb: Callable = pendingCallbacks[cmd]
             pendingCallbacks.erase(cmd)
@@ -241,6 +247,19 @@ func open_invite_dialog(callback: Callable) -> void:
 
 func check_launch_invite(callback: Callable) -> void:
     send_command("check_launch_invite", { }, callback)
+
+
+func on_invite_received(response: Dictionary) -> void:
+    if !response.get("ok", false):
+        return
+    var data: Dictionary = response.get("data", { })
+    var lobbyID: String = data.get("lobby_id", "")
+    if lobbyID.is_empty():
+        return
+    if _cm.is_session_active():
+        return
+    _log("Steam invite received — joining lobby %s" % lobbyID)
+    _cm.coopUI.on_lobby_join_pressed(lobbyID)
 
 
 func on_launch_invite_checked(response: Dictionary) -> void:

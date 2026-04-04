@@ -90,10 +90,9 @@ func _ready() -> void:
     multiplayer.connection_failed.connect(on_connection_failed)
     multiplayer.server_disconnected.connect(on_server_disconnected)
 
-    # Always launch Steam helper
-    steamBridge.launch()
-
     inject_manager.call_deferred()
+    # Defer Steam helper launch until after ModLoader finishes
+    steamBridge.launch.call_deferred()
     _log("Initialized (debug: %s)" % str(DEBUG))
 
 

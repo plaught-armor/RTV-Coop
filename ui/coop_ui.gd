@@ -116,6 +116,7 @@ func build_ui() -> void:
 
     friendScroll = ScrollContainer.new()
     friendScroll.custom_minimum_size = Vector2(0, 200)
+    friendScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
     friendScroll.hide()
     vbox.add_child(friendScroll)
 

@@ -28,14 +28,14 @@ func (pt *peerTunnel) closeTunnel() {
 	pt.closeOnce.Do(func() { close(pt.done) })
 }
 
-// Connection state constants from Steamworks SDK.
+// Aliases for readability.
 const (
-	stateNone                   = 0
-	stateConnecting             = 1
-	stateFindingRoute           = 2
-	stateConnected              = 3
-	stateClosedByPeer           = 4
-	stateProblemDetectedLocally = 5
+	stateNone                   = int32(sw.ESteamNetworkingConnectionState_None)
+	stateConnecting             = int32(sw.ESteamNetworkingConnectionState_Connecting)
+	stateFindingRoute           = int32(sw.ESteamNetworkingConnectionState_FindingRoute)
+	stateConnected              = int32(sw.ESteamNetworkingConnectionState_Connected)
+	stateClosedByPeer           = int32(sw.ESteamNetworkingConnectionState_ClosedByPeer)
+	stateProblemDetectedLocally = int32(sw.ESteamNetworkingConnectionState_ProblemDetectedLocally)
 )
 
 var (
@@ -53,13 +53,6 @@ var (
 	socketsPtr          uintptr
 )
 
-// SteamNetConnectionInfo_t is ~696 bytes in SDK 1.64.
-// State is at offset 8 (after m_hListenSocket which is uint32 + padding).
-type connectionInfo [696]byte
-
-func (ci *connectionInfo) state() int32 {
-	return *(*int32)(unsafe.Pointer(&ci[8]))
-}
 
 func init() {
 	hostTunnels = make(map[sw.HSteamNetConnection]*peerTunnel)
@@ -91,15 +84,83 @@ func getConnectionState(conn sw.HSteamNetConnection) int32 {
 	if fnGetConnectionInfo == 0 || socketsPtr == 0 {
 		return stateNone
 	}
-	var info connectionInfo
+	var info sw.SteamNetConnectionInfo_t
 	ret := sw.CallSymbolPtr(fnGetConnectionInfo, socketsPtr, uintptr(conn), uintptr(unsafe.Pointer(&info)))
 	if ret != 0 {
-		return info.state()
+		return int32(info.State)
 	}
 	return stateNone
 }
 
 // --- Commands (called on the Steam thread) ---
+
+// handleConnectionStatusChange is called from the callback handler on the Steam thread.
+func handleConnectionStatusChange(conn sw.HSteamNetConnection, newState int32, oldState int32) {
+	if !tunnelActive.Load() {
+		return
+	}
+
+	ns := sw.SteamNetworkingSockets()
+
+	switch newState {
+	case stateConnecting:
+		// Host: incoming peer wants to connect
+		if listenSocket != 0 {
+			result := ns.AcceptConnection(conn)
+			if result != sw.EResultOK {
+				log.Printf("AcceptConnection failed: %d", result)
+				ns.CloseConnection(conn, 0, "", false)
+				return
+			}
+			ns.SetConnectionPollGroup(conn, pollGroup)
+			knownConns[conn] = true
+			log.Printf("Accepted P2P connection %d", conn)
+
+			tunnelMu.Lock()
+			if _, exists := hostTunnels[conn]; !exists {
+				udpConn, err := listenUDPCompat()
+				if err != nil {
+					log.Printf("Failed to create UDP for peer %d: %v", conn, err)
+					tunnelMu.Unlock()
+					return
+				}
+				pt := &peerTunnel{
+					steamConn: conn,
+					udpConn:   udpConn,
+					done:      make(chan struct{}),
+				}
+				hostTunnels[conn] = pt
+				go hostUDPToSteamRelay(pt)
+				log.Printf("Host tunnel created for connection %d", conn)
+			}
+			tunnelMu.Unlock()
+		}
+
+	case stateConnected:
+		log.Printf("P2P connection %d fully connected", conn)
+
+	case stateClosedByPeer, stateProblemDetectedLocally:
+		ns.CloseConnection(conn, 0, "", false)
+		// Clean up host tunnel
+		tunnelMu.Lock()
+		if pt, exists := hostTunnels[conn]; exists {
+			pt.closeTunnel()
+			pt.udpConn.Close()
+			delete(hostTunnels, conn)
+			log.Printf("Host tunnel closed for connection %d", conn)
+		}
+		tunnelMu.Unlock()
+		delete(knownConns, conn)
+		// Clean up client tunnel
+		if clientTunnel != nil && clientTunnel.steamConn == conn {
+			clientTunnel.closeTunnel()
+			clientTunnel.udpConn.Close()
+			clientTunnel = nil
+			tunnelActive.Store(false)
+			log.Println("Client P2P connection lost")
+		}
+	}
+}
 
 func cmdStartP2PHost(cmd Command) Response {
 	var p struct {
@@ -155,11 +216,7 @@ func cmdStartP2PClient(cmd Command) Response {
 		return fail("start_p2p_client", "ConnectP2P failed")
 	}
 
-	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-	if err != nil {
-		return fail("start_p2p_client", fmt.Sprintf("resolve: %v", err))
-	}
-	udpConn, err := net.ListenUDP("udp", udpAddr)
+	udpConn, err := listenUDPCompat()
 	if err != nil {
 		return fail("start_p2p_client", fmt.Sprintf("listen: %v", err))
 	}
@@ -235,7 +292,7 @@ func tickHost(ns sw.ISteamNetworkingSockets) {
 
 			tunnelMu.Lock()
 			if _, exists := hostTunnels[conn]; !exists {
-				udpConn, err := net.DialUDP("udp", nil, enetServerAddr)
+				udpConn, err := listenUDPCompat()
 				if err != nil {
 					log.Printf("Failed to create UDP for peer %d: %v", conn, err)
 					tunnelMu.Unlock()
@@ -261,7 +318,7 @@ func tickHost(ns sw.ISteamNetworkingSockets) {
 		if data != nil {
 			tunnelMu.RLock()
 			if pt, exists := hostTunnels[conn]; exists {
-				pt.udpConn.Write(data)
+				pt.udpConn.WriteToUDP(data, enetServerAddr)
 			}
 			tunnelMu.RUnlock()
 		}

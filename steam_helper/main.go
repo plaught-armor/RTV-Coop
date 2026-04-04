@@ -68,6 +68,8 @@ var (
 	currentLobby sw.CSteamID
 	done         chan struct{}
 	steamCh      chan steamJob // All Steam API calls go through this channel
+	activeConnMu sync.Mutex
+	activeConn   net.Conn // Current TCP client connection for push events
 )
 
 func main() {
@@ -151,6 +153,7 @@ func steamThread(ready *sync.WaitGroup) {
 	log.Printf("Logged in as: %s (Steam64: %d)", name, uint64(steamID))
 
 	initNetworkingSymbols()
+	initManualDispatch()
 
 	ready.Done()
 
@@ -172,13 +175,13 @@ func steamThread(ready *sync.WaitGroup) {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("PANIC in RunCallbacks (tick %d): %v", mainTickCount, r)
+						log.Printf("PANIC in callbacks (tick %d): %v", mainTickCount, r)
 					}
 				}()
-				sw.RunCallbacks()
+				pumpManualCallbacks()
 			}()
 			if mainTickCount <= 3 {
-				log.Printf("RunCallbacks OK (tick %d, tunnel=%v)", mainTickCount, tunnelActive.Load())
+				log.Printf("Callbacks OK (tick %d, tunnel=%v)", mainTickCount, tunnelActive.Load())
 			}
 			drainSendQueue()
 			tickTunnel()
@@ -224,7 +227,19 @@ func runOnSteamThreadAsync(fn func() Response) Response {
 }
 
 func handleConn(conn net.Conn) {
-	defer conn.Close()
+	activeConnMu.Lock()
+	activeConn = conn
+	activeConnMu.Unlock()
+
+	defer func() {
+		activeConnMu.Lock()
+		if activeConn == conn {
+			activeConn = nil
+		}
+		activeConnMu.Unlock()
+		conn.Close()
+	}()
+
 	scanner := bufio.NewScanner(conn)
 	enc := json.NewEncoder(conn)
 
@@ -282,6 +297,22 @@ func dispatch(cmd Command) (resp Response) {
 
 func ok(cmd string, data any) Response  { return Response{OK: true, Cmd: cmd, Data: data} }
 func fail(cmd, err string) Response     { return Response{OK: false, Cmd: cmd, Error: err} }
+
+// pushEvent sends an unsolicited event to the connected client.
+func pushEvent(resp Response) {
+	activeConnMu.Lock()
+	conn := activeConn
+	activeConnMu.Unlock()
+	if conn == nil {
+		return
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	conn.Write(data)
+}
 
 // --- Commands (ALL called on the Steam thread, no locking needed) ---
 
@@ -522,10 +553,10 @@ func pumpUntilCompleteLogged[T any](cr *sw.CallResult[T], timeout time.Duration)
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("PANIC in pumpUntilComplete RunCallbacks (pump %d): %v", pumpCount, r)
+						log.Printf("PANIC in pumpUntilComplete (pump %d): %v", pumpCount, r)
 					}
 				}()
-				sw.RunCallbacks()
+				pumpManualCallbacks()
 			}()
 			if pumpCount <= 5 {
 				log.Printf("pumpUntilComplete: RunCallbacks OK (pump %d)", pumpCount)
