@@ -22,6 +22,7 @@ var lobbyList: VBoxContainer = null
 var lobbyLabelPool: Array[Button] = []
 
 # Friend invite widgets
+var friendScroll: ScrollContainer = null
 var friendList: VBoxContainer = null
 var friendLabelPool: Array[HBoxContainer] = []
 var inviteBtn: Button = null
@@ -113,9 +114,14 @@ func build_ui() -> void:
     lobbyList = VBoxContainer.new()
     vbox.add_child(lobbyList)
 
+    friendScroll = ScrollContainer.new()
+    friendScroll.custom_minimum_size = Vector2(0, 200)
+    friendScroll.hide()
+    vbox.add_child(friendScroll)
+
     friendList = VBoxContainer.new()
-    friendList.hide()
-    vbox.add_child(friendList)
+    friendList.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    friendScroll.add_child(friendList)
 
     # ENet debug section (DEBUG only)
     if _cm.DEBUG:
@@ -340,7 +346,7 @@ func on_invite_pressed() -> void:
     if !_cm.isActive:
         return
     friendsVisible = !friendsVisible
-    friendList.visible = friendsVisible
+    friendScroll.visible = friendsVisible
     if friendsVisible:
         _cm.steamBridge.get_friends(on_friends_received)
 
