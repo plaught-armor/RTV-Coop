@@ -49,11 +49,11 @@ func scan_for_new_pickups() -> void:
         var id: int = node.get_instance_id()
         if id in scenePickupIDs:
             continue
-        # Mark as known so we don't broadcast again
-        scenePickupIDs[id] = true
         var slotData: SlotData = node.get("slotData")
         if slotData == null || slotData.itemData == null:
             continue
+        # Mark as known AFTER confirming valid data so incomplete drops retry next scan
+        scenePickupIDs[id] = true
         var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
         var pos: Vector3 = node.global_position
         var rot: Vector3 = node.global_rotation
