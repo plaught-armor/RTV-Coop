@@ -21,7 +21,8 @@ func Interact():
 
     var transitionPath: String = get_tree().current_scene.get_path_to(self)
     if _cm.isHost:
-        _cm.worldState.sync_transition.rpc(transitionPath)
+        var mapName: String = currentMap if currentMap != null else ""
+        _cm.worldState.sync_transition.rpc(transitionPath, mapName)
         host_transition_deferred.call_deferred()
     else:
         _cm.worldState.request_transition.rpc_id(1, transitionPath)

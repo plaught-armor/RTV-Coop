@@ -27,14 +27,19 @@ func Interact():
 
 
 func CheckKey():
-    super.CheckKey()
-
     if _cm == null || !_cm.is_session_active():
+        super.CheckKey()
         return
 
-    if !locked && _cm.isHost:
+    if _cm.isHost:
+        super.CheckKey()
+        if !locked:
+            var doorPath: String = get_tree().current_scene.get_path_to(self)
+            _cm.worldState.sync_door_unlock.rpc(doorPath)
+            if linked:
+                var linkedPath: String = get_tree().current_scene.get_path_to(linked)
+                _cm.worldState.sync_door_unlock.rpc(linkedPath)
+    else:
+        # Clients request host to check key — don't consume locally
         var doorPath: String = get_tree().current_scene.get_path_to(self)
-        _cm.worldState.sync_door_unlock.rpc(doorPath)
-        if linked:
-            var linkedPath: String = get_tree().current_scene.get_path_to(linked)
-            _cm.worldState.sync_door_unlock.rpc(linkedPath)
+        _cm.worldState.request_door_interact.rpc_id(1, doorPath)

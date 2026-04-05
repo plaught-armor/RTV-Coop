@@ -108,24 +108,32 @@ func request_transition(transitionPath: String) -> void:
     var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
     if transition == null || !transition.has_method("Interact"):
         return
-    # Broadcast to clients, then defer own transition so RPC flushes first
-    sync_transition.rpc(transitionPath)
-    transition.call_deferred("Interact")
+    # Broadcast to clients with current map name for spawn resolution
+    var currentMapName: String = transition.get("currentMap") if transition.get("currentMap") != null else ""
+    sync_transition.rpc(transitionPath, currentMapName)
+    # Call super.Interact() directly via deferred to avoid going through the patch
+    # (which would broadcast sync_transition a second time)
+    var nextMap: String = transition.get("nextMap")
+    if nextMap != null && !nextMap.is_empty():
+        transition.call_deferred("host_transition_deferred")
 
 
-## Host tells all clients to run a transition. Loads the scene directly
-## via Loader to bypass the patched Interact (which would RPC back to host).
+## Host tells all clients to run a transition. Includes the current map name
+## so clients can set previousMap for correct spawn point resolution in Compiler.Spawn().
 @rpc("authority", "call_remote", "reliable")
-func sync_transition(transitionPath: String) -> void:
+func sync_transition(transitionPath: String, currentMapName: String = "") -> void:
     if !is_valid_path(transitionPath):
         return
     var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
     if transition == null:
         return
-    # Read the destination from the transition node and load directly
     var nextMap: String = transition.get("nextMap")
     if nextMap == null || nextMap.is_empty():
         return
+    # Set previousMap so Compiler.Spawn() finds the correct spawn point
+    if !currentMapName.is_empty():
+        _cm.gd.previousMap = currentMapName
+        _cm.gd.currentMap = nextMap
     Loader.LoadScene(nextMap)
 
 

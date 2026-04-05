@@ -182,5 +182,3 @@ func get_pooled_row(idx: int) -> HBoxContainer:
 func hide_all_player_labels() -> void:
     for row: HBoxContainer in labelPool:
         row.hide()
-
-

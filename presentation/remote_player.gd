@@ -44,8 +44,8 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-    # Position and rotation are already interpolated by PlayerState's buffer.
-    # Apply directly to avoid double-smoothing latency.
+    if _cm == null:
+        return
     global_position = targetPosition
     rotation.y = targetRotationY
     headPivot.rotation.x = targetRotationX

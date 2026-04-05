@@ -363,8 +363,11 @@ func spawn_remote_player(peerId: int) -> void:
     remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
     remote.init_manager(self)
+    # Set display name from peer registry
+    var displayName: String = get_peer_name(peerId)
+    remote.get_node("NameLabel").text = displayName
     remoteNodes[peerId] = remote
-    _log("Spawned remote player for peer %d" % peerId)
+    _log("Spawned remote player for peer %d (%s)" % [peerId, displayName])
 
 
 func on_remote_node_exiting(peerId: int) -> void:
@@ -388,12 +391,23 @@ func on_scene_changed() -> void:
     if !is_session_active():
         return
     ensure_all_spawned()
-    # Host sends spawn position to clients after scene loads
     if isHost:
-        var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
-        if controller != null:
-            worldState.sync_spawn_position.call_deferred(controller.global_position)
+        # Host syncs when clients report they've loaded (see notify_scene_loaded)
+        pass
+    else:
+        # Client tells host they've finished loading
+        notify_scene_loaded.rpc_id(1)
     _log("Scene changed, remote players respawned")
+
+
+## Client tells host they've finished loading the new scene.
+@rpc("any_peer", "call_remote", "reliable")
+func notify_scene_loaded() -> void:
+    if !isHost:
+        return
+    var peerId: int = multiplayer.get_remote_sender_id()
+    _log("Peer %d finished loading" % peerId)
+    worldState.send_full_state(peerId)
 
 
 ## Injects [code]_cm[/code] into all patched nodes in the current scene.
@@ -452,7 +466,8 @@ func force_windowed() -> void:
     prefs.Save()
 
 
-## Sets generous ENet timeout to survive scene loads but still detect dead peers.
+## Sets ENet timeout to survive scene loads over P2P tunnel.
+## Scene transitions can block the main thread for 10+ seconds.
 func set_peer_timeout(peerId: int) -> void:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if !(peer is ENetMultiplayerPeer):
@@ -460,7 +475,7 @@ func set_peer_timeout(peerId: int) -> void:
     var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
     var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
     if enetPeer != null:
-        enetPeer.set_timeout(0, 5000, 30000)
+        enetPeer.set_timeout(0, 30000, 60000)
 
 
 func is_session_active() -> bool:
