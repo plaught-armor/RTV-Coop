@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +19,7 @@ import (
 // peerTunnel represents a UDP tunnel for one remote Steam peer.
 type peerTunnel struct {
 	steamConn  sw.HSteamNetConnection
-	udpConn    *net.UDPConn
+	udp        udpBridge
 	done       chan struct{}
 	closeOnce  sync.Once
 	clientAddr atomic.Pointer[net.UDPAddr]
@@ -118,7 +119,7 @@ func handleConnectionStatusChange(conn sw.HSteamNetConnection, newState int32, o
 
 			tunnelMu.Lock()
 			if _, exists := hostTunnels[conn]; !exists {
-				udpConn, err := listenUDPCompat()
+				udpConn, err := createUDPBridge()
 				if err != nil {
 					log.Printf("Failed to create UDP for peer %d: %v", conn, err)
 					tunnelMu.Unlock()
@@ -126,7 +127,7 @@ func handleConnectionStatusChange(conn sw.HSteamNetConnection, newState int32, o
 				}
 				pt := &peerTunnel{
 					steamConn: conn,
-					udpConn:   udpConn,
+					udp:       udpConn,
 					done:      make(chan struct{}),
 				}
 				hostTunnels[conn] = pt
@@ -145,7 +146,7 @@ func handleConnectionStatusChange(conn sw.HSteamNetConnection, newState int32, o
 		tunnelMu.Lock()
 		if pt, exists := hostTunnels[conn]; exists {
 			pt.closeTunnel()
-			pt.udpConn.Close()
+			pt.udp.Close()
 			delete(hostTunnels, conn)
 			log.Printf("Host tunnel closed for connection %d", conn)
 		}
@@ -154,7 +155,7 @@ func handleConnectionStatusChange(conn sw.HSteamNetConnection, newState int32, o
 		// Clean up client tunnel
 		if clientTunnel != nil && clientTunnel.steamConn == conn {
 			clientTunnel.closeTunnel()
-			clientTunnel.udpConn.Close()
+			clientTunnel.udp.Close()
 			clientTunnel = nil
 			tunnelActive.Store(false)
 			log.Println("Client P2P connection lost")
@@ -216,16 +217,37 @@ func cmdStartP2PClient(cmd Command) Response {
 		return fail("start_p2p_client", "ConnectP2P failed")
 	}
 
-	udpConn, err := listenUDPCompat()
+	// Wait for P2P connection to reach Connected state before opening the tunnel.
+	// Pump callbacks on this thread so connection status updates are processed.
+	log.Println("P2P client: waiting for connection...")
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		pumpManualCallbacks()
+		state := getConnectionState(conn)
+		if state == stateConnected {
+			log.Println("P2P client: connected!")
+			break
+		}
+		if state == stateClosedByPeer || state == stateProblemDetectedLocally {
+			return fail("start_p2p_client", fmt.Sprintf("connection failed (state %d)", state))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if getConnectionState(conn) != stateConnected {
+		ns.CloseConnection(conn, 0, "", false)
+		return fail("start_p2p_client", "connection timed out")
+	}
+
+	udpConn, err := createUDPBridge()
 	if err != nil {
 		return fail("start_p2p_client", fmt.Sprintf("listen: %v", err))
 	}
 
-	tunnelPort := udpConn.LocalAddr().(*net.UDPAddr).Port
+	tunnelPort := udpConn.LocalPort()
 
 	clientTunnel = &peerTunnel{
 		steamConn: conn,
-		udpConn:   udpConn,
+		udp:       udpConn,
 		done:      make(chan struct{}),
 	}
 	tunnelActive.Store(true)
@@ -264,77 +286,95 @@ func tickTunnel() {
 	}
 }
 
-var hostTickCount int
+// --- Tunnel stats (logged periodically, never spams) ---
+var (
+	hostTickCount        int64
+	hostSteamRecvTotal   int64
+	hostSteamRecvBytes   int64
+	hostToENetSendTotal  int64
+	hostToENetSendErrors int64
+	clientTickCount      int64
+	clientSteamRecvTotal int64
+	clientSteamRecvBytes int64
+	clientToUDPSendTotal int64
+	clientToUDPDropped   int64 // dropped because clientAddr not set
+)
 
 func tickHost(ns sw.ISteamNetworkingSockets) {
 	hostTickCount++
-	if hostTickCount <= 3 {
-		log.Printf("tickHost: about to ReceiveMessagesOnPollGroup (tick %d, pollGroup=%d)", hostTickCount, pollGroup)
-	}
-	// Receive messages from all peers via poll group
+
 	msgs := ns.ReceiveMessagesOnPollGroup(pollGroup, 32)
-	if hostTickCount <= 3 {
-		log.Printf("tickHost: ReceiveMessagesOnPollGroup returned %d msgs (tick %d)", len(msgs), hostTickCount)
-	}
-	if len(msgs) > 0 {
-		log.Printf("tickHost: received %d messages (tick %d)", len(msgs), hostTickCount)
-	}
 
 	for _, msg := range msgs {
 		conn := msg.Connection
 
 		if !knownConns[conn] {
-			// New connection — accept it
 			knownConns[conn] = true
 			ns.AcceptConnection(conn)
 			ns.SetConnectionPollGroup(conn, pollGroup)
-			log.Printf("Accepted P2P connection %d", conn)
+			log.Printf("[host] Accepted P2P connection %d", conn)
 
 			tunnelMu.Lock()
 			if _, exists := hostTunnels[conn]; !exists {
-				udpConn, err := listenUDPCompat()
+				udpConn, err := createUDPBridge()
 				if err != nil {
-					log.Printf("Failed to create UDP for peer %d: %v", conn, err)
+					log.Printf("[host] Failed to create UDP bridge for conn %d: %v", conn, err)
 					tunnelMu.Unlock()
-					// Release this message and continue
 					msg.Release()
 					continue
 				}
 				pt := &peerTunnel{
 					steamConn: conn,
-					udpConn:   udpConn,
+					udp:       udpConn,
 					done:      make(chan struct{}),
 				}
 				hostTunnels[conn] = pt
 				go hostUDPToSteamRelay(pt)
-				log.Printf("Host tunnel created for connection %d", conn)
+				log.Printf("[host] Tunnel created for conn %d (UDP port %d -> ENet %s)",
+					conn, udpConn.LocalPort(), enetServerAddr)
 			}
 			tunnelMu.Unlock()
 		}
 
-		// Relay Steam -> UDP
 		data := copyMsgData(msg)
 		msg.Release()
 		if data != nil {
+			hostSteamRecvTotal++
+			hostSteamRecvBytes += int64(len(data))
 			tunnelMu.RLock()
 			if pt, exists := hostTunnels[conn]; exists {
-				pt.udpConn.WriteToUDP(data, enetServerAddr)
+				err := pt.udp.SendTo(data, enetServerAddr)
+				if err != nil {
+					hostToENetSendErrors++
+					if hostToENetSendErrors <= 5 {
+						log.Printf("[host] SendTo ENet failed: %v", err)
+					}
+				} else {
+					hostToENetSendTotal++
+				}
 			}
 			tunnelMu.RUnlock()
 		}
+	}
+
+	// Periodic stats
+	if hostTickCount%1000 == 0 && (hostSteamRecvTotal > 0 || len(knownConns) > 0) {
+		log.Printf("[host] stats: tick=%d peers=%d steam_recv=%d/%dB enet_send=%d errors=%d",
+			hostTickCount, len(knownConns), hostSteamRecvTotal, hostSteamRecvBytes,
+			hostToENetSendTotal, hostToENetSendErrors)
 	}
 
 	// Check for disconnected peers
 	for conn := range knownConns {
 		state := getConnectionState(conn)
 		if state == stateClosedByPeer || state == stateProblemDetectedLocally {
+			log.Printf("[host] Peer disconnected: conn=%d state=%d", conn, state)
 			ns.CloseConnection(conn, 0, "", false)
 			tunnelMu.Lock()
 			if pt, exists := hostTunnels[conn]; exists {
 				pt.closeTunnel()
-				pt.udpConn.Close()
+				pt.udp.Close()
 				delete(hostTunnels, conn)
-				log.Printf("Host tunnel closed for connection %d", conn)
 			}
 			tunnelMu.Unlock()
 			delete(knownConns, conn)
@@ -342,37 +382,48 @@ func tickHost(ns sw.ISteamNetworkingSockets) {
 	}
 }
 
-var clientTickCount int
-
 func tickClient(ns sw.ISteamNetworkingSockets) {
 	pt := clientTunnel
-
-	// Check connection state
-	state := getConnectionState(pt.steamConn)
 	clientTickCount++
-	if clientTickCount%100 == 1 {
-		log.Printf("tickClient: conn=%d state=%d (tick %d)", pt.steamConn, state, clientTickCount)
-	}
+
+	state := getConnectionState(pt.steamConn)
 	if state == stateClosedByPeer || state == stateProblemDetectedLocally {
+		log.Printf("[client] Connection lost: conn=%d state=%d", pt.steamConn, state)
 		ns.CloseConnection(pt.steamConn, 0, "", false)
 		pt.closeTunnel()
-		pt.udpConn.Close()
+		pt.udp.Close()
 		clientTunnel = nil
 		tunnelActive.Store(false)
-		log.Println("Client P2P connection lost")
 		return
 	}
 
-	// Receive messages from host and relay to local UDP
 	msgs := ns.ReceiveMessagesOnConnection(pt.steamConn, 32)
+	ca := pt.clientAddr.Load()
+
 	for _, msg := range msgs {
 		data := copyMsgData(msg)
 		msg.Release()
-		if data != nil {
-			if ca := pt.clientAddr.Load(); ca != nil {
-				pt.udpConn.WriteToUDP(data, ca)
-			}
+		if data == nil {
+			continue
 		}
+		clientSteamRecvTotal++
+		clientSteamRecvBytes += int64(len(data))
+		if ca != nil {
+			pt.udp.SendTo(data, ca)
+			clientToUDPSendTotal++
+		} else {
+			clientToUDPDropped++
+		}
+	}
+
+	// Log first receive and periodic stats
+	if clientSteamRecvTotal > 0 && clientSteamRecvTotal <= 5 {
+		log.Printf("[client] Receiving from Steam: %d msgs so far, clientAddr=%v", clientSteamRecvTotal, ca)
+	}
+	if clientTickCount%1000 == 0 {
+		log.Printf("[client] stats: tick=%d conn=%d state=%d steam_recv=%d/%dB udp_send=%d dropped=%d clientAddr=%v",
+			clientTickCount, pt.steamConn, state, clientSteamRecvTotal, clientSteamRecvBytes,
+			clientToUDPSendTotal, clientToUDPDropped, ca)
 	}
 }
 
@@ -382,21 +433,33 @@ func tickClient(ns sw.ISteamNetworkingSockets) {
 // to be sent on the Steam thread via a channel.
 func hostUDPToSteamRelay(pt *peerTunnel) {
 	buf := make([]byte, 2048)
+	var recvCount int64
+	var recvBytes int64
+	var errCount int64
+	log.Printf("[host-relay] Started for conn %d (reading ENet responses)", pt.steamConn)
 	for {
 		select {
 		case <-pt.done:
+			log.Printf("[host-relay] Stopped for conn %d (recv=%d/%dB errors=%d)", pt.steamConn, recvCount, recvBytes, errCount)
 			return
 		default:
 		}
-		pt.udpConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		n, err := pt.udpConn.Read(buf)
+		pt.udp.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+		n, _, err := pt.udp.Recv(buf)
 		if err != nil {
-			if !errors.Is(err, os.ErrDeadlineExceeded) {
-				log.Printf("Host UDP read error (conn %d): %v", pt.steamConn, err)
+			if !isTimeoutError(err) {
+				errCount++
+				if errCount <= 3 {
+					log.Printf("[host-relay] UDP read error (conn %d): %v", pt.steamConn, err)
+				}
 			}
 			continue
 		}
-		// Copy and send on the Steam thread
+		recvCount++
+		recvBytes += int64(n)
+		if recvCount <= 3 || recvCount%5000 == 0 {
+			log.Printf("[host-relay] ENet -> Steam: %d bytes (total: %d/%dB)", n, recvCount, recvBytes)
+		}
 		data := make([]byte, n)
 		copy(data, buf[:n])
 		sendViaSteam(pt.steamConn, data)
@@ -407,19 +470,32 @@ func hostUDPToSteamRelay(pt *peerTunnel) {
 // for the Steam thread.
 func clientUDPToSteamRelay(pt *peerTunnel) {
 	buf := make([]byte, 2048)
+	var recvCount int64
+	var recvBytes int64
+	var errCount int64
+	log.Printf("[client-relay] Started (reading ENet client packets on port %d)", pt.udp.LocalPort())
 	for {
 		select {
 		case <-pt.done:
+			log.Printf("[client-relay] Stopped (recv=%d/%dB errors=%d)", recvCount, recvBytes, errCount)
 			return
 		default:
 		}
-		pt.udpConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		n, addr, err := pt.udpConn.ReadFromUDP(buf)
+		pt.udp.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+		n, addr, err := pt.udp.Recv(buf)
 		if err != nil {
-			if !errors.Is(err, os.ErrDeadlineExceeded) {
-				log.Printf("Client UDP read error: %v", err)
+			if !isTimeoutError(err) {
+				errCount++
+				if errCount <= 3 {
+					log.Printf("[client-relay] UDP read error: %v", err)
+				}
 			}
 			continue
+		}
+		recvCount++
+		recvBytes += int64(n)
+		if recvCount <= 3 || recvCount%5000 == 0 {
+			log.Printf("[client-relay] ENet -> Steam: %d bytes from %v (total: %d/%dB)", n, addr, recvCount, recvBytes)
 		}
 		pt.clientAddr.Store(addr)
 		data := make([]byte, n)
@@ -441,12 +517,17 @@ func sendViaSteam(conn sw.HSteamNetConnection, data []byte) {
 	select {
 	case steamSendCh <- steamSendMsg{conn: conn, data: data}:
 	default:
-		// Drop if queue full — unreliable transport anyway
+		sendDropped++
 	}
 }
 
 // drainSendQueue is called from the Steam thread to flush pending sends.
-var sendCount int64
+var (
+	sendCount      int64
+	sendBytes      int64
+	sendErrors     int64
+	sendDropped    int64
+)
 
 func drainSendQueue() {
 	ns := sw.SteamNetworkingSockets()
@@ -456,9 +537,15 @@ func drainSendQueue() {
 			res, _ := ns.SendMessageToConnection(msg.conn, msg.data,
 				sw.SteamNetworkingSend_Unreliable|sw.SteamNetworkingSend_NoNagle)
 			sendCount++
-			if sendCount <= 5 || sendCount%1000 == 0 {
-				log.Printf("drainSendQueue: sent %d bytes to conn %d (result: %d, total: %d)",
-					len(msg.data), msg.conn, res, sendCount)
+			sendBytes += int64(len(msg.data))
+			if res != sw.EResultOK {
+				sendErrors++
+				if sendErrors <= 3 {
+					log.Printf("[send] Error: %d bytes to conn %d result=%d", len(msg.data), msg.conn, res)
+				}
+			}
+			if sendCount <= 3 || sendCount%5000 == 0 {
+				log.Printf("[send] stats: total=%d/%dB errors=%d dropped=%d", sendCount, sendBytes, sendErrors, sendDropped)
 			}
 		default:
 			return
@@ -467,6 +554,24 @@ func drainSendQueue() {
 }
 
 // --- Helpers ---
+
+// isTimeoutError checks if an error is a read timeout (works for both net.UDPConn
+// and raw Windows sockets which return WSAETIMEDOUT instead of os.ErrDeadlineExceeded).
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	// net.Error timeout interface
+	if ne, ok := err.(interface{ Timeout() bool }); ok && ne.Timeout() {
+		return true
+	}
+	// Raw Windows WSAETIMEDOUT (10060) — string match as fallback
+	errStr := err.Error()
+	return len(errStr) > 0 && (errStr == "winapi error #10060" || strings.Contains(errStr, "10060"))
+}
 
 // copyMsgData copies the payload from a SteamNetworkingMessage before Release().
 func copyMsgData(msg *sw.SteamNetworkingMessage) []byte {

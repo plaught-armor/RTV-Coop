@@ -298,12 +298,16 @@ func send_full_state(peerId: int) -> void:
 
     # Sync all doors via Interactable group
     for node: Node in get_tree().get_nodes_in_group("Interactable"):
-        var obj: Node = node.owner
-        if obj is Door:
-            var doorPath: String = get_tree().current_scene.get_path_to(obj)
-            sync_door_state.rpc_id(peerId, doorPath, obj.isOpen)
-            if !obj.locked && obj.key:
-                sync_door_unlock.rpc_id(peerId, doorPath)
+        var obj: Node = node.owner if node.owner != null else node
+        if !(obj is Door):
+            continue
+        if !obj.has_method("Interact"):
+            continue
+        var doorPath: String = get_tree().current_scene.get_path_to(obj)
+        var doorOpen: bool = obj.get("isOpen") if obj.get("isOpen") != null else false
+        sync_door_state.rpc_id(peerId, doorPath, doorOpen)
+        if !obj.locked && obj.get("key"):
+            sync_door_unlock.rpc_id(peerId, doorPath)
 
     # Sync all switches
     for node: Node in get_tree().get_nodes_in_group("Switch"):

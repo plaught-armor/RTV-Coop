@@ -6,68 +6,20 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// listenUDPCompat creates a UDP socket compatible with Wine/Proton.
-// Go's net.ListenUDP unconditionally calls WSAIoctl(SIO_UDP_CONNRESET)
-// which Wine doesn't support, causing socket creation to fail.
-// We fall back to raw syscalls, bypassing Go's net package entirely.
-func listenUDPCompat() (*net.UDPConn, error) {
-	// Try standard first (works on native Windows)
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
-	if err == nil {
-		return conn, nil
-	}
-	log.Printf("ListenUDP failed (%v), using raw socket fallback", err)
-
-	// Raw syscall fallback for Wine/Proton
-	sock, sErr := windows.Socket(windows.AF_INET, windows.SOCK_DGRAM, windows.IPPROTO_UDP)
-	if sErr != nil {
-		return nil, fmt.Errorf("raw socket: %w", sErr)
-	}
-
-	// Try the ioctl but ignore failure (Wine returns WSAEOPNOTSUPP)
-	var bytesReturned uint32
-	rawFalse := [4]byte{0, 0, 0, 0}
-	_ = windows.WSAIoctl(sock, 0x9800000C, // SIO_UDP_CONNRESET
-		&rawFalse[0], 4, nil, 0, &bytesReturned, nil, 0)
-
-	sa := windows.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}
-	if sErr = windows.Bind(sock, &sa); sErr != nil {
-		windows.Closesocket(sock)
-		return nil, fmt.Errorf("raw bind: %w", sErr)
-	}
-
-	// Set non-blocking for Go's runtime poller
-	if sErr = windows.SetNonblock(sock, true); sErr != nil {
-		windows.Closesocket(sock)
-		return nil, fmt.Errorf("nonblock: %w", sErr)
-	}
-
-	// Wrap raw socket as net.UDPConn via net.FilePacketConn
-	// On Windows, we need to use the approach of creating a net.Conn from a raw handle
-	// Unfortunately net.FilePacketConn doesn't work on Windows.
-	// Instead, wrap with our own UDPConn-like type using Recvfrom/Sendto.
-	// But tunnel.go expects *net.UDPConn...
-
-	// Alternative: just use the raw handle directly through a thin wrapper
-	// For now, store the handle and use rawUDP functions
-	windows.Closesocket(sock)
-
-	// Since we can't get a net.UDPConn from a raw Windows handle,
-	// return nil and let the caller use rawUDPConn instead
-	return nil, fmt.Errorf("wine-compat: use rawUDPConn")
-}
-
-// rawUDPConn wraps a raw Windows socket handle for UDP operations.
-type rawUDPConn struct {
+// rawUDPBridge uses raw Windows syscalls to create and operate a UDP socket.
+// Bypasses Go's net.ListenUDP which calls WSAIoctl(SIO_UDP_CONNRESET) — unsupported by Wine.
+type rawUDPBridge struct {
 	sock windows.Handle
 	port int
 }
 
-func newRawUDPConn() (*rawUDPConn, error) {
+func newRawUDPBridge() (*rawUDPBridge, error) {
 	sock, err := windows.Socket(windows.AF_INET, windows.SOCK_DGRAM, windows.IPPROTO_UDP)
 	if err != nil {
 		return nil, fmt.Errorf("socket: %w", err)
@@ -79,7 +31,6 @@ func newRawUDPConn() (*rawUDPConn, error) {
 		return nil, fmt.Errorf("bind: %w", err)
 	}
 
-	// Get assigned port
 	localSa, err := windows.Getsockname(sock)
 	if err != nil {
 		windows.Closesocket(sock)
@@ -87,21 +38,70 @@ func newRawUDPConn() (*rawUDPConn, error) {
 	}
 	localAddr := localSa.(*windows.SockaddrInet4)
 
-	return &rawUDPConn{sock: sock, port: localAddr.Port}, nil
+	log.Printf("Raw UDP socket created on 127.0.0.1:%d", localAddr.Port)
+	return &rawUDPBridge{sock: sock, port: localAddr.Port}, nil
 }
 
-func (r *rawUDPConn) sendTo(data []byte, addr *net.UDPAddr) error {
+func (r *rawUDPBridge) SendTo(data []byte, addr *net.UDPAddr) error {
 	sa := &windows.SockaddrInet4{Port: addr.Port}
 	copy(sa.Addr[:], addr.IP.To4())
 	return windows.Sendto(r.sock, data, 0, sa)
 }
 
-func (r *rawUDPConn) recvFrom(buf []byte) (int, error) {
-	// Set a read timeout via select
-	n, _, err := windows.Recvfrom(r.sock, buf, 0)
-	return n, err
+func (r *rawUDPBridge) Recv(buf []byte) (int, *net.UDPAddr, error) {
+	n, from, err := windows.Recvfrom(r.sock, buf, 0)
+	if err != nil {
+		return 0, nil, err
+	}
+	var addr *net.UDPAddr
+	if sa, ok := from.(*windows.SockaddrInet4); ok {
+		addr = &net.UDPAddr{
+			IP:   net.IPv4(sa.Addr[0], sa.Addr[1], sa.Addr[2], sa.Addr[3]),
+			Port: sa.Port,
+		}
+	}
+	return int(n), addr, nil
 }
 
-func (r *rawUDPConn) close() {
-	windows.Closesocket(r.sock)
+func (r *rawUDPBridge) SetReadDeadline(t time.Time) error {
+	var ms int32
+	if t.IsZero() {
+		ms = 0 // No timeout
+	} else {
+		d := time.Until(t)
+		if d <= 0 {
+			ms = 1
+		} else {
+			ms = int32(d.Milliseconds())
+		}
+	}
+	// SO_RCVTIMEO expects milliseconds as DWORD on Windows
+	return windows.SetsockoptInt(r.sock, windows.SOL_SOCKET, windows.SO_RCVTIMEO, int(ms))
+}
+
+func (r *rawUDPBridge) LocalPort() int {
+	return r.port
+}
+
+func (r *rawUDPBridge) Close() error {
+	return windows.Closesocket(r.sock)
+}
+
+// createUDPBridge tries net.ListenUDP first, falls back to raw syscalls for Wine/Proton.
+func createUDPBridge() (udpBridge, error) {
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err == nil {
+		return newNetUDPBridge(conn), nil
+	}
+	log.Printf("net.ListenUDP failed (%v), using raw socket", err)
+	return newRawUDPBridge()
+}
+
+// SetReadDeadline for raw sockets uses SetsockoptInt with SO_RCVTIMEO.
+// The DWORD size is platform-dependent. Ensure correct size:
+func init() {
+	// Verify DWORD is 4 bytes (sanity check)
+	if unsafe.Sizeof(int32(0)) != 4 {
+		panic("unexpected int32 size")
+	}
 }
