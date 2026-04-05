@@ -44,7 +44,7 @@ func scan_for_new_pickups() -> void:
     if !trackingDrops || !_cm.isActive:
         return
     for node: Node in get_tree().get_nodes_in_group("Item"):
-        if !(node is Pickup):
+        if !(node is Pickup) || !node.is_inside_tree():
             continue
         var id: int = node.get_instance_id()
         if id in scenePickupIDs:

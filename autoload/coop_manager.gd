@@ -170,6 +170,10 @@ func join_game(address: String, port: int = DEFAULT_PORT) -> void:
     if error != OK:
         _log("Failed to connect: %s" % error)
         return
+    # Set generous timeout before assigning peer — handshake needs time over P2P relay
+    var serverPeer: ENetPacketPeer = peer.get_peer(1)
+    if serverPeer != null:
+        serverPeer.set_timeout(0, 30000, 60000)
     multiplayer.multiplayer_peer = peer
     isHost = false
     _log("Connecting to %s:%d" % [address, port])
@@ -502,5 +506,4 @@ func get_local_ip() -> String:
 
 
 func _log(msg: String) -> void:
-    if DEBUG:
-        print("[CoopManager] %s" % msg)
+    print("[CoopManager] %s" % msg)
