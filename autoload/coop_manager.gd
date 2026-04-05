@@ -151,6 +151,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
+    worldState.start_drop_tracking()
     _log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
 
@@ -192,6 +193,7 @@ func disconnect_session() -> void:
     localPeerId = 0
     isHost = false
     isActive = false
+    worldState.stop_drop_tracking()
     steamBridge.leave_lobby()
     _log("Disconnected")
 
@@ -231,6 +233,7 @@ func on_connected_to_server() -> void:
     isActive = true
     peerNames[localPeerId] = get_local_name()
     set_peer_timeout(1) # Server is always peer ID 1
+    worldState.start_drop_tracking()
     _log("Connected to server (id: %d)" % localPeerId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
     sync_name.rpc(get_local_name(), localSteamID)
@@ -391,11 +394,16 @@ func on_scene_changed() -> void:
     if !is_session_active():
         return
     ensure_all_spawned()
+    # Re-snapshot pickups for the new scene
+    if worldState.trackingDrops:
+        worldState.scenePickupIDs.clear()
+        worldState.consumedPickupPaths.clear()
+        worldState.droppedItems.clear()
+        for node: Node in get_tree().get_nodes_in_group("Item"):
+            worldState.scenePickupIDs[node.get_instance_id()] = true
     if isHost:
-        # Host syncs when clients report they've loaded (see notify_scene_loaded)
         pass
     else:
-        # Client tells host they've finished loading
         notify_scene_loaded.rpc_id(1)
     _log("Scene changed, remote players respawned")
 

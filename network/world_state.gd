@@ -4,9 +4,95 @@ extends Node
 
 var _cm: Node
 
+## Set of Pickup node instance IDs that existed when the scene loaded.
+## Only pickups NOT in this set are broadcast as "dropped items".
+var scenePickupIDs: Dictionary = { }
+var trackingDrops: bool = false
+## Paths of pickups consumed since scene load (for late joiners).
+var consumedPickupPaths: Array[String] = []
+## Dropped items since scene load (for late joiners).
+var droppedItems: Array[Dictionary] = []
+
 
 func init_manager(manager: Node) -> void:
     _cm = manager
+
+
+func start_drop_tracking() -> void:
+    if trackingDrops:
+        return
+    trackingDrops = true
+    # Snapshot all existing pickups so we don't re-broadcast scene items
+    scenePickupIDs.clear()
+    for node: Node in get_tree().get_nodes_in_group("Item"):
+        scenePickupIDs[node.get_instance_id()] = true
+    # Listen for new nodes added to the tree
+    get_tree().node_added.connect(on_node_added)
+
+
+func stop_drop_tracking() -> void:
+    if !trackingDrops:
+        return
+    trackingDrops = false
+    if get_tree().node_added.is_connected(on_node_added):
+        get_tree().node_added.disconnect(on_node_added)
+    scenePickupIDs.clear()
+    consumedPickupPaths.clear()
+    droppedItems.clear()
+
+
+func on_node_added(node: Node) -> void:
+    if !_cm.isActive:
+        return
+    if node.is_in_group("Item") && node is Pickup:
+        node.ready.connect(on_new_pickup_ready.bind(node), CONNECT_ONE_SHOT)
+
+
+func on_new_pickup_ready(pickup: Node) -> void:
+    if !is_instance_valid(pickup):
+        return
+    if pickup.get_instance_id() in scenePickupIDs:
+        return
+    var slotData: SlotData = pickup.get("slotData")
+    if slotData == null || slotData.itemData == null:
+        return
+    var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
+    var pos: Vector3 = pickup.global_position
+    var rot: Vector3 = pickup.global_rotation
+    var pickupName: String = pickup.name
+    if _cm.isHost:
+        # Track for late joiners
+        droppedItems.append({ "slot": packedSlot, "pos": pos, "rot": rot, "name": pickupName })
+        # Host broadcasts new pickup to all clients
+        sync_pickup_spawn.rpc(packedSlot, pos, rot, pickupName)
+    else:
+        # Client requests host to broadcast the drop
+        request_pickup_drop.rpc_id(1, packedSlot, pos, rot)
+
+
+## Client requests host to spawn a dropped item for all peers.
+@rpc("any_peer", "call_remote", "reliable")
+func request_pickup_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> void:
+    if !_cm.isHost:
+        return
+    var slotData: SlotData = _cm.SlotSerializerScript.unpack(packedSlot)
+    if slotData == null || slotData.itemData == null:
+        return
+    # Spawn on host
+    var scene: PackedScene = find_pickup_scene(slotData.itemData.file)
+    if scene == null:
+        return
+    var pickup: Node3D = scene.instantiate()
+    pickup.slotData = slotData
+    pickup.global_position = pos
+    pickup.global_rotation = rot
+    get_tree().current_scene.add_child(pickup)
+    var pickupName: String = pickup.name
+    # Broadcast to all clients EXCEPT the one who dropped it (they already have it)
+    var dropperId: int = multiplayer.get_remote_sender_id()
+    for peerId: int in _cm.connectedPeers:
+        if peerId != dropperId:
+            sync_pickup_spawn.rpc_id(peerId, packedSlot, pos, rot, pickupName)
 
 ## Sync simulation every 240 physics frames (~2s at 120Hz).
 const SIM_SYNC_FRAMES: int = 240
@@ -218,7 +304,8 @@ func request_pickup_interact(pickupPath: String) -> void:
     var requesterId: int = multiplayer.get_remote_sender_id()
     var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(pickup.slotData)
     grant_pickup_to_client.rpc_id(requesterId, packedSlot)
-    # Broadcast removal to all peers
+    # Track and broadcast removal to all peers
+    consumedPickupPaths.append(pickupPath)
     sync_pickup_consumed.rpc(pickupPath)
     pickup.queue_free()
 
@@ -324,6 +411,14 @@ func send_full_state(peerId: int) -> void:
             continue
         var switchPath: String = get_tree().current_scene.get_path_to(obj)
         sync_switch_state.rpc_id(peerId, switchPath, obj.active)
+
+    # Sync consumed pickups (items that were picked up since scene loaded)
+    for path: String in consumedPickupPaths:
+        sync_pickup_consumed.rpc_id(peerId, path)
+
+    # Sync dropped items (items dropped by players since scene loaded)
+    for item: Dictionary in droppedItems:
+        sync_pickup_spawn.rpc_id(peerId, item["slot"], item["pos"], item["rot"], item["name"])
 
     # Sync simulation (reliable for initial join)
     sync_simulation_reliable.rpc_id(peerId, Simulation.time, Simulation.day, Simulation.weather)
