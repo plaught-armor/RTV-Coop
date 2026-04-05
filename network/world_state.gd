@@ -17,57 +17,52 @@ var droppedItems: Array[Dictionary] = []
 func init_manager(manager: Node) -> void:
     _cm = manager
 
+## Check for new items every N physics frames.
+const ITEM_SCAN_FRAMES: int = 30
+
 
 func start_drop_tracking() -> void:
     if trackingDrops:
         return
     trackingDrops = true
-    # Snapshot all existing pickups so we don't re-broadcast scene items
     scenePickupIDs.clear()
     for node: Node in get_tree().get_nodes_in_group("Item"):
         scenePickupIDs[node.get_instance_id()] = true
-    # Listen for new nodes added to the tree
-    get_tree().node_added.connect(on_node_added)
 
 
 func stop_drop_tracking() -> void:
     if !trackingDrops:
         return
     trackingDrops = false
-    if get_tree().node_added.is_connected(on_node_added):
-        get_tree().node_added.disconnect(on_node_added)
     scenePickupIDs.clear()
     consumedPickupPaths.clear()
     droppedItems.clear()
 
 
-func on_node_added(node: Node) -> void:
-    if !_cm.isActive:
+## Scans for new pickups that weren't in the original scene snapshot.
+func scan_for_new_pickups() -> void:
+    if !trackingDrops || !_cm.isActive:
         return
-    if node.is_in_group("Item") && node is Pickup:
-        node.ready.connect(on_new_pickup_ready.bind(node), CONNECT_ONE_SHOT)
-
-
-func on_new_pickup_ready(pickup: Node) -> void:
-    if !is_instance_valid(pickup):
-        return
-    if pickup.get_instance_id() in scenePickupIDs:
-        return
-    var slotData: SlotData = pickup.get("slotData")
-    if slotData == null || slotData.itemData == null:
-        return
-    var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
-    var pos: Vector3 = pickup.global_position
-    var rot: Vector3 = pickup.global_rotation
-    var pickupName: String = pickup.name
-    if _cm.isHost:
-        # Track for late joiners
-        droppedItems.append({ "slot": packedSlot, "pos": pos, "rot": rot, "name": pickupName })
-        # Host broadcasts new pickup to all clients
-        sync_pickup_spawn.rpc(packedSlot, pos, rot, pickupName)
-    else:
-        # Client requests host to broadcast the drop
-        request_pickup_drop.rpc_id(1, packedSlot, pos, rot)
+    for node: Node in get_tree().get_nodes_in_group("Item"):
+        if !(node is Pickup):
+            continue
+        var id: int = node.get_instance_id()
+        if id in scenePickupIDs:
+            continue
+        # Mark as known so we don't broadcast again
+        scenePickupIDs[id] = true
+        var slotData: SlotData = node.get("slotData")
+        if slotData == null || slotData.itemData == null:
+            continue
+        var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
+        var pos: Vector3 = node.global_position
+        var rot: Vector3 = node.global_rotation
+        var pickupName: String = node.name
+        if _cm.isHost:
+            droppedItems.append({ "slot": packedSlot, "pos": pos, "rot": rot, "name": pickupName })
+            sync_pickup_spawn.rpc(packedSlot, pos, rot, pickupName)
+        else:
+            request_pickup_drop.rpc_id(1, packedSlot, pos, rot)
 
 
 ## Client requests host to spawn a dropped item for all peers.
@@ -99,7 +94,14 @@ const SIM_SYNC_FRAMES: int = 240
 
 
 func _physics_process(_delta: float) -> void:
-    if !_cm.isActive || !_cm.isHost:
+    if !_cm.isActive:
+        return
+
+    # Scan for dropped/new items (both host and client)
+    if Engine.get_physics_frames() % ITEM_SCAN_FRAMES == 0:
+        scan_for_new_pickups()
+
+    if !_cm.isHost:
         return
 
     if Engine.get_physics_frames() % SIM_SYNC_FRAMES != 0:
