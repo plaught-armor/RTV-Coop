@@ -4,15 +4,13 @@ extends Node
 
 var _cm: Node
 
-## Item sync: tracks dropped/picked-up items by unique sync_id stored as node meta.
-var syncedItems: Dictionary = { } # sync_id -> weakref(Node)
-var knownLocalIDs: Dictionary = { } # instance_id -> true (to skip scene-loaded items)
+## Item sync: unique sync_id on each dropped item, signal-based detection.
+var syncedItems: Dictionary = { } # sync_id -> Node (direct ref, cleared on tree_exiting)
 var syncIdCounter: int = 0
 var trackingItems: bool = false
 var consumedSyncIDs: Array[String] = []
 var droppedItemHistory: Array[Dictionary] = []
-
-const ITEM_SCAN_FRAMES: int = 30
+var mapNode: Node = null
 
 
 func init_manager(manager: Node) -> void:
@@ -24,66 +22,90 @@ func start_item_tracking() -> void:
         return
     trackingItems = true
     syncedItems.clear()
-    knownLocalIDs.clear()
     consumedSyncIDs.clear()
     droppedItemHistory.clear()
     syncIdCounter = 0
-    for node: Node in get_tree().get_nodes_in_group("Item"):
-        knownLocalIDs[node.get_instance_id()] = true
+    # Connect to the map node's child_entered_tree to detect drops
+    connect_map_signal()
 
 
 func stop_item_tracking() -> void:
+    disconnect_map_signal()
     trackingItems = false
     syncedItems.clear()
-    knownLocalIDs.clear()
     consumedSyncIDs.clear()
     droppedItemHistory.clear()
     syncIdCounter = 0
 
 
-## Called every ITEM_SCAN_FRAMES. Detects new drops and removed (picked up) items.
-func scan_items() -> void:
+func connect_map_signal() -> void:
+    disconnect_map_signal()
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return
+    mapNode = scene
+    mapNode.child_entered_tree.connect(on_map_child_entered)
+
+
+func disconnect_map_signal() -> void:
+    if is_instance_valid(mapNode) && mapNode.child_entered_tree.is_connected(on_map_child_entered):
+        mapNode.child_entered_tree.disconnect(on_map_child_entered)
+    mapNode = null
+
+
+## Fires when a new direct child is added to the map scene root.
+## Interface.Drop() adds pickups as direct children of /root/Map.
+func on_map_child_entered(node: Node) -> void:
     if !trackingItems || !_cm.isActive:
         return
+    if !(node is Pickup):
+        return
+    # Defer one frame so slotData is set by Interface.Drop()
+    on_pickup_dropped.call_deferred(node.get_instance_id())
 
-    # Detect new items (dropped by local player)
-    for node: Node in get_tree().get_nodes_in_group("Item"):
-        if !(node is Pickup) || !node.is_inside_tree():
-            continue
-        var localId: int = node.get_instance_id()
-        if localId in knownLocalIDs:
-            continue
-        var slotData: SlotData = node.get("slotData")
-        if slotData == null || slotData.itemData == null:
-            continue
-        knownLocalIDs[localId] = true
-        var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
-        var pos: Vector3 = node.global_position
-        var rot: Vector3 = node.global_rotation
-        if _cm.isHost:
-            syncIdCounter += 1
-            var syncId: String = "drop_%d" % syncIdCounter
-            node.set_meta(&"sync_id", syncId)
-            syncedItems[syncId] = weakref(node)
-            droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
-            sync_item_drop.rpc(syncId, packedSlot, pos, rot)
-        else:
-            request_item_drop.rpc_id(1, packedSlot, pos, rot)
 
-    # Detect removed synced items (picked up locally by original Interact)
-    var removed: Array[String] = []
-    for syncId: String in syncedItems:
-        var ref: WeakRef = syncedItems[syncId]
-        var node: Node = ref.get_ref()
-        if node == null || !is_instance_valid(node):
-            removed.append(syncId)
-    for syncId: String in removed:
-        syncedItems.erase(syncId)
-        if _cm.isHost:
-            consumedSyncIDs.append(syncId)
-            sync_item_consumed.rpc(syncId)
-        else:
-            request_item_consumed.rpc_id(1, syncId)
+func on_pickup_dropped(instanceId: int) -> void:
+    var node: Node = instance_from_id(instanceId)
+    if !is_instance_valid(node) || !(node is Pickup):
+        return
+    # Skip items that already have a sync_id (received via RPC)
+    if node.has_meta(&"sync_id"):
+        return
+    var slotData: SlotData = node.get("slotData")
+    if slotData == null || slotData.itemData == null:
+        return
+    var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
+    var pos: Vector3 = node.global_position if node.is_inside_tree() else Vector3.ZERO
+    var rot: Vector3 = node.global_rotation if node.is_inside_tree() else Vector3.ZERO
+    if _cm.isHost:
+        register_synced_item(node, packedSlot, pos, rot)
+    else:
+        request_item_drop.rpc_id(1, packedSlot, pos, rot)
+
+
+## Host assigns sync_id and broadcasts.
+func register_synced_item(node: Node, packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> void:
+    syncIdCounter += 1
+    var syncId: String = "drop_%d" % syncIdCounter
+    node.set_meta(&"sync_id", syncId)
+    syncedItems[syncId] = node
+    node.tree_exiting.connect(on_synced_item_removed.bind(syncId))
+    droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
+    sync_item_drop.rpc(syncId, packedSlot, pos, rot)
+
+
+## Fires when a synced item is freed (picked up via original Interact).
+func on_synced_item_removed(syncId: String) -> void:
+    if syncId not in syncedItems:
+        return
+    syncedItems.erase(syncId)
+    if !_cm.isActive:
+        return
+    if _cm.isHost:
+        consumedSyncIDs.append(syncId)
+        sync_item_consumed.rpc(syncId)
+    else:
+        request_item_consumed.rpc_id(1, syncId)
 
 
 ## Host broadcasts a dropped item to all clients.
@@ -105,8 +127,8 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
     if pickup.has_method("Unfreeze"):
         pickup.Unfreeze()
     pickup.set_meta(&"sync_id", syncId)
-    syncedItems[syncId] = weakref(pickup)
-    knownLocalIDs[pickup.get_instance_id()] = true
+    syncedItems[syncId] = pickup
+    pickup.tree_exiting.connect(on_synced_item_removed.bind(syncId))
 
 
 ## Host broadcasts that a synced item was picked up — all peers remove it.
@@ -159,8 +181,8 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
     if pickup.has_method("Unfreeze"):
         pickup.Unfreeze()
     pickup.set_meta(&"sync_id", syncId)
-    syncedItems[syncId] = weakref(pickup)
-    knownLocalIDs[pickup.get_instance_id()] = true
+    syncedItems[syncId] = pickup
+    pickup.tree_exiting.connect(on_synced_item_removed.bind(syncId))
     droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
     # Broadcast to all EXCEPT the dropper
     var dropperId: int = multiplayer.get_remote_sender_id()
@@ -175,10 +197,6 @@ const SIM_SYNC_FRAMES: int = 240
 func _physics_process(_delta: float) -> void:
     if !_cm.isActive:
         return
-
-    # Scan for dropped/picked-up items (both host and client)
-    if Engine.get_physics_frames() % ITEM_SCAN_FRAMES == 0:
-        scan_items()
 
     if !_cm.isHost:
         return

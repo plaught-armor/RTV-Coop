@@ -403,15 +403,13 @@ func on_scene_changed() -> void:
     if !is_session_active():
         return
     ensure_all_spawned()
-    # Re-snapshot items for the new scene
+    # Reconnect item tracking signals for the new scene
     if worldState.trackingItems:
         worldState.syncedItems.clear()
         worldState.consumedSyncIDs.clear()
         worldState.droppedItemHistory.clear()
         worldState.syncIdCounter = 0
-        worldState.knownLocalIDs.clear()
-        for node: Node in get_tree().get_nodes_in_group("Item"):
-            worldState.knownLocalIDs[node.get_instance_id()] = true
+        worldState.connect_map_signal()
     if isHost:
         pass
     else:
