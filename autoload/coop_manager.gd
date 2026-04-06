@@ -151,7 +151,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
-    worldState.start_drop_tracking()
+    worldState.start_item_tracking()
     _log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
 
@@ -197,7 +197,7 @@ func disconnect_session() -> void:
     localPeerId = 0
     isHost = false
     isActive = false
-    worldState.stop_drop_tracking()
+    worldState.stop_item_tracking()
     steamBridge.leave_lobby()
     _log("Disconnected")
 
@@ -237,7 +237,7 @@ func on_connected_to_server() -> void:
     isActive = true
     peerNames[localPeerId] = get_local_name()
     set_peer_timeout(1) # Server is always peer ID 1
-    worldState.start_drop_tracking()
+    worldState.start_item_tracking()
     _log("Connected to server (id: %d)" % localPeerId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
     sync_name.rpc(get_local_name(), localSteamID)
@@ -306,6 +306,11 @@ func sync_name(peerName: String, steamID: String = "") -> void:
     if !steamID.is_empty():
         peerSteamIDs[senderId] = steamID
         fetch_avatar(steamID)
+    # Update name label on existing remote player node
+    if senderId in remoteNodes:
+        var remote: Node3D = remoteNodes[senderId]
+        if is_instance_valid(remote):
+            remote.get_node("NameLabel").text = sanitized
     _log("Peer %d name: %s (steam: %s)" % [senderId, sanitized, steamID])
 
 
@@ -398,13 +403,15 @@ func on_scene_changed() -> void:
     if !is_session_active():
         return
     ensure_all_spawned()
-    # Re-snapshot pickups for the new scene
-    if worldState.trackingDrops:
-        worldState.scenePickupIDs.clear()
-        worldState.consumedPickupPaths.clear()
-        worldState.droppedItems.clear()
+    # Re-snapshot items for the new scene
+    if worldState.trackingItems:
+        worldState.syncedItems.clear()
+        worldState.consumedSyncIDs.clear()
+        worldState.droppedItemHistory.clear()
+        worldState.syncIdCounter = 0
+        worldState.knownLocalIDs.clear()
         for node: Node in get_tree().get_nodes_in_group("Item"):
-            worldState.scenePickupIDs[node.get_instance_id()] = true
+            worldState.knownLocalIDs[node.get_instance_id()] = true
     if isHost:
         pass
     else:
@@ -434,11 +441,16 @@ func inject_manager() -> void:
     if controller != null && controller.has_method("init_manager"):
         controller.init_manager(self)
 
-    # Interactables: Doors, Pickups, LootContainers
+    # Interactables: Doors, LootContainers
     for node: Node in get_tree().get_nodes_in_group("Interactable"):
         var obj: Node = node.owner if node.owner != null else node
         if obj.has_method("init_manager"):
             obj.init_manager(self)
+
+    # Items: Pickups
+    for node: Node in get_tree().get_nodes_in_group("Item"):
+        if node.has_method("init_manager"):
+            node.init_manager(self)
 
     # Switches
     for node: Node in get_tree().get_nodes_in_group("Switch"):

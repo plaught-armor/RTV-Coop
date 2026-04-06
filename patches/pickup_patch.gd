@@ -21,6 +21,7 @@ func Interact():
         return
 
     var pickupPath: String = get_tree().current_scene.get_path_to(self)
+    print("[PickupPatch] Interact: name=%s path=%s isHost=%s" % [name, pickupPath, str(_cm.isHost)])
     if _cm.isHost:
         if TryPickup():
             remove_from_group(&"Item")
