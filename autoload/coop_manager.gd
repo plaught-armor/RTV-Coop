@@ -118,6 +118,7 @@ func register_patches() -> void:
         ["res://mod/patches/switch_patch.gd", "res://Scripts/Switch.gd"],
         ["res://mod/patches/transition_patch.gd", "res://Scripts/Transition.gd"],
         ["res://mod/patches/pickup_patch.gd", "res://Scripts/Pickup.gd"],
+        ["res://mod/patches/interface_patch.gd", "res://Scripts/Interface.gd"],
     ]
     for pair: Array in patches:
         var patch: Script = load(pair[0])
@@ -403,13 +404,12 @@ func on_scene_changed() -> void:
     if !is_session_active():
         return
     ensure_all_spawned()
-    # Reconnect item tracking signals for the new scene
+    # Reset item tracking for the new scene
     if worldState.trackingItems:
         worldState.syncedItems.clear()
         worldState.consumedSyncIDs.clear()
         worldState.droppedItemHistory.clear()
         worldState.syncIdCounter = 0
-        worldState.connect_map_signal()
     if isHost:
         pass
     else:
@@ -438,6 +438,11 @@ func inject_manager() -> void:
     var controller: Node = scene.get_node_or_null("Core/Controller")
     if controller != null && controller.has_method("init_manager"):
         controller.init_manager(self)
+
+    # Interface — inventory UI
+    var iface: Node = scene.get_node_or_null("Core/UI/Interface")
+    if iface != null && iface.has_method("init_manager"):
+        iface.init_manager(self)
 
     # Interactables: Doors, LootContainers
     for node: Node in get_tree().get_nodes_in_group("Interactable"):

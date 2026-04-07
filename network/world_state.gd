@@ -4,13 +4,14 @@ extends Node
 
 var _cm: Node
 
-## Item sync: unique sync_id on each dropped item, signal-based detection.
-var syncedItems: Dictionary = { } # sync_id -> Node (direct ref, cleared on tree_exiting)
+## Item sync: unique sync_id on each dropped item.
+## Drops are broadcast by interface_patch.Drop() calling broadcast_item_drop().
+## Pickups are broadcast by pickup_patch.Interact() calling on_synced_item_picked_up().
+var syncedItems: Dictionary = { }
 var syncIdCounter: int = 0
 var trackingItems: bool = false
 var consumedSyncIDs: Array[String] = []
 var droppedItemHistory: Array[Dictionary] = []
-var mapNode: Node = null
 
 
 func init_manager(manager: Node) -> void:
@@ -25,12 +26,9 @@ func start_item_tracking() -> void:
     consumedSyncIDs.clear()
     droppedItemHistory.clear()
     syncIdCounter = 0
-    # Connect to the map node's child_entered_tree to detect drops
-    connect_map_signal()
 
 
 func stop_item_tracking() -> void:
-    disconnect_map_signal()
     trackingItems = false
     syncedItems.clear()
     consumedSyncIDs.clear()
@@ -38,74 +36,32 @@ func stop_item_tracking() -> void:
     syncIdCounter = 0
 
 
-func connect_map_signal() -> void:
-    disconnect_map_signal()
-    var scene: Node = get_tree().current_scene
-    if !is_instance_valid(scene):
-        return
-    mapNode = scene
-    mapNode.child_entered_tree.connect(on_map_child_entered)
-
-
-func disconnect_map_signal() -> void:
-    if is_instance_valid(mapNode) && mapNode.child_entered_tree.is_connected(on_map_child_entered):
-        mapNode.child_entered_tree.disconnect(on_map_child_entered)
-    mapNode = null
-
-
-## Fires when a new direct child is added to the map scene root.
-## Interface.Drop() adds pickups as direct children of /root/Map.
-func on_map_child_entered(node: Node) -> void:
+## Called by interface_patch.Drop() after each pickup is created locally.
+func broadcast_item_drop(pickup: Node) -> void:
     if !trackingItems || !_cm.isActive:
         return
-    if !(node is Pickup):
-        return
-    # Defer one frame so slotData is set by Interface.Drop()
-    on_pickup_dropped.call_deferred(node.get_instance_id())
-
-
-func on_pickup_dropped(instanceId: int) -> void:
-    var node: Node = instance_from_id(instanceId)
-    if !is_instance_valid(node) || !(node is Pickup):
-        return
-    # Skip items that already have a sync_id (received via RPC)
-    if node.has_meta(&"sync_id"):
-        return
-    var slotData: SlotData = node.get("slotData")
+    var slotData: SlotData = pickup.get("slotData")
     if slotData == null || slotData.itemData == null:
         return
     var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
-    var pos: Vector3 = node.global_position if node.is_inside_tree() else Vector3.ZERO
-    var rot: Vector3 = node.global_rotation if node.is_inside_tree() else Vector3.ZERO
+    var pos: Vector3 = pickup.global_position
+    var rot: Vector3 = pickup.global_rotation
     if _cm.isHost:
-        register_synced_item(node, packedSlot, pos, rot)
+        syncIdCounter += 1
+        var syncId: String = "drop_%d" % syncIdCounter
+        pickup.set_meta(&"sync_id", syncId)
+        syncedItems[syncId] = pickup
+        droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
+        sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     else:
         request_item_drop.rpc_id(1, packedSlot, pos, rot)
 
 
-## Host assigns sync_id and broadcasts.
-func register_synced_item(node: Node, packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> void:
-    syncIdCounter += 1
-    var syncId: String = "drop_%d" % syncIdCounter
-    node.set_meta(&"sync_id", syncId)
-    syncedItems[syncId] = node
-    node.tree_exiting.connect(on_synced_item_removed.bind(syncId))
-    droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
-    sync_item_drop.rpc(syncId, packedSlot, pos, rot)
-
-
-## Fires when a synced item is freed (picked up via original Interact).
-func on_synced_item_removed(syncId: String) -> void:
-    if syncId not in syncedItems:
-        return
+## Called by pickup_patch.Interact() when a synced item is picked up.
+func on_synced_item_picked_up(syncId: String) -> void:
     syncedItems.erase(syncId)
-    if !_cm.isActive:
-        return
-    if _cm.isHost:
-        consumedSyncIDs.append(syncId)
-        sync_item_consumed.rpc(syncId)
-    else:
-        request_item_consumed.rpc_id(1, syncId)
+    consumedSyncIDs.append(syncId)
+    sync_item_consumed.rpc(syncId)
 
 
 ## Host broadcasts a dropped item to all clients.
@@ -384,54 +340,6 @@ func request_container_take_item(containerPath: String, itemIndex: int) -> void:
     sync_container_state.rpc(containerPath, _cm.SlotSerializerScript.pack_array(container.loot))
 
 # ---------- Pickup Sync ----------
-
-
-## Client requests to pick up an item. Host validates, marks consumed,
-## sends the item data back to the requester, and broadcasts removal to all.
-@rpc("any_peer", "call_remote", "reliable")
-func request_pickup_interact(pickupPath: String) -> void:
-    if !_cm.isHost:
-        return
-    if !is_valid_path(pickupPath):
-        print("[WorldState] request_pickup_interact: invalid path '%s'" % pickupPath)
-        return
-    var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
-    print("[WorldState] request_pickup_interact: path='%s' found=%s" % [pickupPath, str(pickup != null)])
-    if !is_instance_valid(pickup) || !(pickup is Pickup):
-        return
-    # Immediately mark consumed to prevent race condition (C2)
-    pickup.remove_from_group(&"Item")
-    # Send item data to the requesting client so they add it to their own inventory
-    var requesterId: int = multiplayer.get_remote_sender_id()
-    var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(pickup.slotData)
-    grant_pickup_to_client.rpc_id(requesterId, packedSlot)
-    # Broadcast removal to all peers
-    sync_pickup_consumed.rpc(pickupPath)
-    pickup.queue_free()
-
-
-## Host sends a pickup's item data to the client who picked it up.
-## The client adds it to their own inventory locally.
-@rpc("authority", "call_remote", "reliable")
-func grant_pickup_to_client(packedSlot: Dictionary) -> void:
-    var slotData: SlotData = _cm.SlotSerializerScript.unpack(packedSlot)
-    if slotData == null:
-        return
-    var iface: Node = get_tree().current_scene.get_node_or_null("/root/Map/Core/UI/Interface")
-    if iface == null:
-        return
-    if iface.AutoStack(slotData, iface.inventoryGrid):
-        iface.UpdateStats(false)
-    elif iface.Create(slotData, iface.inventoryGrid, false):
-        iface.UpdateStats(false)
-
-
-## Host broadcasts that a pickup was consumed (removed from world).
-@rpc("authority", "call_remote", "reliable")
-func sync_pickup_consumed(pickupPath: String) -> void:
-    var pickup: Node = get_tree().current_scene.get_node_or_null(pickupPath)
-    if is_instance_valid(pickup):
-        pickup.queue_free()
 
 
 ## Looks up a Pickup PackedScene from the Database constants by item file key.

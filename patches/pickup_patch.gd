@@ -1,7 +1,6 @@
 ## Patch for [code]Pickup.gd[/code] — host-authoritative pickup interactions.
-## Host validates pickup exists and marks it consumed. The requesting peer
-## then adds the item to their own inventory. Prevents duplication.
-## In single-player, falls through to the original [method Interact].
+## Reimplements [method Interact] to broadcast item removal via sync_id.
+## In single-player, falls through to the original.
 extends "res://Scripts/Pickup.gd"
 
 var _cm: Node
@@ -20,28 +19,28 @@ func Interact():
         super.Interact()
         return
 
-    var pickupPath: String = get_tree().current_scene.get_path_to(self)
-    print("[PickupPatch] Interact: name=%s path=%s isHost=%s" % [name, pickupPath, str(_cm.isHost)])
-    if _cm.isHost:
-        if TryPickup():
-            remove_from_group(&"Item")
-            _cm.worldState.sync_pickup_consumed.rpc(pickupPath)
-            queue_free()
-    else:
-        _cm.worldState.request_pickup_interact.rpc_id(1, pickupPath)
-
-
-## Attempts to add this pickup's item to the local player's inventory.
-## Returns true if successful, false if inventory is full.
-func TryPickup() -> bool:
     if interface.AutoStack(slotData, interface.inventoryGrid):
         interface.UpdateStats(false)
         PlayPickup()
-        return true
+        # Broadcast removal if this item has a sync_id (dropped item)
+        if has_meta(&"sync_id"):
+            var syncId: String = get_meta(&"sync_id")
+            if _cm.isHost:
+                _cm.worldState.on_synced_item_picked_up(syncId)
+            else:
+                _cm.worldState.request_item_consumed.rpc_id(1, syncId)
+        queue_free()
+
     elif interface.Create(slotData, interface.inventoryGrid, false):
         interface.UpdateStats(false)
         PlayPickup()
-        return true
+        if has_meta(&"sync_id"):
+            var syncId: String = get_meta(&"sync_id")
+            if _cm.isHost:
+                _cm.worldState.on_synced_item_picked_up(syncId)
+            else:
+                _cm.worldState.request_item_consumed.rpc_id(1, syncId)
+        queue_free()
+
     else:
         interface.PlayError()
-        return false
