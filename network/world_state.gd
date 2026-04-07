@@ -51,7 +51,8 @@ func broadcast_item_drop(pickup: Node) -> void:
         var syncId: String = "drop_%d" % syncIdCounter
         pickup.set_meta(&"sync_id", syncId)
         syncedItems[syncId] = pickup
-        pickup.tree_exiting.connect(on_synced_item_freed.bind(syncId))
+        apply_pickup_patch(pickup)
+        pickup.init_manager(_cm)
         droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     else:
