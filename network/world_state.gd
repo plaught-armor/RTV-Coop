@@ -84,7 +84,6 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
         pickup.Unfreeze()
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
-    pickup.tree_exiting.connect(on_synced_item_removed.bind(syncId))
 
 
 ## Host broadcasts that a synced item was picked up — all peers remove it.
@@ -138,7 +137,6 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
         pickup.Unfreeze()
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
-    pickup.tree_exiting.connect(on_synced_item_removed.bind(syncId))
     droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
     # Broadcast to all EXCEPT the dropper
     var dropperId: int = multiplayer.get_remote_sender_id()
