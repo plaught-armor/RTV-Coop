@@ -337,6 +337,20 @@ func request_container_take_item(containerPath: String, itemIndex: int) -> void:
     # Broadcast updated loot to all peers
     sync_container_state.rpc(containerPath, _cm.SlotSerializerScript.pack_array(container.loot))
 
+## Host sends an item to a specific client's inventory.
+@rpc("authority", "call_remote", "reliable")
+func grant_pickup_to_client(packedSlot: Dictionary) -> void:
+    var slotData: SlotData = _cm.SlotSerializerScript.unpack(packedSlot)
+    if slotData == null:
+        return
+    var iface: Node = get_tree().current_scene.get_node_or_null("/root/Map/Core/UI/Interface")
+    if iface == null:
+        return
+    if iface.AutoStack(slotData, iface.inventoryGrid):
+        iface.UpdateStats(false)
+    elif iface.Create(slotData, iface.inventoryGrid, false):
+        iface.UpdateStats(false)
+
 # ---------- Pickup Sync ----------
 
 
