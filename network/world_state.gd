@@ -83,24 +83,11 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
         pickup.UpdateAttachments()
     if pickup.has_method("Unfreeze"):
         pickup.Unfreeze()
+    # Swap to patched script, preserving exports
+    apply_pickup_patch(pickup)
+    pickup.init_manager(_cm)
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
-    # When this item is freed (picked up via original Interact), broadcast removal
-    pickup.tree_exiting.connect(on_synced_item_freed.bind(syncId))
-
-
-## Called when a synced item node is freed (picked up locally).
-func on_synced_item_freed(syncId: String) -> void:
-    if syncId not in syncedItems:
-        return
-    syncedItems.erase(syncId)
-    if !_cm.isActive:
-        return
-    if _cm.isHost:
-        consumedSyncIDs.append(syncId)
-        sync_item_consumed.rpc(syncId)
-    else:
-        request_item_consumed.rpc_id(1, syncId)
 
 
 ## Host broadcasts that a synced item was picked up — all peers remove it.
@@ -152,9 +139,10 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
         pickup.UpdateAttachments()
     if pickup.has_method("Unfreeze"):
         pickup.Unfreeze()
+    apply_pickup_patch(pickup)
+    pickup.init_manager(_cm)
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
-    pickup.tree_exiting.connect(on_synced_item_freed.bind(syncId))
     droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
     # Broadcast to all EXCEPT the dropper
     var dropperId: int = multiplayer.get_remote_sender_id()
@@ -383,6 +371,18 @@ func find_pickup_scene(fileKey: String) -> PackedScene:
         if res is PackedScene:
             return res
     return null
+
+## Swaps a Pickup node's script to the patched version, preserving exports.
+func apply_pickup_patch(pickup: Node) -> void:
+    var saved_slotData: SlotData = pickup.slotData
+    var saved_mesh: MeshInstance3D = pickup.mesh
+    var saved_collision: CollisionShape3D = pickup.collision
+    var patch: Script = load("res://mod/patches/pickup_patch.gd")
+    pickup.set_script(patch)
+    pickup.slotData = saved_slotData
+    pickup.mesh = saved_mesh
+    pickup.collision = saved_collision
+    pickup.interface = get_tree().current_scene.get_node_or_null("/root/Map/Core/UI/Interface")
 
 # ---------- Simulation Sync ----------
 
