@@ -51,7 +51,8 @@ func broadcast_item_drop(pickup: Node) -> void:
         var syncId: String = "drop_%d" % syncIdCounter
         pickup.set_meta(&"sync_id", syncId)
         syncedItems[syncId] = pickup
-        droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
+        pickup.tree_exiting.connect(on_synced_item_freed.bind(syncId))
+        droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     else:
         request_item_drop.rpc_id(1, packedSlot, pos, rot)
@@ -84,6 +85,22 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
         pickup.Unfreeze()
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
+    # When this item is freed (picked up via original Interact), broadcast removal
+    pickup.tree_exiting.connect(on_synced_item_freed.bind(syncId))
+
+
+## Called when a synced item node is freed (picked up locally).
+func on_synced_item_freed(syncId: String) -> void:
+    if syncId not in syncedItems:
+        return
+    syncedItems.erase(syncId)
+    if !_cm.isActive:
+        return
+    if _cm.isHost:
+        consumedSyncIDs.append(syncId)
+        sync_item_consumed.rpc(syncId)
+    else:
+        request_item_consumed.rpc_id(1, syncId)
 
 
 ## Host broadcasts that a synced item was picked up — all peers remove it.
@@ -137,7 +154,8 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
         pickup.Unfreeze()
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
-    droppedItemHistory.append({ "id": syncId, "slot": packedSlot, "pos": pos, "rot": rot })
+    pickup.tree_exiting.connect(on_synced_item_freed.bind(syncId))
+    droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
     # Broadcast to all EXCEPT the dropper
     var dropperId: int = multiplayer.get_remote_sender_id()
     for peerId: int in _cm.connectedPeers:
