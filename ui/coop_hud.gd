@@ -8,6 +8,7 @@ var _cm: Node
 
 func init_manager(manager: Node) -> void:
     _cm = manager
+    update_hints()
 
 
 var pingTimer: float = 0.0
@@ -38,7 +39,6 @@ func _ready() -> void:
     hintsLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     hintsLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(hintsLabel)
-    update_hints()
 
 
 func _input(event: InputEvent) -> void:

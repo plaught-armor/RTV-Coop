@@ -64,7 +64,7 @@ func play_pooled(audioEvent: AudioEvent) -> void:
 func _input(event: InputEvent) -> void:
     if _cm == null:
         return
-    if _cm.gd.freeze || _cm.gd.isCaching:
+    if _cm.gd.freeze || _cm.gd.isCaching || _cm.gd.vehicle:
         return
     if _cm.panelOpen:
         return

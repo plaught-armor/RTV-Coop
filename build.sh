@@ -19,6 +19,12 @@ STEAM_HELPER_DIR="${SCRIPT_DIR}/steam_helper"
 OUTPUT_NAME="${1:-rtv-coop}"
 OUTPUT_FILE="${SCRIPT_DIR}/${OUTPUT_NAME}.vmz"
 
+# App ID: 480 (Spacewar) for dev, 1963610 for release
+STEAM_APP_ID="480"
+if [ "$2" = "release" ]; then
+    STEAM_APP_ID="1963610"
+fi
+
 # Ensure bin/ directory exists for helper binaries
 mkdir -p "${SCRIPT_DIR}/bin"
 
@@ -39,6 +45,10 @@ for lib in libsteam_api.so libsteam_api64.so steam_api64.dll; do
         echo "Included: ${lib}"
     fi
 done
+
+# Write app ID into bin/
+echo "$STEAM_APP_ID" > "${SCRIPT_DIR}/bin/steam_appid.txt"
+echo "Steam App ID: ${STEAM_APP_ID}"
 
 # Clean previous build
 rm -f "$OUTPUT_FILE"

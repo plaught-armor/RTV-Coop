@@ -342,7 +342,7 @@ func createLobby(cmd Command) Response {
 		json.Unmarshal(cmd.Params, &p)
 	}
 
-	call := sw.SteamMatchmaking().CreateLobby(sw.ELobbyType_FriendsOnly, p.MaxPlayers)
+	call := sw.SteamMatchmaking().CreateLobby(sw.ELobbyType_Public, p.MaxPlayers)
 	log.Printf("CreateLobby call: %d", call)
 
 	cr := sw.NewCallResult[LobbyCreated](call, kLobbyCreated)

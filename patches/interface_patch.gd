@@ -88,3 +88,4 @@ func Drop(target):
     target.reparent(self)
     target.queue_free()
     PlayDrop()
+    UpdateStats(true)
