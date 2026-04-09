@@ -112,7 +112,7 @@ func _physics_process(_delta: float) -> void:
 
 ## Applies [code]take_over_path[/code] patches to game scripts.
 func register_patches() -> void:
-    var patches: Array[Array] = [
+    var patches: Array[PackedStringArray] = [
         ["res://mod/patches/controller_patch.gd", "res://Scripts/Controller.gd"],
         ["res://mod/patches/door_patch.gd", "res://Scripts/Door.gd"],
         ["res://mod/patches/switch_patch.gd", "res://Scripts/Switch.gd"],
@@ -120,7 +120,7 @@ func register_patches() -> void:
         ["res://mod/patches/pickup_patch.gd", "res://Scripts/Pickup.gd"],
         ["res://mod/patches/interface_patch.gd", "res://Scripts/Interface.gd"],
     ]
-    for pair: Array in patches:
+    for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
         patch.reload()
         patch.take_over_path(pair[1])

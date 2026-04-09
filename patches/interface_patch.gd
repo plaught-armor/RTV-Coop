@@ -49,10 +49,10 @@ func Drop(target):
 
     if target.slotData.itemData.stackable:
         var boxSize = target.slotData.itemData.defaultAmount
-        var boxesNeeded = ceil(float(target.slotData.amount) / float(boxSize))
+        var boxesNeeded = ceili(target.slotData.amount / boxSize)
         var amountLeft = target.slotData.amount
 
-        for box in boxesNeeded:
+        for i: int in range(boxesNeeded):
             var pickup = file.instantiate()
             map.add_child(pickup)
             pickup.position = dropPosition
