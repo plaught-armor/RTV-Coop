@@ -584,14 +584,14 @@ func pumpUntilComplete[T any](cr *sw.CallResult[T], timeout time.Duration) (T, b
 		case <-ctx.Done():
 			return zero, false, ctx.Err()
 		case <-ticker.C:
-			// Pump callbacks so async results complete
+			// Pump manual dispatch callbacks (not RunCallbacks — manual dispatch is active)
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("PANIC in pumpUntilComplete RunCallbacks: %v", r)
+						log.Printf("PANIC in pumpUntilComplete: %v", r)
 					}
 				}()
-				sw.RunCallbacks()
+				pumpManualCallbacks()
 			}()
 			if _, complete := cr.IsComplete(); complete {
 				return cr.Result()

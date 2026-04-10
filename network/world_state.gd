@@ -424,7 +424,7 @@ func apply_pickup_patch(pickup: Node) -> void:
     var saved_slotData: SlotData = pickup.slotData
     var saved_mesh: MeshInstance3D = pickup.mesh
     var saved_collision: CollisionShape3D = pickup.collision
-    var patch: Script = load("res://mod/patches/pickup_patch.gd")
+    var patch: Script = _cm.PickupPatchScript
     pickup.set_script(patch)
     pickup.slotData = saved_slotData
     pickup.mesh = saved_mesh

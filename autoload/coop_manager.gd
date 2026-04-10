@@ -42,6 +42,8 @@ var coopUI: Control = null
 var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
 var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
 var SlotSerializerScript: Script = preload("res://mod/network/slot_serializer.gd")
+## Cached before take_over_path — avoids circular extends after path redirect.
+var PickupPatchScript: Script = preload("res://mod/patches/pickup_patch.gd")
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
