@@ -12,6 +12,8 @@ var syncIdCounter: int = 0
 var trackingItems: bool = false
 var consumedSyncIDs: Array[String] = []
 var droppedItemHistory: Array[Dictionary] = []
+## Client-side queue of local pickups waiting for sync_id confirmation from host.
+var pendingDrops: Array[Node] = []
 
 
 func init_manager(manager: Node) -> void:
@@ -25,6 +27,7 @@ func start_item_tracking() -> void:
     syncedItems.clear()
     consumedSyncIDs.clear()
     droppedItemHistory.clear()
+    pendingDrops.clear()
     syncIdCounter = 0
 
 
@@ -33,6 +36,7 @@ func stop_item_tracking() -> void:
     syncedItems.clear()
     consumedSyncIDs.clear()
     droppedItemHistory.clear()
+    pendingDrops.clear()
     syncIdCounter = 0
 
 
@@ -56,6 +60,9 @@ func broadcast_item_drop(pickup: Node) -> void:
         droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     else:
+        apply_pickup_patch(pickup)
+        pickup.init_manager(_cm)
+        pendingDrops.append(pickup)
         request_item_drop.rpc_id(1, packedSlot, pos, rot)
 
 
@@ -82,7 +89,8 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
     pickup.slotData.Update(slotData)
     if pickup.has_method("UpdateAttachments"):
         pickup.UpdateAttachments()
-    if pickup.has_method("Unfreeze"):
+    # World items stay frozen at host's settled position; dropped items get physics
+    if !syncId.begins_with("world_") && pickup.has_method("Unfreeze"):
         pickup.Unfreeze()
     # Swap to patched script, preserving exports
     apply_pickup_patch(pickup)
@@ -95,8 +103,7 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
 @rpc("authority", "call_remote", "reliable")
 func sync_item_consumed(syncId: String) -> void:
     if syncId in syncedItems:
-        var ref: WeakRef = syncedItems[syncId]
-        var node: Node = ref.get_ref()
+        var node: Node = syncedItems[syncId]
         if is_instance_valid(node):
             node.queue_free()
         syncedItems.erase(syncId)
@@ -108,8 +115,7 @@ func request_item_consumed(syncId: String) -> void:
     if !_cm.isHost:
         return
     if syncId in syncedItems:
-        var ref: WeakRef = syncedItems[syncId]
-        var node: Node = ref.get_ref()
+        var node: Node = syncedItems[syncId]
         if is_instance_valid(node):
             node.remove_from_group(&"Item")
             node.queue_free()
@@ -150,6 +156,21 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
     for peerId: int in _cm.connectedPeers:
         if peerId != dropperId:
             sync_item_drop.rpc_id(peerId, syncId, packedSlot, pos, rot)
+    # Confirm sync_id back to the dropper so their local pickup is tracked
+    confirm_item_drop.rpc_id(dropperId, syncId)
+
+
+## Host sends sync_id back to the client that dropped an item.
+## The client tags their local pickup so future interact broadcasts removal.
+@rpc("authority", "call_remote", "reliable")
+func confirm_item_drop(syncId: String) -> void:
+    if pendingDrops.is_empty():
+        return
+    var pickup: Node = pendingDrops.pop_front()
+    if !is_instance_valid(pickup):
+        return
+    pickup.set_meta(&"sync_id", syncId)
+    syncedItems[syncId] = pickup
 
 ## Sync simulation every 240 physics frames (~2s at 120Hz).
 const SIM_SYNC_FRAMES: int = 240
@@ -372,6 +393,31 @@ func find_pickup_scene(fileKey: String) -> PackedScene:
         if res is PackedScene:
             return res
     return null
+
+## Registers all existing Item-group nodes in the current scene with sync_ids.
+## Called by host after scene change. Broadcasts each item to connected clients
+## and stores in droppedItemHistory for late joiners via send_full_state.
+func register_scene_items() -> void:
+    if !_cm.isHost || !trackingItems:
+        return
+    for node: Node in get_tree().get_nodes_in_group("Item"):
+        if node.has_meta(&"sync_id"):
+            continue
+        var slotData: SlotData = node.get("slotData")
+        if slotData == null || slotData.itemData == null:
+            continue
+        syncIdCounter += 1
+        var syncId: String = "world_%d" % syncIdCounter
+        node.set_meta(&"sync_id", syncId)
+        syncedItems[syncId] = node
+        apply_pickup_patch(node)
+        node.init_manager(_cm)
+        var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
+        var pos: Vector3 = node.global_position
+        var rot: Vector3 = node.global_rotation
+        droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
+        sync_item_drop.rpc(syncId, packedSlot, pos, rot)
+
 
 ## Swaps a Pickup node's script to the patched version, preserving exports.
 func apply_pickup_patch(pickup: Node) -> void:

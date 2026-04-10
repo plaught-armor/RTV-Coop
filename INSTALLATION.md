@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [Road to Vostok](https://store.steampowered.com/app/1963610/Road_to_Vostok/) installed via Steam
-- [RTV Mod Loader](https://github.com/plaught-armor/Metro-Mod-Loader) installed (see its README for setup)
+- [RTV Mod Loader](https://github.com/plaught-armor/RTV-Mod-Loader) installed (see its README for setup)
 - Steam running
 
 ## Install

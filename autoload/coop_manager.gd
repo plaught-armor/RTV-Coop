@@ -119,6 +119,7 @@ func register_patches() -> void:
         ["res://mod/patches/transition_patch.gd", "res://Scripts/Transition.gd"],
         ["res://mod/patches/pickup_patch.gd", "res://Scripts/Pickup.gd"],
         ["res://mod/patches/interface_patch.gd", "res://Scripts/Interface.gd"],
+        ["res://mod/patches/loot_simulation_patch.gd", "res://Scripts/LootSimulation.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -409,9 +410,11 @@ func on_scene_changed() -> void:
         worldState.syncedItems.clear()
         worldState.consumedSyncIDs.clear()
         worldState.droppedItemHistory.clear()
+        worldState.pendingDrops.clear()
         worldState.syncIdCounter = 0
     if isHost:
-        pass
+        # Delay 2s so Unfreeze physics settles before capturing positions
+        get_tree().create_timer(2.0).timeout.connect(worldState.register_scene_items)
     else:
         notify_scene_loaded.rpc_id(1)
     _log("Scene changed, remote players respawned")
