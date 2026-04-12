@@ -198,19 +198,22 @@ func receive_footstep(audioPath: String) -> void:
 ## on the rising edge of [code]gameData.isFiring[/code].
 ## [param fireAudio] and [param tailAudio] are resource paths of [AudioEvent]s.
 ## [param showFlash] is false for suppressed weapons.
-func broadcast_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> void:
+## [param hitPoint], [param hitNormal], [param hitSurface] describe the bullet impact.
+func broadcast_fire_event(fireAudio: String, tailAudio: String, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurface: String = "") -> void:
     if !_cm.is_session_active():
         return
-    receive_fire_event.rpc(fireAudio, tailAudio, showFlash)
+    receive_fire_event.rpc(fireAudio, tailAudio, showFlash, hitPoint, hitNormal, hitSurface)
 
 
-## Receives a remote player's fire event — plays gunshot audio and optional muzzle flash.
+## Receives a remote player's fire event — plays gunshot audio, muzzle flash, and bullet impact.
 @rpc("any_peer", "call_remote", "unreliable")
-func receive_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> void:
+func receive_fire_event(fireAudio: String, tailAudio: String, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurface: String = "") -> void:
     var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     remoteNode.play_fire_event(fireAudio, tailAudio, showFlash)
+    if hitPoint != Vector3.ZERO:
+        remoteNode.spawn_bullet_impact(hitPoint, hitNormal, hitSurface)
 
 
 ## Broadcasts health to all remote peers. Called from [method _physics_process] at ~0.5 Hz.
@@ -230,6 +233,45 @@ func receive_vitals(health: int) -> void:
     if remoteNode == null:
         return
     remoteNode.set_meta(&"health", health)
+
+
+## Broadcasts a grenade throw to all remote peers. Called by grenade_rig_patch
+## after ThrowHighExecute or ThrowLowExecute.
+func broadcast_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
+	if !_cm.is_session_active():
+		return
+	receive_grenade_throw.rpc(grenadeScene, handleScene, throwPos, throwRotY, throwDir, basisX, force)
+
+
+## Receives a remote player's grenade throw — instantiates grenade + handle with matching physics.
+## The Grenade.gd fuse timer (3.0s) runs locally and detonates automatically.
+@rpc("any_peer", "call_remote", "reliable")
+func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
+	# Validate resource paths (only allow grenade scenes from Items/)
+	if !grenadeScene.begins_with("res://Items/Grenades/"):
+		return
+
+	var grenadePacked: PackedScene = load(grenadeScene) as PackedScene
+	if grenadePacked == null:
+		return
+
+	var grenade: RigidBody3D = grenadePacked.instantiate() as RigidBody3D
+	get_tree().root.add_child(grenade)
+	grenade.position = throwPos
+	grenade.rotation_degrees = Vector3(0, throwRotY, 0)
+	grenade.linear_velocity = throwDir * force
+	grenade.angular_velocity = basisX * 5.0
+
+	if !handleScene.is_empty() && handleScene.begins_with("res://Items/Grenades/"):
+		var handlePacked: PackedScene = load(handleScene) as PackedScene
+		if handlePacked != null:
+			var handleNode: RigidBody3D = handlePacked.instantiate() as RigidBody3D
+			get_tree().root.add_child(handleNode)
+			handleNode.position = throwPos
+			handleNode.rotation_degrees = Vector3(0, throwRotY, 0)
+			handleNode.linear_velocity = throwDir * force / 1.5
+			handleNode.angular_velocity = -basisX * 5.0
+			grenade.handle = handleNode
 
 
 ## Encodes [param data] movement booleans into a [enum MoveFlag] bitfield.

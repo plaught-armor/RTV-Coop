@@ -144,9 +144,10 @@ var activeOnClient: PackedInt32Array = []
 
 
 ## Registers all AI nodes from the AISpawner for sync ID lookup.
-## Reads existing [code]ai_sync_id[/code] metas assigned by [code]ai_spawner_patch._assign_sync_ids()[/code]
-## in [code]_ready()[/code]. Scans all three containers (A_Pool, B_Pool, Agents) since
+## Scans all three containers (A_Pool, B_Pool, Agents) since
 ## initial spawns may have already reparented some agents out of the pools.
+## If no [code]ai_sync_id[/code] metas exist (e.g. [code]_ready()[/code] took the super path
+## because CoopManager wasn't available yet), assigns them deterministically here.
 func register_spawner_pools(spawner: Node) -> void:
 	# Collect all AI nodes from pools + active agents to find max sync ID
 	var allNodes: Array[Node] = []
@@ -161,6 +162,14 @@ func register_spawner_pools(spawner: Node) -> void:
 				var idx: int = child.get_meta(&"ai_sync_id")
 				if idx > maxId:
 					maxId = idx
+
+	# If no sync IDs were assigned (spawner _ready took super path), assign now
+	if allNodes.is_empty():
+		allNodes = _assign_sync_ids_from_spawner(spawner)
+		for child: Node in allNodes:
+			var idx: int = child.get_meta(&"ai_sync_id")
+			if idx > maxId:
+				maxId = idx
 
 	slotCount = maxId + 1 if maxId >= 0 else 0
 
@@ -184,6 +193,36 @@ func register_spawner_pools(spawner: Node) -> void:
 			activeOnClient[idx] = 1
 			activeCount += 1
 	_log("register_spawner_pools: slotCount=%d nodes=%d active=%d" % [slotCount, allNodes.size(), activeCount])
+
+## Assigns deterministic sync IDs to AI pool children when the spawner patch's
+## [code]_ready()[/code] couldn't (e.g. CoopManager wasn't available yet).
+## ONLY assigns to A_Pool and B_Pool children — agents already reparented to
+## Agents are skipped because host/client pool counts diverge after spawns.
+## Returns the array of all tagged nodes (pools + any pre-tagged Agents).
+func _assign_sync_ids_from_spawner(spawner: Node) -> Array[Node]:
+	var allNodes: Array[Node] = []
+	var idx: int = 0
+	# Assign IDs to pool children only — deterministic on both host and client
+	for container_name: String in ["A_Pool", "B_Pool"]:
+		var container: Node = spawner.get_node_or_null(container_name)
+		if container == null:
+			continue
+		for child: Node in container.get_children():
+			child.set_meta(&"ai_sync_id", idx)
+			allNodes.append(child)
+			idx += 1
+	# Tag agents already reparented from pools (host only — spawned before this ran)
+	var agentsNode: Node = spawner.get_node_or_null("Agents")
+	if agentsNode != null:
+		for child: Node in agentsNode.get_children():
+			child.set_meta(&"ai_sync_id", idx)
+			allNodes.append(child)
+			idx += 1
+	if idx > 0:
+		_log("_assign_sync_ids_from_spawner: assigned 0..%d (%d total)" % [idx - 1, idx])
+	else:
+		_log("_assign_sync_ids_from_spawner: no AI nodes found")
+	return allNodes
 
 # ---------- Host Broadcast (10Hz) ----------
 

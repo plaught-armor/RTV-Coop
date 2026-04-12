@@ -276,4 +276,25 @@ func _broadcast_fire_event() -> void:
 
     if fireAudio.is_empty():
         return
-    _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor)
+
+    # Capture bullet impact via immediate physics raycast from camera
+    var hitPoint: Vector3 = Vector3.ZERO
+    var hitNormal: Vector3 = Vector3.ZERO
+    var hitSurface: String = ""
+    var cam: Camera3D = get_viewport().get_camera_3d()
+    if cam != null:
+        var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+        var from: Vector3 = cam.global_position
+        var to: Vector3 = from - cam.global_transform.basis.z * 200.0
+        var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to)
+        var result: Dictionary = space.intersect_ray(query)
+        if !result.is_empty():
+            hitPoint = result["position"]
+            hitNormal = result["normal"]
+            var collider: Object = result["collider"]
+            if collider != null && collider.get("surface") != null:
+                hitSurface = collider.get("surface")
+            elif hitSurface.is_empty():
+                hitSurface = "Generic"
+
+    _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor, hitPoint, hitNormal, hitSurface)

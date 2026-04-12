@@ -312,7 +312,12 @@ func sync_transition(transitionPath: String, currentMapName: String = "") -> voi
     if !currentMapName.is_empty():
         _cm.gd.previousMap = currentMapName
         _cm.gd.currentMap = nextMap
+    # Save client's character before scene change — matches original Transition.Interact()
+    # which calls SaveCharacter + SaveWorld after LoadScene. LoadScene is deferred,
+    # so saves run while the current scene/interface still exist.
     Loader.LoadScene(nextMap)
+    Loader.SaveCharacter()
+    Loader.SaveWorld()
 
 
 ## Host sends spawn position to clients after a scene transition.

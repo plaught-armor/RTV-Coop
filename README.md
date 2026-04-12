@@ -6,9 +6,11 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 - **2-4 player co-op** with 20Hz position sync and interpolation
 - **Steam integration** -- lobby browser, friend invites with avatars, P2P NAT traversal
-- **World state sync** -- doors, switches, time/weather synced between all players
-- **Synchronized map transitions** -- all players transition together
-- **Remote player audio** -- footsteps, jumps, and landings play spatially
+- **World state sync** -- doors, switches, containers, time/weather synced between all players
+- **AI multi-player awareness** -- enemies detect, target, and fight all players (host-authoritative, 10Hz replication)
+- **Combat sync** -- weapon fire audio, muzzle flash, bullet impact decals, AI damage routing, grenade throws
+- **Synchronized map transitions** -- all players transition and save together
+- **Remote player audio** -- footsteps, jumps, landings, gunshots, and bullet impacts play spatially
 - **Host-authoritative pickups** -- prevents item duplication
 - **Non-destructive** -- installs as a `.vmz` mod archive, no game files modified
 - **Ping overlay** -- HUD showing connected players, avatars, and round-trip times
@@ -96,10 +98,10 @@ There are two log files. **Both are needed when reporting bugs.**
 
 ## Known Limitations
 
-- **Loot container sync disabled** -- conflicts with TraderDisplay type checks
-- **No combat sync** -- weapons, hits, and damage are local only
-- **No AI awareness** -- enemies only detect the host player
 - **Ghost capsule model** -- remote players shown as translucent capsules (full model planned)
+- **Grenade damage is local** -- thrown grenades are synced visually but explosion damage is not host-authoritative yet
+- **No voice chat** -- use Steam/Discord voice as a workaround
+- **Inventory is independent** -- each player manages their own loot; no shared inventory view
 
 ---
 
@@ -108,11 +110,13 @@ There are two log files. **Both are needed when reporting bugs.**
 - [x] Position sync, ghost visuals, connection UI
 - [x] Steam lobbies, friend invites, avatars, P2P NAT traversal
 - [x] World state sync (doors, switches, time/weather)
+- [x] Loot container sync
 - [x] Transitions, pickups, footstep audio
 - [x] Metro Mod Loader packaging, Proton support
-- [ ] Loot container sync
-- [ ] AI multi-player awareness
-- [ ] Combat sync (weapons, hits, damage)
+- [x] AI multi-player awareness (detection, targeting, host-authoritative replication)
+- [x] Combat sync (weapon fire, bullet impacts, AI damage routing)
+- [x] Client equipment save across transitions
+- [x] Grenade sync (throw physics, detonation, explosion/smoke effects)
 - [ ] Third-person player model
 - [ ] Voice chat
 
@@ -125,10 +129,16 @@ This mod patches game scripts via `take_over_path()`. Other mods patching the sa
 | Script | Risk |
 |--------|------|
 | `Controller.gd` | **High** |
+| `AI.gd` | **High** |
+| `AISpawner.gd` | Medium |
+| `Interface.gd` | Medium |
 | `Door.gd` | Low |
 | `Switch.gd` | Low |
 | `Transition.gd` | Low |
 | `Pickup.gd` | Low |
+| `LootContainer.gd` | Low |
+| `LootSimulation.gd` | Low |
+| `GrenadeRig.gd` | Low |
 
 ---
 

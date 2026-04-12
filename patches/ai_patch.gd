@@ -21,15 +21,29 @@ var _cm: Node
 var targetPeerId: int = -1
 
 
+## Collision layer 20 (bit 19) — matches remote_player.gd COOP_HIT_LAYER.
+const COOP_HIT_LAYER: int = 1 << 19
+
+
 func init_manager(manager: Node) -> void:
 	_cm = manager
+	# Add co-op hit layer to AI raycasts so they detect remote player HitBodies
+	if fire != null:
+		fire.collision_mask |= COOP_HIT_LAYER
+	if LOS != null:
+		LOS.collision_mask |= COOP_HIT_LAYER
 
 # ---------- Physics Process ----------
 
 
 func _physics_process(delta: float) -> void:
 	if _cm == null:
-		_cm = get_node_or_null("/root/CoopManager")
+		var root: Node = get_tree().root if get_tree() != null else null
+		if root != null:
+			for child: Node in root.get_children():
+				if child.has_meta(&"is_coop_manager"):
+					_cm = child
+					break
 	if is_instance_valid(_cm) && _cm.is_session_active():
 		if !_cm.isHost:
 			# Client: AI visuals driven entirely by ai_state.gd snapshots
@@ -292,12 +306,7 @@ func Raycast() -> void:
 	if fire.is_colliding():
 		var hitCollider: Node = fire.get_collider()
 
-		if hitCollider.is_in_group("Player"):
-			# Hit host's local player (original behavior)
-			var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
-			hitCollider.get_child(0).WeaponDamage(dmg, weaponData.penetration)
-
-		elif hitCollider.is_in_group("CoopRemote"):
+		if hitCollider.is_in_group("CoopRemote"):
 			# Hit a remote player — find their peer ID and send damage RPC
 			var remoteRoot: Node3D = _find_remote_root(hitCollider)
 			if remoteRoot != null:
@@ -305,6 +314,11 @@ func Raycast() -> void:
 				if peerId > 0:
 					var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
 					_cm.aiState.send_ai_damage_to_peer(peerId, dmg, weaponData.penetration)
+
+		elif hitCollider.is_in_group("Player"):
+			# Hit host's local player (original behavior)
+			var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
+			hitCollider.get_child(0).WeaponDamage(dmg, weaponData.penetration)
 
 		else:
 			var hitPoint: Vector3 = fire.get_collision_point()

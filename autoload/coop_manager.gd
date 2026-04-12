@@ -56,27 +56,33 @@ const SCENE_CHECK_FRAMES: int = 60
 
 
 func _ready() -> void:
+    set_meta(&"is_coop_manager", true)
     if DEBUG:
         force_windowed()
 
     register_patches()
 
-    playerState = load("res://mod/network/player_state.gd").new()
+    var PlayerStateScript_: Script = preload("res://mod/network/player_state.gd")
+    var WorldStateScript: Script = preload("res://mod/network/world_state.gd")
+    var AIStateScript: Script = preload("res://mod/network/ai_state.gd")
+    var SteamBridgeScript: Script = preload("res://mod/network/steam_bridge.gd")
+
+    playerState = PlayerStateScript_.new()
     playerState.name = "PlayerState"
     add_child(playerState)
     playerState.init_manager(self)
 
-    worldState = load("res://mod/network/world_state.gd").new()
+    worldState = WorldStateScript.new()
     worldState.name = "WorldState"
     add_child(worldState)
     worldState.init_manager(self)
 
-    aiState = load("res://mod/network/ai_state.gd").new()
+    aiState = AIStateScript.new()
     aiState.name = "AIState"
     add_child(aiState)
     aiState.init_manager(self)
 
-    steamBridge = load("res://mod/network/steam_bridge.gd").new()
+    steamBridge = SteamBridgeScript.new()
     steamBridge.name = "SteamBridge"
     add_child(steamBridge)
     steamBridge.init_manager(self)
@@ -135,6 +141,7 @@ func register_patches() -> void:
         ["res://mod/patches/loot_simulation_patch.gd", "res://Scripts/LootSimulation.gd"],
         ["res://mod/patches/ai_spawner_patch.gd", "res://Scripts/AISpawner.gd"],
         ["res://mod/patches/ai_patch.gd", "res://Scripts/AI.gd"],
+        ["res://mod/patches/grenade_rig_patch.gd", "res://Scripts/GrenadeRig.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -331,11 +338,11 @@ func sync_name(peerName: String, steamID: String = "") -> void:
     if !steamID.is_empty():
         peerSteamIDs[senderId] = steamID
         fetch_avatar(steamID)
-    # Update name label on existing remote player node
+    # Update display name on existing remote player node
     if senderId in remoteNodes:
         var remote: Node3D = remoteNodes[senderId]
         if is_instance_valid(remote):
-            remote.get_node("NameLabel").text = sanitized
+            remote.displayName = sanitized
     _log("Peer %d name: %s (steam: %s)" % [senderId, sanitized, steamID])
 
 
@@ -394,10 +401,10 @@ func spawn_remote_player(peerId: int) -> void:
     mapNode.add_child(remote)
     remote.init_manager(self)
     # Set display name from peer registry
-    var displayName: String = get_peer_name(peerId)
-    remote.get_node("NameLabel").text = displayName
+    var peerDisplayName: String = get_peer_name(peerId)
+    remote.displayName = peerDisplayName
     remoteNodes[peerId] = remote
-    _log("Spawned remote player for peer %d (%s)" % [peerId, displayName])
+    _log("Spawned remote player for peer %d (%s)" % [peerId, peerDisplayName])
 
 
 func on_remote_node_exiting(peerId: int) -> void:
@@ -418,12 +425,12 @@ func ensure_all_spawned() -> void:
 
 func on_scene_changed() -> void:
     inject_manager()
-    _register_ai_pools()
     if !is_session_active():
         return
     ensure_all_spawned()
-    # Reset item tracking for the new scene
+    # Reset tracking state from the PREVIOUS scene before registering the new one
     aiState.clear()
+    _register_ai_pools()
     if worldState.trackingItems:
         worldState.syncedItems.clear()
         worldState.consumedSyncIDs.clear()

@@ -11,6 +11,7 @@ var targetRotationY: float = 0.0
 var targetRotationX: float = 0.0
 var moveFlags: int = 0
 var smoothSpeed: float = 15.0
+var displayName: String = ""
 
 var audioPlayer: AudioStreamPlayer3D = null
 
@@ -32,7 +33,8 @@ func init_manager(manager: Node) -> void:
     headMat.albedo_color = Color(0.8, 0.7, 0.5)
     headMesh.material_override = headMat
 
-    nameLabel.text = name
+    displayName = name
+    nameLabel.text = displayName
     targetPosition = global_position
 
     audioPlayer = AudioStreamPlayer3D.new()
@@ -42,18 +44,24 @@ func init_manager(manager: Node) -> void:
 
     # Collision body for AI raycasts (LOS + fire) to detect this remote player
     _create_collision_body()
-    # Groups for AI detection: "CoopRemote" for the patch, "Player" for the detector Area3D
+    # Group for AI detection — ai_patch checks "CoopRemote" explicitly
     add_to_group("CoopRemote")
-    add_to_group("Player")
 
 
 ## Creates a StaticBody3D with a capsule collider matching the body mesh.
 ## The body is in the "CoopRemote" and "Player" groups so AI raycasts recognize it.
+## Collision layer 20 (bit 19) — dedicated to co-op remote player hit detection.
+## Only AI raycasts have this bit in their mask (set by ai_patch.gd).
+## Keeps HitBody invisible to the Interactor, player weapons, and other systems.
+const COOP_HIT_LAYER: int = 1 << 19
+
+
 func _create_collision_body() -> void:
     var staticBody: StaticBody3D = StaticBody3D.new()
     staticBody.name = "HitBody"
+    staticBody.collision_layer = COOP_HIT_LAYER
+    staticBody.collision_mask = 0
     staticBody.add_to_group("CoopRemote")
-    staticBody.add_to_group("Player")
     # Copy peer_id meta so ai_patch can find the peer from the collider
     if has_meta(&"peer_id"):
         staticBody.set_meta(&"peer_id", get_meta(&"peer_id"))
@@ -86,7 +94,9 @@ func _physics_process(delta: float) -> void:
     # Update name label with health if available
     var health: int = get_meta(&"health", -1)
     if health >= 0:
-        nameLabel.text = "%s [%d%%]" % [name, health]
+        nameLabel.text = "%s [%d%%]" % [displayName, health]
+    else:
+        nameLabel.text = displayName
 
 
 ## Applies a network state snapshot. Called by the interpolation loop in [code]PlayerState[/code].
@@ -113,6 +123,32 @@ func play_remote_audio(audioPath: String) -> void:
     audioPlayer.volume_db = audioEvent.volume
     audioPlayer.pitch_scale = randf_range(0.9, 1.0) if audioEvent.randomPitch else 1.0
     audioPlayer.play()
+
+
+var hitDefaultScene: PackedScene = preload("res://Effects/Hit_Default.tscn")
+
+
+## Spawns a bullet impact decal + particle at the given world position.
+## Parented to the current scene root so it stays in world space.
+func spawn_bullet_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String) -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return
+    var hit: Node3D = hitDefaultScene.instantiate()
+    scene.add_child(hit)
+    hit.global_position = hitPoint
+
+    # Orient decal by normal (same logic as WeaponRig.HitEffect)
+    if hitNormal == Vector3(0, 1, 0):
+        hit.look_at(hitPoint + hitNormal, Vector3.RIGHT)
+    elif hitNormal == Vector3(0, -1, 0):
+        hit.look_at(hitPoint + hitNormal, Vector3.RIGHT)
+    else:
+        hit.look_at(hitPoint + hitNormal, Vector3.DOWN)
+    hit.global_rotation.z = randf_range(-360, 360)
+
+    hit.Emit()
+    hit.PlayHit(hitSurface)
 
 
 ## Plays a weapon fire event: gunshot audio, optional tail audio, and muzzle flash.
