@@ -106,6 +106,12 @@ func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
+    # If peer is on a different map, forward to headless map instead
+    if !_cm.is_peer_on_same_map(peerId):
+        if _cm.isHost:
+            var camPos: Vector3 = position + Vector3(0, 1.6, 0)
+            _cm.forward_position_to_headless(peerId, position, camPos, rot, flags)
+        return
     var buf: PeerBuffer = null
 
     if peerId in peerBuffers:

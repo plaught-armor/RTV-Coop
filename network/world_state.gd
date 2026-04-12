@@ -273,66 +273,6 @@ func sync_switch_state(switchPath: String, active: bool) -> void:
         sw.Deactivate()
         sw.PlaySwitch()
 
-# ---------- Transition Sync ----------
-
-
-## Client requests the host to trigger a map transition.
-@rpc("any_peer", "call_remote", "reliable")
-func request_transition(transitionPath: String) -> void:
-    if !_cm.isHost:
-        return
-    if !is_valid_path(transitionPath):
-        return
-    var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
-    if transition == null || !transition.has_method("Interact"):
-        return
-    # Broadcast to clients with current map name for spawn resolution
-    var currentMapName: String = transition.get("currentMap") if transition.get("currentMap") != null else ""
-    sync_transition.rpc(transitionPath, currentMapName)
-    # Call super.Interact() directly via deferred to avoid going through the patch
-    # (which would broadcast sync_transition a second time)
-    var nextMap: String = transition.get("nextMap")
-    if nextMap != null && !nextMap.is_empty():
-        transition.call_deferred("host_transition_deferred")
-
-
-## Host tells all clients to run a transition. Includes the current map name
-## so clients can set previousMap for correct spawn point resolution in Compiler.Spawn().
-@rpc("authority", "call_remote", "reliable")
-func sync_transition(transitionPath: String, currentMapName: String = "") -> void:
-    if !is_valid_path(transitionPath):
-        return
-    var transition: Node = get_tree().current_scene.get_node_or_null(transitionPath)
-    if transition == null:
-        return
-    var nextMap: String = transition.get("nextMap")
-    if nextMap == null || nextMap.is_empty():
-        return
-    # Set previousMap so Compiler.Spawn() finds the correct spawn point
-    if !currentMapName.is_empty():
-        _cm.gd.previousMap = currentMapName
-        _cm.gd.currentMap = nextMap
-    # Save client's character before scene change — matches original Transition.Interact()
-    # which calls SaveCharacter + SaveWorld after LoadScene. LoadScene is deferred,
-    # so saves run while the current scene/interface still exist.
-    Loader.LoadScene(nextMap)
-    Loader.SaveCharacter()
-    Loader.SaveWorld()
-
-
-## Host sends spawn position to clients after a scene transition.
-## Deferred so the host's Controller has had a frame to settle into its spawn point.
-func sync_spawn_position(pos: Vector3) -> void:
-    teleport_client.rpc(pos)
-
-
-## Teleports the client's local Controller to the given position.
-@rpc("authority", "call_remote", "reliable")
-func teleport_client(pos: Vector3) -> void:
-    var controller: Node3D = get_tree().current_scene.get_node_or_null("Core/Controller")
-    if controller != null:
-        controller.global_position = pos
-
 # ---------- Container Sync ----------
 
 

@@ -29,6 +29,12 @@ var peerNames: Dictionary[int, String] = { }
 var peerSteamIDs: Dictionary[int, String] = { }
 ## Cached avatar textures keyed by Steam ID string.
 var avatarCache: Dictionary[String, ImageTexture] = { }
+## Maps multiplayer peer ID -> scene file path of the map they are on.
+var peerMaps: Dictionary[int, String] = { }
+## Headless map simulations keyed by map scene path. Host only.
+var headlessMaps: Dictionary[String, Node] = {}
+## Persisted snapshots of headless maps after teardown.
+var mapSnapshots: Dictionary[String, Dictionary] = {}
 ## Reference to the [code]PlayerState[/code] child node handling position sync.
 var playerState: Node = null
 ## Reference to the [code]WorldState[/code] child node handling world sync.
@@ -44,6 +50,7 @@ var coopUI: Control = null
 var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
 var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
 var SlotSerializerScript: Script = preload("res://mod/network/slot_serializer.gd")
+var HeadlessMapScript: Script = preload("res://mod/network/headless_map.gd")
 ## Cached before take_over_path — avoids circular extends after path redirect.
 var PickupPatchScript: Script = preload("res://mod/patches/pickup_patch.gd")
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
@@ -170,6 +177,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
     isHost = true
     isActive = true
     peerNames[localPeerId] = steamBridge.localSteamName if steamBridge.is_ready() else "Host"
+    peerMaps[localPeerId] = get_current_map()
 
     if steamBridge.is_ready():
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
@@ -218,6 +226,13 @@ func disconnect_session() -> void:
     connectedPeers.clear()
     peerNames.clear()
     peerSteamIDs.clear()
+    peerMaps.clear()
+    for mapPath: String in headlessMaps.keys():
+        var hmap: Node = headlessMaps[mapPath]
+        hmap.teardown()
+        hmap.queue_free()
+    headlessMaps.clear()
+    mapSnapshots.clear()
     multiplayer.multiplayer_peer = null
     localPeerId = 0
     isHost = false
@@ -233,16 +248,17 @@ func disconnect_session() -> void:
 func on_peer_connected(peerId: int) -> void:
     _log("Peer connected: %d" % peerId)
     connectedPeers.append(peerId)
-    spawn_remote_player.call_deferred(peerId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
     sync_name.rpc_id(peerId, get_local_name(), localSteamID)
-    # Set generous timeout on the new peer connection
     set_peer_timeout(peerId)
     _update_rich_presence()
     _update_lobby_data()
-    # Send current world state to the new peer
-    if isHost:
-        worldState.send_full_state.call_deferred(peerId)
+    # Send our current map so peer knows where we are
+    var currentMap: String = get_current_map()
+    if !currentMap.is_empty():
+        sync_peer_map.rpc_id(peerId, currentMap)
+    # Don't spawn remote player yet — wait for sync_peer_map from peer
+    # to confirm they're on the same map
 
 
 func on_peer_disconnected(peerId: int) -> void:
@@ -253,6 +269,17 @@ func on_peer_disconnected(peerId: int) -> void:
     playerState.clear_peer(peerId)
     peerNames.erase(peerId)
     peerSteamIDs.erase(peerId)
+    var peerMap: String = peerMaps.get(peerId, "")
+    peerMaps.erase(peerId)
+    # Remove from headless map if applicable
+    if isHost && !peerMap.is_empty() && peerMap in headlessMaps:
+        var hmap: Node = headlessMaps[peerMap]
+        hmap.remove_client(peerId)
+        if hmap.clientPeers.is_empty():
+            mapSnapshots[peerMap] = hmap.snapshot()
+            hmap.teardown()
+            hmap.queue_free()
+            headlessMaps.erase(peerMap)
     _update_rich_presence()
     _update_lobby_data()
     if peerId in remoteNodes:
@@ -266,12 +293,16 @@ func on_connected_to_server() -> void:
     localPeerId = multiplayer.get_unique_id()
     isActive = true
     peerNames[localPeerId] = get_local_name()
+    var currentMap: String = get_current_map()
+    peerMaps[localPeerId] = currentMap
     set_peer_timeout(1) # Server is always peer ID 1
     worldState.start_item_tracking()
     _update_rich_presence()
     _log("Connected to server (id: %d)" % localPeerId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
     sync_name.rpc(get_local_name(), localSteamID)
+    if !currentMap.is_empty():
+        sync_peer_map.rpc(currentMap)
 
 
 func on_connection_failed() -> void:
@@ -386,6 +417,8 @@ func get_peer_avatar(peerId: int) -> ImageTexture:
 func spawn_remote_player(peerId: int) -> void:
     if peerId in remoteNodes:
         return
+    if !is_peer_on_same_map(peerId):
+        return
     var mapNode: Node = get_tree().current_scene
     if !is_instance_valid(mapNode):
         return
@@ -427,6 +460,15 @@ func on_scene_changed() -> void:
     inject_manager()
     if !is_session_active():
         return
+    var currentMap: String = get_current_map()
+    peerMaps[localPeerId] = currentMap
+    # Despawn remote players from the old map
+    for peerId: int in remoteNodes.keys():
+        if !is_peer_on_same_map(peerId):
+            var node: Node3D = remoteNodes[peerId]
+            if is_instance_valid(node):
+                node.queue_free()
+            remoteNodes.erase(peerId)
     ensure_all_spawned()
     # Reset tracking state from the PREVIOUS scene before registering the new one
     aiState.clear()
@@ -438,17 +480,22 @@ func on_scene_changed() -> void:
         worldState.pendingDrops.clear()
         worldState.syncIdCounter = 0
     if isHost:
+        # If we arrived at a map that was running headlessly, extract + transfer state
+        var handoffSnap: Dictionary = _teardown_headless_map(currentMap)
+        if !handoffSnap.is_empty():
+            get_tree().create_timer(2.0).timeout.connect(_apply_handoff_state.bind(handoffSnap))
         # Cancel any previous timer from a rapid scene re-entry
         if is_instance_valid(itemRegistrationTimer) && itemRegistrationTimer.time_left > 0:
             itemRegistrationTimer.timeout.disconnect(worldState.register_scene_items)
         # Delay 2s so Unfreeze physics settles before capturing positions
         itemRegistrationTimer = get_tree().create_timer(2.0)
         itemRegistrationTimer.timeout.connect(worldState.register_scene_items)
-    else:
-        notify_scene_loaded.rpc_id(1)
+    # Broadcast our new map to all peers
+    if !currentMap.is_empty():
+        sync_peer_map.rpc(currentMap)
     _update_rich_presence()
     _update_lobby_data()
-    _log("Scene changed, remote players respawned")
+    _log("Scene changed to %s" % currentMap)
 
 
 ## Client tells host they've finished loading the new scene.
@@ -458,8 +505,9 @@ func notify_scene_loaded() -> void:
         return
     var peerId: int = multiplayer.get_remote_sender_id()
     _log("Peer %d finished loading" % peerId)
-    worldState.send_full_state(peerId)
-    aiState.send_full_state(peerId)
+    if is_peer_on_same_map(peerId):
+        worldState.send_full_state(peerId)
+        aiState.send_full_state(peerId)
 
 
 ## Injects [code]_cm[/code] into all patched nodes in the current scene.
@@ -561,6 +609,140 @@ func _get_current_map_name() -> String:
         return ""
     # "res://Scenes/Village.tscn" -> "Village"
     return path.get_file().get_basename()
+
+# ---------- Map Tracking ----------
+
+
+## Returns the scene file path of the current map.
+func get_current_map() -> String:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return ""
+    return scene.scene_file_path
+
+
+## Returns true if [param peerId] is on the same map as the local player.
+func is_peer_on_same_map(peerId: int) -> bool:
+    var localMap: String = get_current_map()
+    if localMap.is_empty():
+        return false
+    return peerMaps.get(peerId, "") == localMap
+
+
+## RPC: peer broadcasts which map they are on.
+@rpc("any_peer", "call_remote", "reliable")
+func sync_peer_map(mapPath: String) -> void:
+    var senderId: int = multiplayer.get_remote_sender_id()
+    var oldMap: String = peerMaps.get(senderId, "")
+    peerMaps[senderId] = mapPath
+    var localMap: String = get_current_map()
+    _log("Peer %d map: %s" % [senderId, mapPath])
+
+    if mapPath == localMap:
+        # Peer arrived on our map — spawn their remote player
+        spawn_remote_player.call_deferred(senderId)
+        if isHost:
+            worldState.send_full_state.call_deferred(senderId)
+            aiState.send_full_state.call_deferred(senderId)
+            _teardown_headless_map(mapPath)
+    elif oldMap == localMap:
+        # Peer left our map — despawn their remote player
+        if senderId in remoteNodes:
+            var node: Node3D = remoteNodes[senderId]
+            if is_instance_valid(node):
+                node.queue_free()
+            remoteNodes.erase(senderId)
+        playerState.clear_peer(senderId)
+
+    # Host: manage headless maps for peers on maps the host isn't on
+    if isHost:
+        _update_headless_maps(senderId, oldMap, mapPath)
+
+# ---------- Headless Map Management ----------
+
+
+## Creates or updates headless maps when a peer changes maps.
+func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
+    var localMap: String = get_current_map()
+
+    # Remove peer from old headless map
+    if !oldMap.is_empty() && oldMap != localMap && oldMap in headlessMaps:
+        var oldHmap: Node = headlessMaps[oldMap]
+        oldHmap.remove_client(peerId)
+        if oldHmap.clientPeers.is_empty():
+            mapSnapshots[oldMap] = oldHmap.snapshot()
+            oldHmap.teardown()
+            oldHmap.queue_free()
+            headlessMaps.erase(oldMap)
+            _log("Headless map freed: %s (snapshot saved)" % oldMap)
+
+    # Add peer to new headless map (if host isn't on that map)
+    if !newMap.is_empty() && newMap != localMap:
+        if newMap not in headlessMaps:
+            var hmap: Node = HeadlessMapScript.new()
+            hmap.name = "Headless_%s" % newMap.get_file().get_basename()
+            add_child(hmap)
+            hmap.init_manager(self)
+            if hmap.setup(newMap):
+                headlessMaps[newMap] = hmap
+                if newMap in mapSnapshots:
+                    hmap.restore(mapSnapshots[newMap])
+                    mapSnapshots.erase(newMap)
+                hmap.start.call_deferred()
+                _log("Headless map created: %s" % newMap)
+            else:
+                hmap.queue_free()
+                return
+        headlessMaps[newMap].add_client(peerId)
+
+
+## Tears down a headless map and returns its snapshot for handoff.
+func _teardown_headless_map(mapPath: String) -> Dictionary:
+    if mapPath not in headlessMaps:
+        return {}
+    var hmap: Node = headlessMaps[mapPath]
+    var snap: Dictionary = hmap.snapshot()
+    hmap.teardown()
+    hmap.queue_free()
+    headlessMaps.erase(mapPath)
+    _log("Headless map transferred to real scene: %s" % mapPath)
+    return snap
+
+
+## Applies state from a headless SubViewport to the real scene after host arrives.
+func _apply_handoff_state(snap: Dictionary) -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return
+    var doors: Dictionary = snap.get("doors", {})
+    for doorPath: String in doors:
+        var door: Node = scene.get_node_or_null(doorPath)
+        if !is_instance_valid(door) || !(door is Door):
+            continue
+        var state: Dictionary = doors[doorPath]
+        door.isOpen = state.get("isOpen", false)
+        door.locked = state.get("locked", false)
+        if door.isOpen:
+            door.animationTime = 4.0
+    var switches: Dictionary = snap.get("switches", {})
+    for switchPath: String in switches:
+        var sw: Node = scene.get_node_or_null(switchPath)
+        if !is_instance_valid(sw) || !sw.has_method("Activate"):
+            continue
+        var active: bool = switches[switchPath]
+        if active && !sw.active:
+            sw.Activate()
+        elif !active && sw.active:
+            sw.Deactivate()
+    _log("Handoff applied: %d doors, %d switches" % [doors.size(), switches.size()])
+
+
+## Forwards a client's position to the appropriate headless map.
+func forward_position_to_headless(peerId: int, pos: Vector3, camPos: Vector3, rot: Vector3, flags: int) -> void:
+    var peerMap: String = peerMaps.get(peerId, "")
+    if peerMap.is_empty() || peerMap not in headlessMaps:
+        return
+    headlessMaps[peerMap].update_client_position(peerId, pos, camPos, rot, flags)
 
 # ---------- Utility ----------
 

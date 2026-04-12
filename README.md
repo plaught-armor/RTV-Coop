@@ -9,7 +9,8 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 - **World state sync** -- doors, switches, containers, time/weather synced between all players
 - **AI multi-player awareness** -- enemies detect, target, and fight all players (host-authoritative, 10Hz replication)
 - **Combat sync** -- weapon fire audio, muzzle flash, bullet impact decals, AI damage routing, grenade throws
-- **Synchronized map transitions** -- all players transition and save together
+- **Independent map transitions** -- players can explore different maps simultaneously
+- **Headless AI** -- host runs AI for remote maps via SubViewport, enemies detect all players everywhere
 - **Remote player audio** -- footsteps, jumps, landings, gunshots, and bullet impacts play spatially
 - **Host-authoritative pickups** -- prevents item duplication
 - **Non-destructive** -- installs as a `.vmz` mod archive, no game files modified
@@ -117,6 +118,7 @@ There are two log files. **Both are needed when reporting bugs.**
 - [x] Combat sync (weapon fire, bullet impacts, AI damage routing)
 - [x] Client equipment save across transitions
 - [x] Grenade sync (throw physics, detonation, explosion/smoke effects)
+- [x] Independent map transitions (headless SubViewport AI on host)
 - [ ] Third-person player model
 - [ ] Voice chat
 

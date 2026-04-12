@@ -1,6 +1,9 @@
-## Patch for [code]Transition.gd[/code] — enforces host-only map transitions in co-op.
-## Clients request the host to trigger the transition, preventing unilateral scene changes.
-## In single-player, falls through to the original [method Interact].
+## Patch for [code]Transition.gd[/code] — independent map transitions in co-op.
+## Each player transitions on their own via [code]super.Interact()[/code].
+## Map change is broadcast automatically by [code]coop_manager.on_scene_changed()[/code]
+## via [code]sync_peer_map[/code] RPC. This patch exists as a hook point — the original
+## Interact() handles saving, simulation updates, and scene loading correctly for each
+## player independently.
 extends "res://Scripts/Transition.gd"
 
 var _cm: Node
@@ -12,21 +15,3 @@ func init_manager(manager: Node) -> void:
 
 func _ready():
     super._ready()
-
-
-func Interact():
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
-        super.Interact()
-        return
-
-    var transitionPath: String = get_tree().current_scene.get_path_to(self)
-    if _cm.isHost:
-        var mapName: String = currentMap if currentMap != null else ""
-        _cm.worldState.sync_transition.rpc(transitionPath, mapName)
-        host_transition_deferred.call_deferred()
-    else:
-        _cm.worldState.request_transition.rpc_id(1, transitionPath)
-
-
-func host_transition_deferred() -> void:
-    super.Interact()
