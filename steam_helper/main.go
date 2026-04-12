@@ -46,12 +46,14 @@ const (
 
 type Command struct {
 	Cmd    string          `json:"cmd"`
+	ReqID  int             `json:"req_id,omitempty"`
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
 type Response struct {
 	OK    bool   `json:"ok"`
 	Cmd   string `json:"cmd"`
+	ReqID int    `json:"req_id,omitempty"`
 	Data  any    `json:"data,omitempty"`
 	Error string `json:"error,omitempty"`
 }
@@ -75,7 +77,7 @@ var (
 func main() {
 	flag.IntVar(&port, "port", 27099, "TCP port to listen on")
 	var appIDFlag uint
-	flag.UintVar(&appIDFlag, "appid", 2141300, "Steam App ID (Road to Vostok Demo)")
+	flag.UintVar(&appIDFlag, "appid", 1963610, "Steam App ID (Road to Vostok)")
 	flag.Parse()
 	appID = uint32(appIDFlag)
 
@@ -249,7 +251,9 @@ func handleConn(conn net.Conn) {
 			enc.Encode(Response{OK: false, Error: "invalid json"})
 			continue
 		}
-		enc.Encode(dispatch(cmd))
+		resp := dispatch(cmd)
+		resp.ReqID = cmd.ReqID
+		enc.Encode(resp)
 	}
 }
 
@@ -284,8 +288,18 @@ func dispatch(cmd Command) (resp Response) {
 		return runOnSteamThread(func() Response { return openInviteDialog(cmd) })
 	case "get_avatar":
 		return runOnSteamThread(func() Response { return getAvatar(cmd) })
+	case "get_avatar_bin":
+		return runOnSteamThread(func() Response { return getAvatarBinary(cmd) })
 	case "check_launch_invite":
 		return runOnSteamThread(func() Response { return checkLaunchInvite(cmd) })
+	case "set_rich_presence":
+		return runOnSteamThread(func() Response { return setRichPresence(cmd) })
+	case "clear_rich_presence":
+		return runOnSteamThread(func() Response { return clearRichPresence(cmd) })
+	case "set_lobby_data":
+		return runOnSteamThread(func() Response { return setLobbyData(cmd) })
+	case "get_lobby_data":
+		return runOnSteamThread(func() Response { return getLobbyData(cmd) })
 	case "start_p2p_host":
 		return runOnSteamThread(func() Response { return cmdStartP2PHost(cmd) })
 	case "start_p2p_client":
@@ -389,6 +403,7 @@ func listLobbies(_ Command) Response {
 			"host_steam_id": mm.GetLobbyData(id, "host_steam_id"),
 			"players":       mm.GetNumLobbyMembers(id),
 			"max_players":   mm.GetLobbyMemberLimit(id),
+			"map":           mm.GetLobbyData(id, "map"),
 		})
 	}
 	return ok("list_lobbies", lobbies)
@@ -455,19 +470,7 @@ func getFriends(_ Command) Response {
 		if inGame {
 			entry["game_id"] = fmt.Sprintf("%d", gameInfo.GameID)
 		}
-		// Avatar
-		avatarHandle := friends.GetSmallFriendAvatar(id)
-		if avatarHandle > 0 {
-			w, h, sizeOk := sw.SteamUtils().GetImageSize(int(avatarHandle))
-			if sizeOk && w > 0 && h > 0 {
-				buf := make([]byte, w*h*4)
-				if sw.SteamUtils().GetImageRGBA(int(avatarHandle), buf) {
-					entry["avatar"] = base64.StdEncoding.EncodeToString(buf)
-					entry["avatar_w"] = w
-					entry["avatar_h"] = h
-				}
-			}
-		}
+		// Avatars stripped from friends list — fetch via get_avatar_bin instead
 		result = append(result, entry)
 	}
 	return ok("get_friends", result)
@@ -527,6 +530,124 @@ func getAvatar(cmd Command) Response {
 		"avatar":   base64.StdEncoding.EncodeToString(buf),
 		"avatar_w": w,
 		"avatar_h": h,
+	})
+}
+
+// --- Binary Avatar ---
+
+func getAvatarBinary(cmd Command) Response {
+	var p struct {
+		SteamID string `json:"steam_id"`
+	}
+	if err := json.Unmarshal(cmd.Params, &p); err != nil || p.SteamID == "" {
+		return fail("get_avatar_bin", "missing steam_id")
+	}
+	var id uint64
+	fmt.Sscanf(p.SteamID, "%d", &id)
+
+	handle := sw.SteamFriends().GetSmallFriendAvatar(sw.CSteamID(id))
+	if handle <= 0 {
+		return fail("get_avatar_bin", "no avatar available")
+	}
+	w, h, sizeOk := sw.SteamUtils().GetImageSize(int(handle))
+	if !sizeOk || w == 0 || h == 0 {
+		return fail("get_avatar_bin", "invalid image size")
+	}
+	buf := make([]byte, w*h*4)
+	if !sw.SteamUtils().GetImageRGBA(int(handle), buf) {
+		return fail("get_avatar_bin", "GetImageRGBA failed")
+	}
+
+	// Send binary: [0x00][4 bytes total len BE][0x01 type][1 byte id_len][steam_id][2 bytes w BE][2 bytes h BE][RGBA]
+	idBytes := []byte(p.SteamID)
+	payloadLen := 1 + 1 + len(idBytes) + 2 + 2 + len(buf) // type + id_len + id + w + h + rgba
+	msg := make([]byte, 0, 5+payloadLen)
+	msg = append(msg, 0x00) // binary marker
+	msg = append(msg, byte(payloadLen>>24), byte(payloadLen>>16), byte(payloadLen>>8), byte(payloadLen))
+	msg = append(msg, 0x01)            // type: avatar
+	msg = append(msg, byte(len(idBytes))) // steam_id length
+	msg = append(msg, idBytes...)
+	msg = append(msg, byte(w>>8), byte(w))
+	msg = append(msg, byte(h>>8), byte(h))
+	msg = append(msg, buf...)
+
+	pushBinary(msg)
+	return ok("get_avatar_bin", map[string]any{"steam_id": p.SteamID, "binary": true})
+}
+
+// pushBinary writes raw bytes to the active TCP connection.
+func pushBinary(data []byte) {
+	activeConnMu.Lock()
+	conn := activeConn
+	activeConnMu.Unlock()
+	if conn == nil {
+		return
+	}
+	conn.Write(data)
+}
+
+// --- Rich Presence ---
+
+func setRichPresence(cmd Command) Response {
+	var p struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(cmd.Params, &p); err != nil || p.Key == "" {
+		return fail("set_rich_presence", "missing key")
+	}
+	sw.SteamFriends().SetRichPresence(p.Key, p.Value)
+	return ok("set_rich_presence", nil)
+}
+
+func clearRichPresence(_ Command) Response {
+	// go-steamworks doesn't bind ClearRichPresence — set keys to empty instead
+	sw.SteamFriends().SetRichPresence("status", "")
+	sw.SteamFriends().SetRichPresence("steam_display", "")
+	return ok("clear_rich_presence", nil)
+}
+
+// --- Lobby Data ---
+
+func setLobbyData(cmd Command) Response {
+	var p struct {
+		LobbyID string `json:"lobby_id"`
+		Key     string `json:"key"`
+		Value   string `json:"value"`
+	}
+	if err := json.Unmarshal(cmd.Params, &p); err != nil || p.Key == "" {
+		return fail("set_lobby_data", "missing key")
+	}
+	lobby := currentLobby
+	if p.LobbyID != "" {
+		var id uint64
+		fmt.Sscanf(p.LobbyID, "%d", &id)
+		lobby = sw.CSteamID(id)
+	}
+	if uint64(lobby) == 0 {
+		return fail("set_lobby_data", "no active lobby")
+	}
+	success := sw.SteamMatchmaking().SetLobbyData(lobby, p.Key, p.Value)
+	if !success {
+		return fail("set_lobby_data", "SetLobbyData failed")
+	}
+	return ok("set_lobby_data", nil)
+}
+
+func getLobbyData(cmd Command) Response {
+	var p struct {
+		LobbyID string `json:"lobby_id"`
+		Key     string `json:"key"`
+	}
+	if err := json.Unmarshal(cmd.Params, &p); err != nil || p.LobbyID == "" || p.Key == "" {
+		return fail("get_lobby_data", "missing lobby_id or key")
+	}
+	var id uint64
+	fmt.Sscanf(p.LobbyID, "%d", &id)
+	value := sw.SteamMatchmaking().GetLobbyData(sw.CSteamID(id), p.Key)
+	return ok("get_lobby_data", map[string]any{
+		"key":   p.Key,
+		"value": value,
 	})
 }
 

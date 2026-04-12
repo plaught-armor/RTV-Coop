@@ -9,6 +9,8 @@ var _cm: Node
 func init_manager(manager: Node) -> void:
     _cm = manager
 
+
+
 ## TCP port the helper listens on. Fixed at 27099 for Proton (wrapper launches helper).
 ## Randomized per instance in editor for multi-instance testing.
 var HELPER_PORT: int = 27099
@@ -20,7 +22,16 @@ const CONNECT_RETRY: float = 0.25
 var helperPID: int = -1
 var tcp: StreamPeerTCP = StreamPeerTCP.new()
 var connected: bool = false
-var readBuffer: String = ""
+var readBuffer: PackedByteArray = PackedByteArray()
+## Read offset into readBuffer — avoids copying on every dispatch cycle.
+## Buffer is compacted only when readOffset exceeds half the buffer size.
+var readOffset: int = 0
+const COMPACT_THRESHOLD: int = 4096
+var newlineByte: int = "\n".to_utf8_buffer()[0]
+## Binary message marker byte (0x00). JSON lines always start with '{' (0x7B).
+const BIN_MARKER: int = 0x00
+## Pending binary avatar callback keyed by steam_id.
+var pendingAvatarCallbacks: Dictionary[String, Callable] = {}
 
 ## Cached Steam identity after first get_user call.
 var localSteamName: String = ""
@@ -28,8 +39,10 @@ var localSteamID: String = ""
 ## Cached ownership result after first check_ownership call.
 var ownsGame: bool = false
 
-## Pending async callbacks keyed by command name.
-var pendingCallbacks: Dictionary[String, Callable] = { }
+## Pending async callbacks keyed by request ID (int).
+var pendingCallbacks: Dictionary[int, Callable] = {}
+## Monotonic request ID counter.
+var nextReqId: int = 1
 
 var connectTimer: float = 0.0
 var connecting: bool = false
@@ -136,53 +149,114 @@ func on_ownership_result(response: Dictionary) -> void:
 
 
 ## Reads complete JSON lines from TCP and dispatches to pending callbacks.
+## Uses PackedByteArray with offset tracking to avoid copying on every cycle.
+## Buffer is compacted only when consumed data exceeds [constant COMPACT_THRESHOLD].
 func read_responses() -> void:
     var available: int = tcp.get_available_bytes()
     if available <= 0:
         return
 
     var chunk: PackedByteArray = tcp.get_data(available)[1]
-    readBuffer += chunk.get_string_from_utf8()
+    readBuffer.append_array(chunk)
 
-    while "\n" in readBuffer:
-        var newlineIdx: int = readBuffer.find("\n")
-        var line: String = readBuffer.substr(0, newlineIdx)
-        readBuffer = readBuffer.substr(newlineIdx + 1)
-
-        if line.is_empty():
+    var bufSize: int = readBuffer.size()
+    while readOffset < bufSize:
+        # Binary message: [0x00][4 bytes length BE][payload]
+        if readBuffer[readOffset] == BIN_MARKER:
+            if bufSize - readOffset < 5:
+                break
+            var msgLen: int = (readBuffer[readOffset + 1] << 24) | (readBuffer[readOffset + 2] << 16) | (readBuffer[readOffset + 3] << 8) | readBuffer[readOffset + 4]
+            if bufSize - readOffset < 5 + msgLen:
+                break
+            var payload: PackedByteArray = readBuffer.slice(readOffset + 5, readOffset + 5 + msgLen)
+            _dispatch_binary(payload)
+            readOffset += 5 + msgLen
             continue
 
-        var response: Variant = JSON.parse_string(line)
-        if response == null || !(response is Dictionary):
-            continue
+        # JSON line: terminated by newline
+        var nlIdx: int = readBuffer.find(newlineByte, readOffset)
+        if nlIdx < 0:
+            break
+        if nlIdx > readOffset:
+            var lineBytes: PackedByteArray = readBuffer.slice(readOffset, nlIdx)
+            var line: String = lineBytes.get_string_from_utf8()
+            _dispatch_response(line)
+        readOffset = nlIdx + 1
 
-        var cmd: String = response.get("cmd", "")
+    # Compact buffer when consumed data exceeds threshold
+    if readOffset >= COMPACT_THRESHOLD:
+        readBuffer = readBuffer.slice(readOffset)
+        readOffset = 0
 
-        # Handle push events from the helper (no pending callback)
-        if cmd == "invite_received":
-            on_invite_received(response)
-            continue
 
-        if cmd in pendingCallbacks:
-            var cb: Callable = pendingCallbacks[cmd]
-            pendingCallbacks.erase(cmd)
+## Dispatches a binary message. Format: [1 byte type][type-specific payload].
+## Type 0x01 = avatar: [1 byte steam_id_len][steam_id bytes][2 bytes w BE][2 bytes h BE][RGBA bytes]
+func _dispatch_binary(payload: PackedByteArray) -> void:
+    if payload.is_empty():
+        return
+    var msgType: int = payload[0]
+    if msgType == 0x01:
+        # Avatar binary
+        if payload.size() < 6:
+            return
+        var idLen: int = payload[1]
+        if payload.size() < 2 + idLen + 4:
+            return
+        var steamID: String = payload.slice(2, 2 + idLen).get_string_from_utf8()
+        var w: int = (payload[2 + idLen] << 8) | payload[3 + idLen]
+        var h: int = (payload[4 + idLen] << 8) | payload[5 + idLen]
+        var rgbaStart: int = 6 + idLen
+        var expectedSize: int = w * h * 4
+        if payload.size() < rgbaStart + expectedSize:
+            return
+        var rgba: PackedByteArray = payload.slice(rgbaStart, rgbaStart + expectedSize)
+        if steamID in pendingAvatarCallbacks:
+            var cb: Callable = pendingAvatarCallbacks[steamID]
+            pendingAvatarCallbacks.erase(steamID)
             if cb.is_valid():
-                cb.call(response)
+                cb.call(steamID, w, h, rgba)
+
+
+## Parses a single JSON response line and dispatches it.
+func _dispatch_response(line: String) -> void:
+    var response: Variant = JSON.parse_string(line)
+    if response == null || !(response is Dictionary):
+        return
+
+    var cmd: String = response.get("cmd", "")
+
+    # Handle push events from the helper (no pending callback, no req_id)
+    if cmd == "invite_received":
+        on_invite_received(response)
+        return
+
+    # Match by req_id for normal command responses
+    var reqId: int = response.get("req_id", 0)
+    if reqId > 0 && reqId in pendingCallbacks:
+        var cb: Callable = pendingCallbacks[reqId]
+        pendingCallbacks.erase(reqId)
+        if cb.is_valid():
+            cb.call(response)
 
 
 ## Sends a JSON command to the helper and registers a callback for the response.
+## Each command gets a unique [code]req_id[/code] so multiple calls of the same
+## command don't overwrite each other's callbacks.
 func send_command(cmd: String, params: Dictionary, callback: Callable) -> void:
     if !connected:
         if callback.is_valid():
             callback.call({ "ok": false, "cmd": cmd, "error": "not connected" })
         return
 
-    var payload: Dictionary = { "cmd": cmd }
+    var reqId: int = nextReqId
+    nextReqId += 1
+    var payload: Dictionary = { "cmd": cmd, "req_id": reqId }
     if !params.is_empty():
         payload["params"] = params
     var jsonLine: String = "%s\n" % JSON.stringify(payload)
     tcp.put_data(jsonLine.to_utf8_buffer())
-    pendingCallbacks[cmd] = callback
+    if callback.is_valid():
+        pendingCallbacks[reqId] = callback
 
 
 ## Shuts down the helper process and TCP connection.
@@ -249,6 +323,15 @@ func check_launch_invite(callback: Callable) -> void:
     send_command("check_launch_invite", { }, callback)
 
 
+## Requests a binary avatar transfer. The helper sends raw RGBA bytes via the binary
+## channel instead of base64 JSON. Callback signature: (steamID, w, h, rgba: PackedByteArray).
+func get_avatar_binary(steamID: String, callback: Callable) -> void:
+    if !connected:
+        return
+    pendingAvatarCallbacks[steamID] = callback
+    send_command("get_avatar_bin", { "steam_id": steamID }, Callable())
+
+
 func on_invite_received(response: Dictionary) -> void:
     if !response.get("ok", false):
         return
@@ -271,6 +354,35 @@ func on_launch_invite_checked(response: Dictionary) -> void:
         return
     _log("Launch invite detected — joining lobby %s" % lobbyID)
     _cm.coopUI.on_lobby_join_pressed(lobbyID)
+
+
+## Sets a Steam Rich Presence key/value pair visible on the friends list.
+func set_rich_presence(key: String, value: String) -> void:
+    if !connected:
+        return
+    send_command("set_rich_presence", { "key": key, "value": value }, Callable())
+
+
+## Clears all Rich Presence keys.
+func clear_rich_presence() -> void:
+    if !connected:
+        return
+    send_command("clear_rich_presence", {}, Callable())
+
+
+## Sets a key/value on the current lobby (or specified lobby).
+func set_lobby_data(key: String, value: String, lobbyID: String = "") -> void:
+    if !connected:
+        return
+    var params: Dictionary = { "key": key, "value": value }
+    if !lobbyID.is_empty():
+        params["lobby_id"] = lobbyID
+    send_command("set_lobby_data", params, Callable())
+
+
+## Gets a key from a lobby. Result delivered via callback.
+func get_lobby_data(lobbyID: String, key: String, callback: Callable) -> void:
+    send_command("get_lobby_data", { "lobby_id": lobbyID, "key": key }, callback)
 
 
 ## Starts a Steam Networking Sockets P2P listen socket on the host.

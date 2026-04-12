@@ -14,7 +14,7 @@ func _ready():
 
 
 func Interact():
-    if _cm == null || !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Interact()
         return
 
@@ -27,7 +27,7 @@ func Interact():
 
 
 func CheckKey():
-    if _cm == null || !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.CheckKey()
         return
 
@@ -36,7 +36,7 @@ func CheckKey():
         if !locked:
             var doorPath: String = get_tree().current_scene.get_path_to(self)
             _cm.worldState.sync_door_unlock.rpc(doorPath)
-            if linked:
+            if is_instance_valid(linked):
                 var linkedPath: String = get_tree().current_scene.get_path_to(linked)
                 _cm.worldState.sync_door_unlock.rpc(linkedPath)
     else:

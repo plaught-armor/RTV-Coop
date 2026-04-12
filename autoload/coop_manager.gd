@@ -33,6 +33,8 @@ var avatarCache: Dictionary[String, ImageTexture] = { }
 var playerState: Node = null
 ## Reference to the [code]WorldState[/code] child node handling world sync.
 var worldState: Node = null
+## Reference to the [code]AIState[/code] child node handling AI replication.
+var aiState: Node = null
 ## Reference to the [code]SteamBridge[/code] child node for Steam helper IPC.
 var steamBridge: Node = null
 ## Reference to the co-op UI panel.
@@ -47,6 +49,8 @@ var PickupPatchScript: Script = preload("res://mod/patches/pickup_patch.gd")
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
+## Timer for deferred register_scene_items after scene change.
+var itemRegistrationTimer: SceneTreeTimer = null
 ## Check scene every 60 physics frames (~0.5s at 120Hz).
 const SCENE_CHECK_FRAMES: int = 60
 
@@ -66,6 +70,11 @@ func _ready() -> void:
     worldState.name = "WorldState"
     add_child(worldState)
     worldState.init_manager(self)
+
+    aiState = load("res://mod/network/ai_state.gd").new()
+    aiState.name = "AIState"
+    add_child(aiState)
+    aiState.init_manager(self)
 
     steamBridge = load("res://mod/network/steam_bridge.gd").new()
     steamBridge.name = "SteamBridge"
@@ -93,6 +102,7 @@ func _ready() -> void:
     multiplayer.server_disconnected.connect(on_server_disconnected)
 
     inject_manager.call_deferred()
+    _register_ai_pools.call_deferred()
     # Defer Steam helper launch until after ModLoader finishes
     steamBridge.launch.call_deferred()
     _log("Initialized (debug: %s)" % str(DEBUG))
@@ -121,7 +131,10 @@ func register_patches() -> void:
         ["res://mod/patches/transition_patch.gd", "res://Scripts/Transition.gd"],
         ["res://mod/patches/pickup_patch.gd", "res://Scripts/Pickup.gd"],
         ["res://mod/patches/interface_patch.gd", "res://Scripts/Interface.gd"],
+        ["res://mod/patches/loot_container_patch.gd", "res://Scripts/LootContainer.gd"],
         ["res://mod/patches/loot_simulation_patch.gd", "res://Scripts/LootSimulation.gd"],
+        ["res://mod/patches/ai_spawner_patch.gd", "res://Scripts/AISpawner.gd"],
+        ["res://mod/patches/ai_patch.gd", "res://Scripts/AI.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -156,6 +169,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
     worldState.start_item_tracking()
+    _update_rich_presence()
     _log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
 
@@ -203,6 +217,7 @@ func disconnect_session() -> void:
     isActive = false
     worldState.stop_item_tracking()
     steamBridge.leave_lobby()
+    steamBridge.clear_rich_presence()
     _log("Disconnected")
 
 # ---------- Signal Handlers ----------
@@ -216,6 +231,8 @@ func on_peer_connected(peerId: int) -> void:
     sync_name.rpc_id(peerId, get_local_name(), localSteamID)
     # Set generous timeout on the new peer connection
     set_peer_timeout(peerId)
+    _update_rich_presence()
+    _update_lobby_data()
     # Send current world state to the new peer
     if isHost:
         worldState.send_full_state.call_deferred(peerId)
@@ -229,6 +246,8 @@ func on_peer_disconnected(peerId: int) -> void:
     playerState.clear_peer(peerId)
     peerNames.erase(peerId)
     peerSteamIDs.erase(peerId)
+    _update_rich_presence()
+    _update_lobby_data()
     if peerId in remoteNodes:
         var node: Node3D = remoteNodes[peerId]
         if is_instance_valid(node):
@@ -242,6 +261,7 @@ func on_connected_to_server() -> void:
     peerNames[localPeerId] = get_local_name()
     set_peer_timeout(1) # Server is always peer ID 1
     worldState.start_item_tracking()
+    _update_rich_presence()
     _log("Connected to server (id: %d)" % localPeerId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
     sync_name.rpc(get_local_name(), localSteamID)
@@ -266,6 +286,7 @@ func on_lobby_created(response: Dictionary) -> void:
         return
     var lobbyID: String = response.get("data", { }).get("lobby_id", "")
     _log("Steam lobby created: %s" % lobbyID)
+    _update_lobby_data()
 
 
 func on_p2p_host_ready(response: Dictionary) -> void:
@@ -329,26 +350,19 @@ func sanitize_name(rawName: String) -> String:
 
 
 ## Fetches and caches a Steam avatar by Steam ID. Skips if already cached.
+## Uses binary transfer (raw RGBA bytes) to avoid base64 overhead.
 func fetch_avatar(steamID: String) -> void:
     if steamID.is_empty() || steamID in avatarCache:
         return
     if !steamBridge.is_ready():
         return
-    steamBridge.send_command("get_avatar", { "steam_id": steamID }, on_avatar_received)
+    steamBridge.get_avatar_binary(steamID, on_avatar_binary_received)
 
 
-func on_avatar_received(response: Dictionary) -> void:
-    if !response.get("ok", false):
+func on_avatar_binary_received(steamID: String, w: int, h: int, rgba: PackedByteArray) -> void:
+    if steamID.is_empty() || rgba.is_empty():
         return
-    var data: Dictionary = response.get("data", { })
-    var steamID: String = data.get("steam_id", "")
-    var avatarB64: String = data.get("avatar", "")
-    if steamID.is_empty() || avatarB64.is_empty():
-        return
-    var w: int = data.get("avatar_w", 32)
-    var h: int = data.get("avatar_h", 32)
-    var raw: PackedByteArray = Marshalls.base64_to_raw(avatarB64)
-    var img: Image = Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, raw)
+    var img: Image = Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, rgba)
     avatarCache[steamID] = ImageTexture.create_from_image(img)
 
 
@@ -404,10 +418,12 @@ func ensure_all_spawned() -> void:
 
 func on_scene_changed() -> void:
     inject_manager()
+    _register_ai_pools()
     if !is_session_active():
         return
     ensure_all_spawned()
     # Reset item tracking for the new scene
+    aiState.clear()
     if worldState.trackingItems:
         worldState.syncedItems.clear()
         worldState.consumedSyncIDs.clear()
@@ -415,10 +431,16 @@ func on_scene_changed() -> void:
         worldState.pendingDrops.clear()
         worldState.syncIdCounter = 0
     if isHost:
+        # Cancel any previous timer from a rapid scene re-entry
+        if is_instance_valid(itemRegistrationTimer) && itemRegistrationTimer.time_left > 0:
+            itemRegistrationTimer.timeout.disconnect(worldState.register_scene_items)
         # Delay 2s so Unfreeze physics settles before capturing positions
-        get_tree().create_timer(2.0).timeout.connect(worldState.register_scene_items)
+        itemRegistrationTimer = get_tree().create_timer(2.0)
+        itemRegistrationTimer.timeout.connect(worldState.register_scene_items)
     else:
         notify_scene_loaded.rpc_id(1)
+    _update_rich_presence()
+    _update_lobby_data()
     _log("Scene changed, remote players respawned")
 
 
@@ -430,6 +452,7 @@ func notify_scene_loaded() -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
     _log("Peer %d finished loading" % peerId)
     worldState.send_full_state(peerId)
+    aiState.send_full_state(peerId)
 
 
 ## Injects [code]_cm[/code] into all patched nodes in the current scene.
@@ -471,6 +494,66 @@ func inject_manager() -> void:
         var obj: Node = node.owner if node.owner != null else node
         if obj.has_method("init_manager"):
             obj.init_manager(self)
+
+    # AISpawner — at /root/Map/AI in game scenes
+    var spawner: Node = scene.get_node_or_null("AI")
+    if spawner != null && spawner.has_method("init_manager"):
+        spawner.init_manager(self)
+
+    # AI agents — inject into any already-active agents
+    for node: Node in get_tree().get_nodes_in_group("AI"):
+        if node.has_method("init_manager"):
+            node.init_manager(self)
+
+
+## Registers AI spawner pools with aiState for the current scene.
+## Called deferred after scene load so the spawner's _ready() has completed.
+func _register_ai_pools() -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return
+    var spawner: Node = scene.get_node_or_null("AI")
+    if spawner != null:
+        aiState.register_spawner_pools(spawner)
+
+# ---------- Rich Presence / Lobby Data ----------
+
+
+## Updates Steam Rich Presence to show current co-op status on the friends list.
+func _update_rich_presence() -> void:
+    if !steamBridge.is_ready():
+        return
+    if !isActive:
+        steamBridge.clear_rich_presence()
+        return
+    var playerCount: int = connectedPeers.size() + 1
+    var mapName: String = _get_current_map_name()
+    var status: String = "Co-op (%d players)" % playerCount
+    if !mapName.is_empty():
+        status = "%s — %s" % [mapName, status]
+    steamBridge.set_rich_presence("steam_display", "#Status")
+    steamBridge.set_rich_presence("status", status)
+
+
+## Updates lobby metadata (map name, player count) visible in the lobby browser.
+func _update_lobby_data() -> void:
+    if !steamBridge.is_ready() || !isHost:
+        return
+    var playerCount: int = connectedPeers.size() + 1
+    var mapName: String = _get_current_map_name()
+    steamBridge.set_lobby_data("map", mapName)
+    steamBridge.set_lobby_data("players", str(playerCount))
+
+
+## Extracts a display-friendly map name from the current scene path.
+func _get_current_map_name() -> String:
+    if !is_instance_valid(get_tree().current_scene):
+        return ""
+    var path: String = get_tree().current_scene.scene_file_path
+    if path.is_empty():
+        return ""
+    # "res://Scenes/Village.tscn" -> "Village"
+    return path.get_file().get_basename()
 
 # ---------- Utility ----------
 

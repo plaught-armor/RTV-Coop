@@ -6,11 +6,6 @@ extends Control
 var _cm: Node
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
-    build_ui()
-    panel.hide()
-
 
 var panel: PanelContainer = null
 var statusLabel: Label = null
@@ -38,9 +33,12 @@ var portInput: LineEdit = null
 var playerList: VBoxContainer = null
 
 
-func _ready() -> void:
+func init_manager(manager: Node) -> void:
+    _cm = manager
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     mouse_filter = Control.MOUSE_FILTER_IGNORE
+    build_ui()
+    panel.hide()
 
 
 func _input(event: InputEvent) -> void:
@@ -315,7 +313,11 @@ func on_lobby_list_received(response: Dictionary) -> void:
         var hostName: String = lobby.get("host_name", "Unknown")
         var players: int = lobby.get("players", 0)
         var maxPlayers: int = lobby.get("max_players", 0)
-        btn.text = "%s (%d/%d)" % [hostName, players, maxPlayers]
+        var mapName: String = lobby.get("map", "")
+        if mapName.is_empty():
+            btn.text = "%s (%d/%d)" % [hostName, players, maxPlayers]
+        else:
+            btn.text = "%s — %s (%d/%d)" % [hostName, mapName, players, maxPlayers]
         var lobbyID: String = lobby.get("lobby_id", "")
         for conn: Dictionary in btn.pressed.get_connections():
             btn.pressed.disconnect(conn["callable"])
@@ -397,20 +399,19 @@ func on_friends_received(response: Dictionary) -> void:
         nameLabel.text = "%s%s" % [friendName, stateText]
         nameLabel.add_theme_color_override("font_color", nameColor)
 
-        # Decode avatar if available
-        var avatarData: String = friend.get("avatar", "")
-        if !avatarData.is_empty():
-            var avatarW: int = friend.get("avatar_w", 32)
-            var avatarH: int = friend.get("avatar_h", 32)
-            var raw: PackedByteArray = Marshalls.base64_to_raw(avatarData)
-            var img: Image = Image.create_from_data(avatarW, avatarH, false, Image.FORMAT_RGBA8, raw)
-            avatar.texture = ImageTexture.create_from_image(img)
+        # Fetch avatar via binary channel (faster than inline base64)
+        var steamID: String = friend.get("steam_id", "")
+        if steamID in _cm.avatarCache:
+            avatar.texture = _cm.avatarCache[steamID]
             avatar.show()
+        elif !steamID.is_empty():
+            _cm.fetch_avatar(steamID)
+            avatar.texture = null
+            avatar.hide()
         else:
             avatar.texture = null
             avatar.hide()
 
-        var steamID: String = friend.get("steam_id", "")
         for conn: Dictionary in btn.pressed.get_connections():
             btn.pressed.disconnect(conn["callable"])
         btn.pressed.connect(on_invite_friend_pressed.bind(steamID, friendName))

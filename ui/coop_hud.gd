@@ -1,14 +1,10 @@
 ## Always-visible HUD overlay in the top-right showing keybind hints,
 ## connected players, and their ping. [kbd]F12[/kbd] toggles visibility.
-## Added as a child of [code]CoopManager[/code]'s [code]CanvasLayer[/code].
+## Added as a child of [code]Node[/code]'s [code]CanvasLayer[/code].
 extends VBoxContainer
 
 var _cm: Node
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
-    update_hints()
 
 
 var pingTimer: float = 0.0
@@ -23,7 +19,8 @@ const HINT_COLOR: Color = Color(0.6, 0.6, 0.6, 0.6)
 const PLAYER_COLOR: Color = Color(0.8, 1.0, 0.8, 0.8)
 
 
-func _ready() -> void:
+func init_manager(manager: Node) -> void:
+    _cm = manager
     anchor_left = 1.0
     anchor_right = 1.0
     anchor_top = 0.0
@@ -39,6 +36,7 @@ func _ready() -> void:
     hintsLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     hintsLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(hintsLabel)
+    update_hints()
 
 
 func _input(event: InputEvent) -> void:
@@ -50,7 +48,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-    if _cm == null || !hudVisible:
+    if !is_instance_valid(_cm) || !hudVisible:
         if visible:
             visible = false
         return

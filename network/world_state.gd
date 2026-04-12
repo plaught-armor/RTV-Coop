@@ -4,6 +4,11 @@ extends Node
 
 var _cm: Node
 
+
+func init_manager(manager: Node) -> void:
+    _cm = manager
+
+
 ## Item sync: unique sync_id on each dropped item.
 ## Drops are broadcast by interface_patch.Drop() calling broadcast_item_drop().
 ## Pickups are broadcast by pickup_patch.Interact() calling on_synced_item_picked_up().
@@ -14,10 +19,6 @@ var consumedSyncIDs: Array[String] = []
 var droppedItemHistory: Array[Dictionary] = []
 ## Client-side queue of local pickups waiting for sync_id confirmation from host.
 var pendingDrops: Array[Node] = []
-
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func start_item_tracking() -> void:
@@ -56,18 +57,20 @@ func broadcast_item_drop(pickup: Node) -> void:
         pickup.set_meta(&"sync_id", syncId)
         syncedItems[syncId] = pickup
         apply_pickup_patch(pickup)
-        pickup.init_manager(_cm)
+        pickup._cm = _cm
         droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     else:
         apply_pickup_patch(pickup)
-        pickup.init_manager(_cm)
+        pickup._cm = _cm
         pendingDrops.append(pickup)
         request_item_drop.rpc_id(1, packedSlot, pos, rot)
 
 
 ## Called by pickup_patch.Interact() when a synced item is picked up.
 func on_synced_item_picked_up(syncId: String) -> void:
+    if !_cm.isHost:
+        return
     syncedItems.erase(syncId)
     consumedSyncIDs.append(syncId)
     sync_item_consumed.rpc(syncId)
@@ -94,7 +97,7 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
         pickup.Unfreeze()
     # Swap to patched script, preserving exports
     apply_pickup_patch(pickup)
-    pickup.init_manager(_cm)
+    pickup._cm = _cm
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
 
@@ -129,11 +132,14 @@ func request_item_consumed(syncId: String) -> void:
 func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> void:
     if !_cm.isHost:
         return
+    var dropperId: int = multiplayer.get_remote_sender_id()
     var slotData: SlotData = _cm.SlotSerializerScript.unpack(packedSlot)
     if slotData == null || slotData.itemData == null:
+        reject_item_drop.rpc_id(dropperId)
         return
     var scene: PackedScene = find_pickup_scene(slotData.itemData.file)
     if scene == null:
+        reject_item_drop.rpc_id(dropperId)
         return
     syncIdCounter += 1
     var syncId: String = "drop_%d" % syncIdCounter
@@ -147,12 +153,11 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
     if pickup.has_method("Unfreeze"):
         pickup.Unfreeze()
     apply_pickup_patch(pickup)
-    pickup.init_manager(_cm)
+    pickup._cm = _cm
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
     droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
     # Broadcast to all EXCEPT the dropper
-    var dropperId: int = multiplayer.get_remote_sender_id()
     for peerId: int in _cm.connectedPeers:
         if peerId != dropperId:
             sync_item_drop.rpc_id(peerId, syncId, packedSlot, pos, rot)
@@ -171,6 +176,15 @@ func confirm_item_drop(syncId: String) -> void:
         return
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
+
+
+## Host tells the client that their drop request was rejected.
+## The client pops the orphaned entry from pendingDrops to keep the FIFO aligned.
+@rpc("authority", "call_remote", "reliable")
+func reject_item_drop() -> void:
+    if pendingDrops.is_empty():
+        return
+    pendingDrops.pop_front()
 
 ## Sync simulation every 240 physics frames (~2s at 120Hz).
 const SIM_SYNC_FRAMES: int = 240
@@ -237,16 +251,13 @@ func request_switch_interact(switchPath: String) -> void:
     if !is_valid_path(switchPath):
         return
     var sw: Node = get_tree().current_scene.get_node_or_null(switchPath)
-    if sw == null || !sw.has_method("Activate"):
+    if sw == null:
         return
-    sw.active = !sw.active
-    if sw.active:
-        sw.Activate()
-        sw.PlaySwitch()
-    else:
-        sw.Deactivate()
-        sw.PlaySwitch()
-    sync_switch_state.rpc(switchPath, sw.active)
+    # Type-check: only process actual Switch nodes, not other Interactables
+    if !sw.has_method("Activate") || !sw.has_method("PlaySwitch"):
+        return
+    # Use Interact() through the patch rather than manually toggling
+    sw.Interact()
 
 
 ## Host broadcasts a switch state to peers.
@@ -321,6 +332,7 @@ func teleport_client(pos: Vector3) -> void:
 
 
 ## Client requests to open a loot container.
+## Host packs the loot and sends it back — does NOT open its own UI.
 @rpc("any_peer", "call_remote", "reliable")
 func request_container_open(containerPath: String) -> void:
     if !_cm.isHost:
@@ -330,10 +342,27 @@ func request_container_open(containerPath: String) -> void:
     var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
     if container == null || !(container is LootContainer):
         return
-    container.Interact()
+    var packedLoot: Array[Dictionary] = _cm.SlotSerializerScript.pack_array(container.loot)
+    var requesterId: int = multiplayer.get_remote_sender_id()
+    sync_container_open.rpc_id(requesterId, containerPath, packedLoot)
 
 
-## Host broadcasts a container's loot state to all peers.
+## Host tells a specific client to open a container with the given loot.
+## Sets the loot array first, then calls Interact() to open the UI locally.
+@rpc("authority", "call_remote", "reliable")
+func sync_container_open(containerPath: String, packedLoot: Array[Dictionary]) -> void:
+    var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
+    if container == null || !(container is LootContainer):
+        return
+    container.loot = _cm.SlotSerializerScript.unpack_array(packedLoot)
+    # Open the container UI on this client
+    var uiManager: Node = get_tree().current_scene.get_node_or_null("Core/UI")
+    if is_instance_valid(uiManager) && uiManager.has_method("OpenContainer"):
+        uiManager.OpenContainer(container)
+        container.ContainerAudio()
+
+
+## Host broadcasts a container's loot state to all peers (e.g., after item taken).
 @rpc("authority", "call_remote", "reliable")
 func sync_container_state(containerPath: String, packedLoot: Array[Dictionary]) -> void:
     var container: Node = get_tree().current_scene.get_node_or_null(containerPath)
@@ -400,23 +429,30 @@ func find_pickup_scene(fileKey: String) -> PackedScene:
 func register_scene_items() -> void:
     if !_cm.isHost || !trackingItems:
         return
+    var itemCount: int = 0
+    var skippedCount: int = 0
     for node: Node in get_tree().get_nodes_in_group("Item"):
         if node.has_meta(&"sync_id"):
+            skippedCount += 1
             continue
         var slotData: SlotData = node.get("slotData")
         if slotData == null || slotData.itemData == null:
+            skippedCount += 1
             continue
+        itemCount += 1
         syncIdCounter += 1
         var syncId: String = "world_%d" % syncIdCounter
         node.set_meta(&"sync_id", syncId)
         syncedItems[syncId] = node
         apply_pickup_patch(node)
-        node.init_manager(_cm)
+        node._cm = _cm
         var packedSlot: Dictionary = _cm.SlotSerializerScript.pack(slotData)
         var pos: Vector3 = node.global_position
         var rot: Vector3 = node.global_rotation
         droppedItemHistory.append({"id": syncId, "slot": packedSlot, "pos": pos, "rot": rot})
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
+    _cm._log("register_scene_items: registered=%d skipped=%d total_in_group=%d" % [
+        itemCount, skippedCount, itemCount + skippedCount])
 
 
 ## Swaps a Pickup node's script to the patched version, preserving exports.

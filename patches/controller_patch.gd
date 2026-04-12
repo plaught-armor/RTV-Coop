@@ -11,8 +11,10 @@
 extends "res://Scripts/Controller.gd"
 
 var _cm: Node
+
 var audioPool: Array[AudioStreamPlayer] = []
 const AUDIO_POOL_INITIAL: int = 8
+var wasFiring: bool = false
 
 
 func init_manager(manager: Node) -> void:
@@ -62,7 +64,7 @@ func play_pooled(audioEvent: AudioEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
-    if _cm == null:
+    if !is_instance_valid(_cm):
         return
     if _cm.gd.freeze || _cm.gd.isCaching || _cm.gd.vehicle:
         return
@@ -92,7 +94,7 @@ func _input(event: InputEvent) -> void:
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
-    if _cm == null || !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
 
     _cm.playerState.broadcast_position(
@@ -101,11 +103,18 @@ func Movement(delta: float) -> void:
         _cm.PlayerStateScript.encode_flags(_cm.gd),
     )
 
+    _cm.playerState.broadcast_vitals()
+
+    # Detect fire event rising edge and broadcast to peers
+    if _cm.gd.isFiring && !wasFiring:
+        _broadcast_fire_event()
+    wasFiring = _cm.gd.isFiring
+
 # ---------- Inertia ----------
 
 
 func Inertia(delta: float) -> void:
-    if _cm == null:
+    if !is_instance_valid(_cm):
         super.Inertia(delta)
         return
     if _cm.gd.isWalking || _cm.gd.isRunning:
@@ -124,7 +133,7 @@ func Inertia(delta: float) -> void:
 
 
 func SurfaceDetection(delta: float) -> void:
-    if _cm == null:
+    if !is_instance_valid(_cm):
         super.SurfaceDetection(delta)
         return
     scanTimer += delta
@@ -145,7 +154,7 @@ func SurfaceDetection(delta: float) -> void:
 
 
 func ResolveFootstep(isLanding: bool) -> AudioEvent:
-    if _cm == null:
+    if !is_instance_valid(_cm):
         return audioLibrary.footstepGenericLand if isLanding else audioLibrary.footstepGeneric
     match _cm.gd.surface:
         &"Grass":
@@ -182,7 +191,7 @@ func play_footstep_and_broadcast(isLanding: bool) -> void:
 
 
 func PlayFootstep() -> void:
-    if _cm == null:
+    if !is_instance_valid(_cm):
         super.PlayFootstep()
         return
     if character.heavyGear && randi_range(1, 2) == 1:
@@ -191,7 +200,7 @@ func PlayFootstep() -> void:
 
 
 func PlayFootstepJump() -> void:
-    if _cm == null:
+    if !is_instance_valid(_cm):
         super.PlayFootstepJump()
         return
     PlayMovementCloth()
@@ -201,7 +210,7 @@ func PlayFootstepJump() -> void:
 
 
 func PlayFootstepLand() -> void:
-    if _cm == null:
+    if !is_instance_valid(_cm):
         super.PlayFootstepLand()
         return
     PlayMovementCloth()
@@ -216,3 +225,55 @@ func PlayMovementCloth() -> void:
 
 func PlayMovementGear() -> void:
     play_pooled(audioLibrary.movementGear)
+
+# ---------- Fire Event Broadcast ----------
+
+
+## Detects the active weapon's fire audio and broadcasts to peers.
+## Called on the rising edge of [code]gameData.isFiring[/code].
+func _broadcast_fire_event() -> void:
+    var rm: Node3D = get_node_or_null("../Camera/Manager")
+    if rm == null || rm.get_child_count() == 0:
+        return
+    var rig: Node = rm.get_child(rm.get_child_count() - 1)
+    var weaponData: Resource = rig.get("data")
+    if weaponData == null:
+        return
+
+    # Pick the correct fire audio based on mode and attachments
+    var fireAudio: String = ""
+    var tailAudio: String = ""
+    var hasSuppressor: bool = rig.get("activeMuzzle") != null || (weaponData.get("nativeSuppressor") == true)
+
+    if hasSuppressor:
+        var res: Resource = weaponData.get("fireSuppressed")
+        if res != null:
+            fireAudio = res.resource_path
+        var tailRes: Resource = null
+        if _cm.gd.get("indoor") == true:
+            tailRes = weaponData.get("tailIndoorSuppressed")
+        else:
+            tailRes = weaponData.get("tailOutdoorSuppressed")
+        if tailRes != null:
+            tailAudio = tailRes.resource_path
+    else:
+        var mode: int = _cm.gd.get("firemode") if _cm.gd.get("firemode") != null else 1
+        if mode == 2:
+            var res: Resource = weaponData.get("fireAuto")
+            if res != null:
+                fireAudio = res.resource_path
+        else:
+            var res: Resource = weaponData.get("fireSemi")
+            if res != null:
+                fireAudio = res.resource_path
+        var tailRes: Resource = null
+        if _cm.gd.get("indoor") == true:
+            tailRes = weaponData.get("tailIndoor")
+        else:
+            tailRes = weaponData.get("tailOutdoor")
+        if tailRes != null:
+            tailAudio = tailRes.resource_path
+
+    if fireAudio.is_empty():
+        return
+    _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor)

@@ -10,7 +10,7 @@ func init_manager(manager: Node) -> void:
 
 
 func Interact():
-    if _cm == null || !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Interact()
         return
 
