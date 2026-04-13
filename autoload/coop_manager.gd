@@ -58,6 +58,8 @@ var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
 ## Timer for deferred register_scene_items after scene change.
 var itemRegistrationTimer: SceneTreeTimer = null
+## Active co-op world ID. Empty when not hosting/joined.
+var worldId: String = ""
 ## Check scene every 60 physics frames (~0.5s at 120Hz).
 const SCENE_CHECK_FRAMES: int = 60
 ## Set when lobby state says host is in-game; consumed in on_connected_to_server.
@@ -157,6 +159,12 @@ func register_patches() -> void:
         ["res://mod/patches/ai_spawner_patch.gd", "res://Scripts/AISpawner.gd"],
         ["res://mod/patches/ai_patch.gd", "res://Scripts/AI.gd"],
         ["res://mod/patches/grenade_rig_patch.gd", "res://Scripts/GrenadeRig.gd"],
+        ["res://mod/patches/knife_rig_patch.gd", "res://Scripts/KnifeRig.gd"],
+        ["res://mod/patches/explosion_patch.gd", "res://Scripts/Explosion.gd"],
+        ["res://mod/patches/character_patch.gd", "res://Scripts/Character.gd"],
+        ["res://mod/patches/mine_patch.gd", "res://Scripts/Mine.gd"],
+        ["res://mod/patches/fire_patch.gd", "res://Scripts/Fire.gd"],
+        ["res://mod/patches/loader_patch.gd", "res://Scripts/Loader.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -192,6 +200,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
     worldState.start_item_tracking()
+    _setup_save_paths()
     _update_rich_presence()
     _log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
@@ -248,7 +257,9 @@ func disconnect_session() -> void:
     pendingAutoJoin = false
     currentLobbyID = ""
     _autoLoadInProgress = false
+    worldId = ""
     worldState.stop_item_tracking()
+    _reset_save_paths()
     steamBridge.leave_lobby()
     steamBridge.clear_rich_presence()
     _log("Disconnected")
@@ -314,13 +325,8 @@ func on_connected_to_server() -> void:
     sync_name.rpc(get_local_name(), localSteamID)
     if !currentMap.is_empty():
         sync_peer_map.rpc(currentMap)
-    # Auto-join: if lobby state said host is in-game, load now
-    if pendingAutoJoin:
-        pendingAutoJoin = false
-        _auto_load_game.call_deferred()
-    elif _is_on_menu():
-        # Re-check in case host transitioned during P2P setup
-        _recheck_host_state()
+    # Request world ID from host — _auto_load_game is deferred until response arrives
+    _request_world_id.rpc_id(1)
 
 
 func on_connection_failed() -> void:
@@ -387,6 +393,9 @@ func sync_name(peerName: String, steamID: String = "") -> void:
     if !steamID.is_empty():
         peerSteamIDs[senderId] = steamID
         fetch_avatar(steamID)
+        # Send stored character to joining client if we have one
+        if isHost && !worldId.is_empty():
+            send_character_to_client(senderId, steamID)
     # Update display name on existing remote player node
     if senderId in remoteNodes:
         var remote: Node3D = remoteNodes[senderId]
@@ -547,6 +556,11 @@ func inject_manager() -> void:
     if controller != null && controller.has_method("init_manager"):
         controller.init_manager(self)
 
+    # Character — vitals/death handler
+    var character: Node = scene.get_node_or_null("Core/Controller/Character")
+    if character != null && character.has_method("init_manager"):
+        character.init_manager(self)
+
     # Interface — inventory UI
     var iface: Node = scene.get_node_or_null("Core/UI/Interface")
     if iface != null && iface.has_method("init_manager"):
@@ -674,8 +688,12 @@ func _auto_load_game() -> void:
         _log("Auto-load: continuing save (shelter: %s)" % shelter)
         loader.LoadScene(shelter)
     else:
-        _log("Auto-load: new game (Cabin)")
-        loader.NewGame(1, 1)
+        var diff: int = get_meta(&"new_world_difficulty", 1) as int
+        var season: int = get_meta(&"new_world_season", 1) as int
+        remove_meta(&"new_world_difficulty")
+        remove_meta(&"new_world_season")
+        _log("Auto-load: new game (difficulty=%d, season=%d)" % [diff, season])
+        loader.NewGame(diff, season)
         loader.LoadScene("Cabin")
 
 
@@ -705,6 +723,149 @@ func sync_game_start(sceneName: String) -> void:
     _log("Host started game (%s) — auto-loading" % sceneName)
     _auto_load_game()
 
+
+# ---------- World Save Management ----------
+
+
+## Sets up save paths for the co-op world. Host only.
+## Uses [member worldId] which is set by the world picker UI before hosting.
+func _setup_save_paths() -> void:
+    if worldId.is_empty():
+        worldId = "world_%d" % Time.get_unix_time_from_system()
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader == null || !loader.has_method("_ensure_save_dir"):
+        return
+    loader.savePath = "user://coop/%s/" % worldId
+    var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
+    loader.playerSavePath = "user://coop/%s/players/%s/" % [worldId, localSteamId]
+    loader._ensure_save_dir()
+    _log("Save paths: world=%s player=%s" % [loader.savePath, loader.playerSavePath])
+
+
+## Returns true if [param component] is safe for use in a file path (no traversal).
+func _sanitize_path_component(component: String) -> bool:
+    if component.is_empty():
+        return false
+    if component.find("..") != -1 || component.find("/") != -1 || component.find("\\") != -1:
+        return false
+    return true
+
+
+## Resets save paths to default (solo mode).
+func _reset_save_paths() -> void:
+    worldId = ""
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader != null && loader.has_method("reset_save_paths"):
+        loader.reset_save_paths()
+
+
+## Client requests the world ID from the host.
+@rpc("any_peer", "call_remote", "reliable")
+func _request_world_id() -> void:
+    if !isHost:
+        return
+    var peerId: int = multiplayer.get_remote_sender_id()
+    _receive_world_id.rpc_id(peerId, worldId)
+
+
+## Client receives the world ID and sets up save paths, then triggers auto-load.
+@rpc("authority", "call_remote", "reliable")
+func _receive_world_id(hostWorldId: String) -> void:
+    if !_sanitize_path_component(hostWorldId):
+        _log("Invalid worldId from host: %s" % hostWorldId)
+        return
+    worldId = hostWorldId
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader == null || !loader.has_method("_ensure_save_dir"):
+        return
+    loader.savePath = "user://coop/%s/" % worldId
+    var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else str(localPeerId)
+    loader.playerSavePath = "user://coop/%s/players/%s/" % [worldId, localSteamId]
+    loader._ensure_save_dir()
+    _log("Client save paths: world=%s player=%s" % [loader.savePath, loader.playerSavePath])
+    # Now safe to auto-load since save paths are configured
+    if pendingAutoJoin:
+        pendingAutoJoin = false
+        _auto_load_game.call_deferred()
+    elif _is_on_menu():
+        _recheck_host_state()
+
+
+## Client sends their character save file to the host for storage.
+## Called after SaveCharacter() completes.
+func send_character_to_host() -> void:
+    if isHost:
+        return
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader == null:
+        return
+    var charPath: String = loader.playerSavePath + "Character.tres"
+    if !FileAccess.file_exists(charPath):
+        return
+    var fileData: PackedByteArray = FileAccess.get_file_as_bytes(charPath)
+    if fileData.is_empty():
+        return
+    var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else str(localPeerId)
+    _receive_client_character.rpc_id(1, localSteamId, fileData)
+    _log("Sent character to host (%d bytes)" % fileData.size())
+
+
+## Host receives a client's character save file and writes it to the world directory.
+## Steam ID is looked up from [member peerSteamIDs] — not trusted from RPC args.
+@rpc("any_peer", "call_remote", "reliable")
+func _receive_client_character(clientSteamId: String, fileData: PackedByteArray) -> void:
+    if !isHost:
+        return
+    var senderId: int = multiplayer.get_remote_sender_id()
+    var trustedSteamId: String = peerSteamIDs.get(senderId, "")
+    if trustedSteamId.is_empty() || fileData.is_empty():
+        return
+    if fileData.size() > 1048576:
+        _log("Character file too large from peer %d (%d bytes)" % [senderId, fileData.size()])
+        return
+    var dir: String = "user://coop/%s/players/%s/" % [worldId, trustedSteamId]
+    if !DirAccess.dir_exists_absolute(dir):
+        DirAccess.make_dir_recursive_absolute(dir)
+    var filePath: String = dir + "Character.tres"
+    var file: FileAccess = FileAccess.open(filePath, FileAccess.WRITE)
+    if file != null:
+        file.store_buffer(fileData)
+        file.close()
+        _log("Stored character for %s (%d bytes)" % [clientSteamId, fileData.size()])
+
+
+## Host sends a stored character file to a requesting client.
+## Called when a client joins and needs their character for this world.
+func send_character_to_client(peerId: int, clientSteamId: String) -> void:
+    if !isHost:
+        return
+    var filePath: String = "user://coop/%s/players/%s/Character.tres" % [worldId, clientSteamId]
+    if !FileAccess.file_exists(filePath):
+        _receive_host_character.rpc_id(peerId, PackedByteArray())
+        return
+    var fileData: PackedByteArray = FileAccess.get_file_as_bytes(filePath)
+    _receive_host_character.rpc_id(peerId, fileData)
+    _log("Sent stored character to peer %d (%d bytes)" % [peerId, fileData.size()])
+
+
+## Client receives their character file from the host and writes it locally.
+@rpc("authority", "call_remote", "reliable")
+func _receive_host_character(fileData: PackedByteArray) -> void:
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader == null:
+        return
+    if fileData.is_empty():
+        _log("No stored character on host — starting fresh")
+        return
+    var dir: String = loader.playerSavePath
+    if !DirAccess.dir_exists_absolute(dir):
+        DirAccess.make_dir_recursive_absolute(dir)
+    var filePath: String = dir + "Character.tres"
+    var file: FileAccess = FileAccess.open(filePath, FileAccess.WRITE)
+    if file != null:
+        file.store_buffer(fileData)
+        file.close()
+        _log("Received character from host (%d bytes)" % fileData.size())
 
 # ---------- Map Tracking ----------
 

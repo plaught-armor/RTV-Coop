@@ -8,7 +8,11 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 - **Steam integration** -- lobby browser, friend invites with avatars, P2P NAT traversal
 - **World state sync** -- doors, switches, containers, time/weather synced between all players
 - **AI multi-player awareness** -- enemies detect, target, and fight all players (host-authoritative, 10Hz replication)
-- **Combat sync** -- weapon fire audio, muzzle flash, bullet impact decals, AI damage routing, grenade throws
+- **Combat sync** -- weapon fire audio, muzzle flash, bullet impact decals, AI damage routing, grenade throws, explosion damage, mine detonation
+- **Death sync** -- remote players removed on death, AI stops targeting dead players
+- **Campfire sync** -- fire ignite/extinguish replicated between all players
+- **Per-world saves** -- each hosted world has its own save directory; player characters persist per-world
+- **World picker** -- choose to create a new world or continue an existing one when hosting
 - **Independent map transitions** -- players can explore different maps simultaneously
 - **Headless AI** -- host runs AI for remote maps via SubViewport, enemies detect all players everywhere
 - **Remote player audio** -- footsteps, jumps, landings, gunshots, and bullet impacts play spatially
@@ -46,7 +50,9 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 1. Load into a map
 2. Press **INS** to open the multiplayer panel
-3. Click **Host** (or press **F10**)
+3. Click **Host** -- a world picker appears
+4. Choose **+ New World** or select an existing world
+5. (Or press **F10** to quick-host a new world)
 
 ### Joining
 
@@ -100,9 +106,9 @@ There are two log files. **Both are needed when reporting bugs.**
 ## Known Limitations
 
 - **Ghost capsule model** -- remote players shown as translucent capsules (full model planned)
-- **Grenade damage is local** -- thrown grenades are synced visually but explosion damage is not host-authoritative yet
 - **No voice chat** -- use Steam/Discord voice as a workaround
 - **Inventory is independent** -- each player manages their own loot; no shared inventory view
+- **Knife attacks not visible** -- melee damage works but other players don't see knife swing animations
 
 ---
 
@@ -119,7 +125,12 @@ There are two log files. **Both are needed when reporting bugs.**
 - [x] Client equipment save across transitions
 - [x] Grenade sync (throw physics, detonation, explosion/smoke effects)
 - [x] Independent map transitions (headless SubViewport AI on host)
+- [x] Explosion/mine damage sync (host-authoritative)
+- [x] Death state sync and player cleanup
+- [x] Campfire state sync
+- [x] Per-world persistent saves with world picker
 - [ ] Third-person player model
+- [ ] Knife attack visuals for remote players
 - [ ] Voice chat
 
 ---
@@ -141,6 +152,11 @@ This mod patches game scripts via `take_over_path()`. Other mods patching the sa
 | `LootContainer.gd` | Low |
 | `LootSimulation.gd` | Low |
 | `GrenadeRig.gd` | Low |
+| `Explosion.gd` | Low |
+| `Character.gd` | Low |
+| `Mine.gd` | Low |
+| `Fire.gd` | Low |
+| `Loader.gd` | Medium |
 
 ---
 

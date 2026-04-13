@@ -191,7 +191,7 @@ const SIM_SYNC_FRAMES: int = 240
 
 
 func _physics_process(_delta: float) -> void:
-    if !_cm.isActive:
+    if !is_instance_valid(_cm) || !_cm.isActive:
         return
 
     if !_cm.isHost:
@@ -429,6 +429,58 @@ func sync_simulation_reliable(syncTime: float, syncDay: int, syncWeather: String
     Simulation.time = syncTime
     Simulation.day = syncDay
     Simulation.weather = syncWeather
+
+# ---------- Fire Sync ----------
+
+
+## Host broadcasts campfire state to all clients.
+func broadcast_fire_state(firePath: String, isActive: bool) -> void:
+    sync_fire_state.rpc(firePath, isActive)
+
+
+## Client requests fire interaction from host.
+@rpc("any_peer", "call_remote", "reliable")
+func request_fire_interact(firePath: String) -> void:
+    if !_cm.isHost:
+        return
+    var fire: Node = get_node_or_null(firePath)
+    if !is_instance_valid(fire) || !fire.has_method("Interact"):
+        return
+    # Run the original interact on host (match check, activate/deactivate)
+    fire.Interact()
+
+
+## Client receives fire state from host.
+@rpc("authority", "call_remote", "reliable")
+func sync_fire_state(firePath: String, isActive: bool) -> void:
+    var fire: Node = get_node_or_null(firePath)
+    if !is_instance_valid(fire):
+        return
+    if isActive && !fire.active:
+        fire.Activate()
+        fire.active = true
+    elif !isActive && fire.active:
+        fire.Deactivate()
+        fire.active = false
+
+# ---------- Mine Sync ----------
+
+
+## Host broadcasts mine detonation to all clients.
+func broadcast_mine_detonate(minePath: String, instant: bool) -> void:
+    receive_mine_detonate.rpc(minePath, instant)
+
+
+## Client receives mine detonation event from host.
+@rpc("authority", "call_remote", "reliable")
+func receive_mine_detonate(minePath: String, instant: bool) -> void:
+    var mine: Node = get_node_or_null(minePath)
+    if !is_instance_valid(mine):
+        return
+    if instant:
+        mine.InstantDetonate()
+    else:
+        mine.Detonate()
 
 # ---------- Full State Sync (on peer join) ----------
 

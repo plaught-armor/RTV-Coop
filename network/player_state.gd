@@ -89,7 +89,7 @@ var peerBuffers: Dictionary[int, PeerBuffer] = {}
 
 ## Called by the controller patch every physics tick. Throttles to 20 Hz before sending.
 func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
-    if !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
 
     if Engine.get_physics_frames() % SEND_EVERY_N_TICKS != 0:
@@ -131,7 +131,7 @@ func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> 
 ## Interpolates buffered snapshots for each remote peer and applies them to
 ## the corresponding [code]RemotePlayer[/code] node every physics tick.
 func _physics_process(_delta: float) -> void:
-    if !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
 
     var currentTime: float = Time.get_ticks_msec() / 1000.0
@@ -186,7 +186,7 @@ func _physics_process(_delta: float) -> void:
 ## Broadcasts a footstep sound to all remote peers. Called by the controller patch.
 ## [param audioPath] is the resource path of the [AudioEvent] to play.
 func broadcast_footstep(audioPath: String) -> void:
-    if !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
     receive_footstep.rpc(audioPath)
 
@@ -206,7 +206,7 @@ func receive_footstep(audioPath: String) -> void:
 ## [param showFlash] is false for suppressed weapons.
 ## [param hitPoint], [param hitNormal], [param hitSurface] describe the bullet impact.
 func broadcast_fire_event(fireAudio: String, tailAudio: String, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurface: String = "") -> void:
-    if !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
     receive_fire_event.rpc(fireAudio, tailAudio, showFlash, hitPoint, hitNormal, hitSurface)
 
@@ -224,7 +224,7 @@ func receive_fire_event(fireAudio: String, tailAudio: String, showFlash: bool, h
 
 ## Broadcasts health to all remote peers. Called from [method _physics_process] at ~0.5 Hz.
 func broadcast_vitals() -> void:
-    if !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
     if Engine.get_physics_frames() % VITALS_EVERY_N_TICKS != 0:
         return
@@ -241,22 +241,78 @@ func receive_vitals(health: int) -> void:
     remoteNode.set_meta(&"health", health)
 
 
+## Broadcasts local player death to all remote peers.
+func broadcast_death() -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    receive_death.rpc()
+
+
+## Receives a remote player's death event. Updates the remote player node.
+@rpc("any_peer", "call_remote", "reliable")
+func receive_death() -> void:
+    var peerId: int = multiplayer.get_remote_sender_id()
+    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    if remoteNode == null:
+        return
+    _cm.remoteNodes.erase(peerId)
+    clear_peer(peerId)
+    remoteNode.queue_free()
+
+
+## Broadcasts a knife attack audio event to all remote peers.
+## [param isSlash]: true for slash, false for stab.
+## [param attackId]: combo attack index (1-4 slash, 5-8 stab).
+func broadcast_knife_attack(isSlash: bool, _attackId: int) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    receive_knife_attack.rpc(isSlash)
+
+
+## Receives a remote player's knife attack — plays spatial audio.
+@rpc("any_peer", "call_remote", "unreliable")
+func receive_knife_attack(isSlash: bool) -> void:
+    if !is_instance_valid(_cm):
+        return
+    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
+    if remoteNode == null:
+        return
+    remoteNode.play_knife_attack(isSlash)
+
+
+## Broadcasts a knife hit impact to all remote peers.
+func broadcast_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    receive_knife_hit.rpc(hitPoint, hitNormal, hitSurface, isFlesh, attackId)
+
+
+## Receives a remote player's knife hit — spawns decal at impact point.
+@rpc("any_peer", "call_remote", "unreliable")
+func receive_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
+    if !is_instance_valid(_cm):
+        return
+    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
+    if remoteNode == null:
+        return
+    remoteNode.spawn_knife_impact(hitPoint, hitNormal, hitSurface, isFlesh, attackId)
+
+
 ## Broadcasts a grenade throw to all remote peers. Called by grenade_rig_patch
 ## after ThrowHighExecute or ThrowLowExecute.
 func broadcast_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
-    if !_cm.is_session_active():
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    if grenadeScene.is_empty():
         return
     receive_grenade_throw.rpc(grenadeScene, handleScene, throwPos, throwRotY, throwDir, basisX, force)
 
 
 ## Receives a remote player's grenade throw — instantiates grenade + handle with matching physics.
 ## The Grenade.gd fuse timer (3.0s) runs locally and detonates automatically.
+## Paths are pre-validated by the sender in [method broadcast_grenade_throw].
 @rpc("any_peer", "call_remote", "reliable")
 func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
-    # Validate resource paths (only allow grenade scenes from Items/)
-    if !grenadeScene.begins_with("res://Items/Grenades/"):
-        return
-
     var grenadePacked: PackedScene = load(grenadeScene) as PackedScene
     if grenadePacked == null:
         return
@@ -268,7 +324,7 @@ func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: 
     grenade.linear_velocity = throwDir * force
     grenade.angular_velocity = basisX * 5.0
 
-    if !handleScene.is_empty() && handleScene.begins_with("res://Items/Grenades/"):
+    if !handleScene.is_empty():
         var handlePacked: PackedScene = load(handleScene) as PackedScene
         if handlePacked != null:
             var handleNode: RigidBody3D = handlePacked.instantiate() as RigidBody3D

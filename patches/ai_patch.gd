@@ -74,9 +74,8 @@ func _all_players_dead() -> bool:
     if !gameData.isDead:
         return false
     for peerId: int in _cm.remoteNodes:
-        if is_instance_valid(_cm.remoteNodes[peerId]):
-            # Remote players exist — at least one is alive
-            # (we don't sync death state yet, so assume alive)
+        var remote: Node3D = _cm.remoteNodes[peerId]
+        if is_instance_valid(remote) && !remote.get_meta(&"is_dead", false):
             return false
     return true
 

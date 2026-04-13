@@ -126,6 +126,7 @@ func play_remote_audio(audioPath: String) -> void:
 
 
 var hitDefaultScene: PackedScene = preload("res://Effects/Hit_Default.tscn")
+var hitKnifeScene: PackedScene = preload("res://Effects/Hit_Knife.tscn")
 
 
 ## Spawns a bullet impact decal + particle at the given world position.
@@ -149,6 +150,53 @@ func spawn_bullet_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: Stri
 
     hit.Emit()
     hit.PlayHit(hitSurface)
+
+
+## Plays a knife attack audio event spatially.
+func play_knife_attack(isSlash: bool) -> void:
+    if !is_instance_valid(_cm):
+        return
+    var audioEvent: AudioEvent = _cm.audioLibrary.knifeSlash if isSlash else _cm.audioLibrary.knifeStab
+    if audioEvent == null || audioEvent.audioClips.is_empty():
+        return
+    if !is_instance_valid(audioPlayer):
+        return
+    audioPlayer.stream = audioEvent.audioClips.pick_random()
+    audioPlayer.volume_db = audioEvent.volume
+    audioPlayer.play()
+
+
+## Spawns a knife hit decal at the impact point.
+func spawn_knife_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return
+    var decal: Node3D = hitKnifeScene.instantiate()
+    scene.add_child(decal)
+    decal.global_position = hitPoint
+
+    if hitNormal == Vector3(0, 1, 0):
+        decal.look_at(hitPoint + hitNormal, Vector3.RIGHT)
+    elif hitNormal == Vector3(0, -1, 0):
+        decal.look_at(hitPoint + hitNormal, Vector3.RIGHT)
+    else:
+        decal.look_at(hitPoint + hitNormal, Vector3.DOWN)
+
+    # Rotation by attack type (matches KnifeRig.KnifeDecal)
+    match attackId:
+        1: decal.global_rotation_degrees.z = 30.0
+        2: decal.global_rotation_degrees.z = 10.0
+        3: decal.global_rotation_degrees.z = -10.0
+        4: decal.global_rotation_degrees.z = -30.0
+        5: decal.global_rotation_degrees.z = 15.0
+        6: decal.global_rotation_degrees.z = 0.0
+        7: decal.global_rotation_degrees.z = -30.0
+        8: decal.global_rotation_degrees.z = 45.0
+
+    if isFlesh:
+        decal.PlayKnifeHitFlesh(attackId)
+    else:
+        decal.PlayKnifeHit(hitSurface)
 
 
 ## Plays a weapon fire event: gunshot audio, optional tail audio, and muzzle flash.
@@ -177,4 +225,4 @@ func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> v
         light.omni_range = 8.0
         light.position = Vector3(0, 1.4, -0.3)
         add_child(light)
-        get_tree().create_timer(0.05).timeout.connect(light.queue_free)
+        get_tree().create_timer(0.05).timeout.connect(func(): if is_instance_valid(light): light.queue_free())

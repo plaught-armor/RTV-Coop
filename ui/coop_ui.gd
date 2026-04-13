@@ -25,6 +25,24 @@ var friendLabelPool: Array[HBoxContainer] = []
 var inviteBtn: Button = null
 var friendsVisible: bool = false
 
+# World picker widgets
+var worldPickerPanel: PanelContainer = null
+var worldPickerList: VBoxContainer = null
+var worldPickerVisible: bool = false
+
+# New world dialog widgets
+var newWorldPanel: PanelContainer = null
+var newWorldNameInput: LineEdit = null
+var newWorldDifficulty: int = 1
+var newWorldSeason: int = 1
+var diffButtons: Array[Button] = []
+var seasonButtons: Array[Button] = []
+
+const COOP_DIR: String = "user://coop/"
+const META_FILE: String = "meta.cfg"
+const SELECTED_COLOR: Color = Color(0.4, 0.8, 0.4)
+const UNSELECTED_COLOR: Color = Color(0.7, 0.7, 0.7)
+
 # ENet debug widgets (only created in DEBUG mode)
 var addressInput: LineEdit = null
 var portInput: LineEdit = null
@@ -278,7 +296,9 @@ func is_in_gameplay() -> bool:
 
 
 func on_host_pressed() -> void:
-    _cm.host_game()
+    if _cm.is_session_active():
+        return
+    show_world_picker()
 
 
 func on_direct_join_pressed() -> void:
@@ -471,6 +491,453 @@ func get_pooled_friend_row(idx: int) -> HBoxContainer:
     friendList.add_child(row)
     friendLabelPool.append(row)
     return row
+
+
+# ---------- World Picker ----------
+
+
+func show_world_picker() -> void:
+    if worldPickerPanel != null:
+        worldPickerPanel.queue_free()
+
+    worldPickerPanel = PanelContainer.new()
+    worldPickerPanel.custom_minimum_size = Vector2(380, 340)
+    worldPickerPanel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    worldPickerPanel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+    worldPickerPanel.grow_vertical = Control.GROW_DIRECTION_BOTH
+    worldPickerPanel.mouse_filter = Control.MOUSE_FILTER_STOP
+    add_child(worldPickerPanel)
+
+    var vbox: VBoxContainer = VBoxContainer.new()
+    worldPickerPanel.add_child(vbox)
+
+    var title: Label = Label.new()
+    title.text = "Select World"
+    title.add_theme_font_size_override("font_size", 18)
+    vbox.add_child(title)
+
+    vbox.add_child(HSeparator.new())
+
+    var newBtn: Button = Button.new()
+    newBtn.text = "+ New World"
+    newBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    newBtn.pressed.connect(show_new_world_dialog)
+    vbox.add_child(newBtn)
+
+    vbox.add_child(HSeparator.new())
+
+    var scroll: ScrollContainer = ScrollContainer.new()
+    scroll.custom_minimum_size = Vector2(0, 220)
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    vbox.add_child(scroll)
+
+    worldPickerList = VBoxContainer.new()
+    worldPickerList.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    scroll.add_child(worldPickerList)
+
+    populate_world_list()
+
+    vbox.add_child(HSeparator.new())
+
+    var cancelBtn: Button = Button.new()
+    cancelBtn.text = "Cancel"
+    cancelBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    cancelBtn.pressed.connect(hide_world_picker)
+    vbox.add_child(cancelBtn)
+
+    worldPickerVisible = true
+
+
+func hide_world_picker() -> void:
+    if worldPickerPanel != null:
+        worldPickerPanel.queue_free()
+        worldPickerPanel = null
+    worldPickerVisible = false
+
+
+func populate_world_list() -> void:
+    if worldPickerList == null:
+        return
+
+    if !DirAccess.dir_exists_absolute(COOP_DIR):
+        _add_empty_label()
+        return
+
+    var dir: DirAccess = DirAccess.open(COOP_DIR)
+    if dir == null:
+        _add_empty_label()
+        return
+
+    # Collect worlds with metadata
+    var worlds: Array[Dictionary] = []
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    while entry != "":
+        if dir.current_is_dir() && entry != "." && entry != "..":
+            var worldDir: String = COOP_DIR + entry + "/"
+            if FileAccess.file_exists(worldDir + "World.tres"):
+                var meta: Dictionary = _read_world_meta(worldDir, entry)
+                worlds.append(meta)
+        entry = dir.get_next()
+    dir.list_dir_end()
+
+    if worlds.is_empty():
+        _add_empty_label()
+        return
+
+    # Sort by last_played descending (most recent first)
+    worlds.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.get("last_played", 0) > b.get("last_played", 0))
+
+    for world: Dictionary in worlds:
+        var row: HBoxContainer = HBoxContainer.new()
+        worldPickerList.add_child(row)
+
+        var btn: Button = Button.new()
+        btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        btn.mouse_filter = Control.MOUSE_FILTER_STOP
+        btn.text = _format_world_label(world)
+        btn.pressed.connect(on_world_selected.bind(world["id"]))
+        row.add_child(btn)
+
+        var delBtn: Button = Button.new()
+        delBtn.text = "X"
+        delBtn.custom_minimum_size = Vector2(30, 0)
+        delBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+        delBtn.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+        delBtn.pressed.connect(on_delete_world_pressed.bind(world["id"], world["name"]))
+        row.add_child(delBtn)
+
+
+func _add_empty_label() -> void:
+    var emptyLabel: Label = Label.new()
+    emptyLabel.text = "No existing worlds"
+    emptyLabel.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+    worldPickerList.add_child(emptyLabel)
+
+
+func _read_world_meta(worldDir: String, dirName: String) -> Dictionary:
+    var meta: Dictionary = {"id": dirName, "name": dirName, "last_played": 0}
+
+    # Read meta.cfg if it exists
+    var cfg: ConfigFile = ConfigFile.new()
+    if cfg.load(worldDir + META_FILE) == OK:
+        meta["name"] = cfg.get_value("world", "name", dirName)
+        meta["last_played"] = cfg.get_value("world", "last_played", 0)
+
+    # Read World.tres for game data
+    var worldSave: Resource = load(worldDir + "World.tres")
+    if worldSave != null:
+        meta["day"] = worldSave.get("day") if worldSave.get("day") != null else 1
+        meta["season"] = worldSave.get("season") if worldSave.get("season") != null else 1
+        meta["difficulty"] = worldSave.get("difficulty") if worldSave.get("difficulty") != null else 1
+
+    meta["players"] = _count_players_in_world(worldDir + "players/")
+    return meta
+
+
+func _format_world_label(world: Dictionary) -> String:
+    var name: String = world.get("name", "Unknown")
+    var day: int = world.get("day", 1)
+    var season: int = world.get("season", 1)
+    var diff: int = world.get("difficulty", 1)
+    var players: int = world.get("players", 0)
+    var lastPlayed: int = world.get("last_played", 0)
+
+    var seasonText: String = "Summer" if season == 1 else "Winter"
+    var diffText: String = "Normal"
+    match diff:
+        2: diffText = "Hard"
+        3: diffText = "Permadeath"
+
+    var timeText: String = ""
+    if lastPlayed > 0:
+        var now: int = int(Time.get_unix_time_from_system())
+        var elapsed: int = now - lastPlayed
+        if elapsed < 3600:
+            timeText = " — %dm ago" % (elapsed / 60)
+        elif elapsed < 86400:
+            timeText = " — %dh ago" % (elapsed / 3600)
+        else:
+            timeText = " — %dd ago" % (elapsed / 86400)
+
+    return "%s — %s Day %d, %s, %d player(s)%s" % [name, seasonText, day, diffText, players, timeText]
+
+
+func _count_players_in_world(playersDir: String) -> int:
+    if !DirAccess.dir_exists_absolute(playersDir):
+        return 0
+    var dir: DirAccess = DirAccess.open(playersDir)
+    if dir == null:
+        return 0
+    var count: int = 0
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    while entry != "":
+        if dir.current_is_dir() && entry != "." && entry != "..":
+            count += 1
+        entry = dir.get_next()
+    dir.list_dir_end()
+    return count
+
+
+# ---------- New World Dialog ----------
+
+
+func show_new_world_dialog() -> void:
+    hide_world_picker()
+
+    newWorldDifficulty = 1
+    newWorldSeason = 1
+    diffButtons.clear()
+    seasonButtons.clear()
+
+    newWorldPanel = PanelContainer.new()
+    newWorldPanel.custom_minimum_size = Vector2(340, 280)
+    newWorldPanel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    newWorldPanel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+    newWorldPanel.grow_vertical = Control.GROW_DIRECTION_BOTH
+    newWorldPanel.mouse_filter = Control.MOUSE_FILTER_STOP
+    add_child(newWorldPanel)
+
+    var vbox: VBoxContainer = VBoxContainer.new()
+    newWorldPanel.add_child(vbox)
+
+    var title: Label = Label.new()
+    title.text = "New World"
+    title.add_theme_font_size_override("font_size", 18)
+    vbox.add_child(title)
+
+    vbox.add_child(HSeparator.new())
+
+    # Name input
+    var nameLabel: Label = Label.new()
+    nameLabel.text = "World Name"
+    vbox.add_child(nameLabel)
+
+    newWorldNameInput = LineEdit.new()
+    newWorldNameInput.placeholder_text = "My World"
+    newWorldNameInput.max_length = 32
+    newWorldNameInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    vbox.add_child(newWorldNameInput)
+
+    vbox.add_child(HSeparator.new())
+
+    # Difficulty selection
+    var diffLabel: Label = Label.new()
+    diffLabel.text = "Difficulty"
+    vbox.add_child(diffLabel)
+
+    var diffRow: HBoxContainer = HBoxContainer.new()
+    vbox.add_child(diffRow)
+
+    for pair: Array in [[1, "Normal"], [2, "Hard"], [3, "Permadeath"]]:
+        var btn: Button = Button.new()
+        btn.text = pair[1]
+        btn.mouse_filter = Control.MOUSE_FILTER_STOP
+        btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        btn.pressed.connect(_on_difficulty_selected.bind(pair[0]))
+        diffRow.add_child(btn)
+        diffButtons.append(btn)
+
+    vbox.add_child(HSeparator.new())
+
+    # Season selection
+    var seasonLabel: Label = Label.new()
+    seasonLabel.text = "Season"
+    vbox.add_child(seasonLabel)
+
+    var seasonRow: HBoxContainer = HBoxContainer.new()
+    vbox.add_child(seasonRow)
+
+    for pair: Array in [[1, "Summer"], [2, "Winter"]]:
+        var btn: Button = Button.new()
+        btn.text = pair[1]
+        btn.mouse_filter = Control.MOUSE_FILTER_STOP
+        btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        btn.pressed.connect(_on_season_selected.bind(pair[0]))
+        seasonRow.add_child(btn)
+        seasonButtons.append(btn)
+
+    _update_selection_colors()
+
+    vbox.add_child(HSeparator.new())
+
+    # Action buttons
+    var actionRow: HBoxContainer = HBoxContainer.new()
+    vbox.add_child(actionRow)
+
+    var createBtn: Button = Button.new()
+    createBtn.text = "Create"
+    createBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    createBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    createBtn.pressed.connect(on_create_world_confirmed)
+    actionRow.add_child(createBtn)
+
+    var backBtn: Button = Button.new()
+    backBtn.text = "Back"
+    backBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    backBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    backBtn.pressed.connect(on_new_world_back)
+    actionRow.add_child(backBtn)
+
+
+func _on_difficulty_selected(diff: int) -> void:
+    newWorldDifficulty = diff
+    _update_selection_colors()
+
+
+func _on_season_selected(season: int) -> void:
+    newWorldSeason = season
+    _update_selection_colors()
+
+
+func _update_selection_colors() -> void:
+    for i: int in diffButtons.size():
+        var btn: Button = diffButtons[i]
+        if i + 1 == newWorldDifficulty:
+            btn.add_theme_color_override("font_color", SELECTED_COLOR)
+        else:
+            btn.add_theme_color_override("font_color", UNSELECTED_COLOR)
+
+    for i: int in seasonButtons.size():
+        var btn: Button = seasonButtons[i]
+        if i + 1 == newWorldSeason:
+            btn.add_theme_color_override("font_color", SELECTED_COLOR)
+        else:
+            btn.add_theme_color_override("font_color", UNSELECTED_COLOR)
+
+
+func on_create_world_confirmed() -> void:
+    var worldName: String = newWorldNameInput.text.strip_edges()
+    if worldName.is_empty():
+        worldName = "World"
+
+    var worldId: String = "world_%d" % Time.get_unix_time_from_system()
+
+    # Write meta.cfg
+    var worldDir: String = COOP_DIR + worldId + "/"
+    DirAccess.make_dir_recursive_absolute(worldDir)
+    _write_world_meta(worldDir, worldName)
+
+    # Close dialog and host
+    if newWorldPanel != null:
+        newWorldPanel.queue_free()
+        newWorldPanel = null
+
+    _cm.worldId = worldId
+    _cm.host_game()
+
+    # NewGame with selected difficulty/season will be called by _auto_load_game
+    # when the host transitions from menu to game. We store the settings
+    # so coop_manager can pass them to Loader.NewGame().
+    _cm.set_meta(&"new_world_difficulty", newWorldDifficulty)
+    _cm.set_meta(&"new_world_season", newWorldSeason)
+
+
+func on_new_world_back() -> void:
+    if newWorldPanel != null:
+        newWorldPanel.queue_free()
+        newWorldPanel = null
+    show_world_picker()
+
+
+func on_world_selected(worldId: String) -> void:
+    hide_world_picker()
+    _update_world_last_played(worldId)
+    _cm.worldId = worldId
+    _cm.host_game()
+
+
+# ---------- Delete World ----------
+
+
+func on_delete_world_pressed(worldId: String, worldName: String) -> void:
+    # Replace the world list with a confirmation prompt
+    for child: Node in worldPickerList.get_children():
+        child.queue_free()
+
+    var confirmLabel: Label = Label.new()
+    confirmLabel.text = "Delete \"%s\"?" % worldName
+    worldPickerList.add_child(confirmLabel)
+
+    var warnLabel: Label = Label.new()
+    warnLabel.text = "All player saves will be lost."
+    warnLabel.add_theme_font_size_override("font_size", 12)
+    warnLabel.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+    worldPickerList.add_child(warnLabel)
+
+    var row: HBoxContainer = HBoxContainer.new()
+    worldPickerList.add_child(row)
+
+    var yesBtn: Button = Button.new()
+    yesBtn.text = "Delete"
+    yesBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    yesBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    yesBtn.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+    yesBtn.pressed.connect(_confirm_delete_world.bind(worldId))
+    row.add_child(yesBtn)
+
+    var noBtn: Button = Button.new()
+    noBtn.text = "Cancel"
+    noBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    noBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    noBtn.pressed.connect(_cancel_delete_world)
+    row.add_child(noBtn)
+
+
+func _confirm_delete_world(worldId: String) -> void:
+    var worldDir: String = COOP_DIR + worldId + "/"
+    _recursive_delete(worldDir)
+    # Refresh the list
+    for child: Node in worldPickerList.get_children():
+        child.queue_free()
+    populate_world_list()
+
+
+func _cancel_delete_world() -> void:
+    for child: Node in worldPickerList.get_children():
+        child.queue_free()
+    populate_world_list()
+
+
+func _recursive_delete(path: String) -> void:
+    var dir: DirAccess = DirAccess.open(path)
+    if dir == null:
+        return
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    while entry != "":
+        if entry == "." || entry == "..":
+            entry = dir.get_next()
+            continue
+        var fullPath: String = path + entry
+        if dir.current_is_dir():
+            _recursive_delete(fullPath + "/")
+            DirAccess.remove_absolute(fullPath)
+        else:
+            DirAccess.remove_absolute(fullPath)
+        entry = dir.get_next()
+    dir.list_dir_end()
+    DirAccess.remove_absolute(path)
+
+
+# ---------- World Meta Helpers ----------
+
+
+func _write_world_meta(worldDir: String, worldName: String) -> void:
+    var cfg: ConfigFile = ConfigFile.new()
+    cfg.set_value("world", "name", worldName)
+    cfg.set_value("world", "created", int(Time.get_unix_time_from_system()))
+    cfg.set_value("world", "last_played", int(Time.get_unix_time_from_system()))
+    cfg.save(worldDir + META_FILE)
+
+
+func _update_world_last_played(worldId: String) -> void:
+    var worldDir: String = COOP_DIR + worldId + "/"
+    var cfg: ConfigFile = ConfigFile.new()
+    cfg.load(worldDir + META_FILE)
+    cfg.set_value("world", "last_played", int(Time.get_unix_time_from_system()))
+    cfg.save(worldDir + META_FILE)
 
 
 func get_pooled_lobby_button(idx: int) -> Button:

@@ -538,6 +538,22 @@ func receive_ai_damage(damage: float, penetration: int) -> void:
     if is_instance_valid(character) && character.has_method("WeaponDamage"):
         character.WeaponDamage(damage, penetration)
 
+
+## Sends explosion damage to a specific remote peer. Host only.
+func send_explosion_damage_to_peer(peerId: int) -> void:
+    receive_explosion_damage.rpc_id(peerId)
+
+
+## Client receives explosion damage — applies to local player's Character node.
+@rpc("authority", "call_remote", "reliable")
+func receive_explosion_damage() -> void:
+    var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
+    if !is_instance_valid(controller):
+        return
+    var character: Node = controller.get_child(0) if controller.get_child_count() > 0 else null
+    if is_instance_valid(character) && character.has_method("ExplosionDamage"):
+        character.ExplosionDamage()
+
 # ---------- Full State (Late Join) ----------
 
 

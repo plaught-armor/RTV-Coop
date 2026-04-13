@@ -236,6 +236,8 @@ func extract_door_states() -> Dictionary:
         var obj: Node = node.owner if node.owner != null else node
         if !(obj is Door):
             continue
+        if !mapScene.is_ancestor_of(obj):
+            continue
         var doorPath: String = mapScene.get_path_to(obj)
         doors[doorPath] = {
             "isOpen": obj.get("isOpen") if obj.get("isOpen") != null else false,
@@ -251,6 +253,8 @@ func extract_switch_states() -> Dictionary:
     for node: Node in mapScene.get_tree().get_nodes_in_group("Switch"):
         var obj: Node = node.owner if node.owner != null else node
         if !obj.has_method("Activate"):
+            continue
+        if !mapScene.is_ancestor_of(obj):
             continue
         var switchPath: String = mapScene.get_path_to(obj)
         switches[switchPath] = obj.get("active") if obj.get("active") != null else false
