@@ -336,11 +336,26 @@ func on_lobby_joined(response: Dictionary) -> void:
         return
     var data: Dictionary = response.get("data", { })
     var hostSteamID: String = data.get("host_steam_id", "")
+    var lobbyID: String = data.get("lobby_id", "")
     if hostSteamID.is_empty():
         _cm._log("Lobby has no host Steam ID")
         return
+    _cm.currentLobbyID = lobbyID
     _cm._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
+    # Read host state to decide if we should auto-load into the game
+    if !lobbyID.is_empty():
+        _cm.steamBridge.get_lobby_data(lobbyID, "state", _on_host_state_received)
     _cm.steamBridge.start_p2p_client(hostSteamID, _cm.on_p2p_tunnel_ready)
+
+
+func _on_host_state_received(response: Dictionary) -> void:
+    if !response.get("ok", false):
+        return
+    var data: Dictionary = response.get("data", {})
+    var hostState: String = data.get("value", "")
+    _cm._log("Host lobby state: %s" % hostState)
+    if hostState == "in_game":
+        _cm.pendingAutoJoin = true
 
 
 func on_invite_pressed() -> void:

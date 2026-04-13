@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	sw "github.com/badhex/go-steamworks"
+	sw "github.com/plaught-armor/go-steamworks"
 )
 
 // Callback result structs matching Steamworks SDK layout.

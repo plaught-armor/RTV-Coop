@@ -13,7 +13,7 @@ import (
 	"time"
 	"unsafe"
 
-	sw "github.com/badhex/go-steamworks"
+	sw "github.com/plaught-armor/go-steamworks"
 )
 
 // peerTunnel represents a UDP tunnel for one remote Steam peer.

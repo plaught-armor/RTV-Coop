@@ -5,7 +5,7 @@ import (
 	"os"
 	"runtime"
 
-	sw "github.com/badhex/go-steamworks"
+	sw "github.com/plaught-armor/go-steamworks"
 )
 
 // isProton detects Wine/Proton on Windows by checking for STEAM_COMPAT_DATA_PATH.

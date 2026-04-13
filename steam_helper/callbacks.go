@@ -5,7 +5,7 @@ import (
 	"log"
 	"unsafe"
 
-	sw "github.com/badhex/go-steamworks"
+	sw "github.com/plaught-armor/go-steamworks"
 )
 
 // Callback IDs from Steamworks SDK.

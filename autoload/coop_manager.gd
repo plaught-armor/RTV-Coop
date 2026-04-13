@@ -60,6 +60,14 @@ var lastScenePath: String = ""
 var itemRegistrationTimer: SceneTreeTimer = null
 ## Check scene every 60 physics frames (~0.5s at 120Hz).
 const SCENE_CHECK_FRAMES: int = 60
+## Set when lobby state says host is in-game; consumed in on_connected_to_server.
+var pendingAutoJoin: bool = false
+## Lobby ID of the currently joined lobby (for reading lobby metadata).
+var currentLobbyID: String = ""
+## Tracks previous scene to detect menu→game transitions.
+var _wasOnMenu: bool = true
+## Prevents double _auto_load_game calls during async scene loading.
+var _autoLoadInProgress: bool = false
 
 
 func _ready() -> void:
@@ -237,6 +245,9 @@ func disconnect_session() -> void:
     localPeerId = 0
     isHost = false
     isActive = false
+    pendingAutoJoin = false
+    currentLobbyID = ""
+    _autoLoadInProgress = false
     worldState.stop_item_tracking()
     steamBridge.leave_lobby()
     steamBridge.clear_rich_presence()
@@ -303,6 +314,13 @@ func on_connected_to_server() -> void:
     sync_name.rpc(get_local_name(), localSteamID)
     if !currentMap.is_empty():
         sync_peer_map.rpc(currentMap)
+    # Auto-join: if lobby state said host is in-game, load now
+    if pendingAutoJoin:
+        pendingAutoJoin = false
+        _auto_load_game.call_deferred()
+    elif _is_on_menu():
+        # Re-check in case host transitioned during P2P setup
+        _recheck_host_state()
 
 
 func on_connection_failed() -> void:
@@ -457,11 +475,18 @@ func ensure_all_spawned() -> void:
 
 
 func on_scene_changed() -> void:
+    var wasOnMenu: bool = _wasOnMenu
+    _wasOnMenu = _is_on_menu()
+    _autoLoadInProgress = false
     inject_manager()
     if !is_session_active():
         return
     var currentMap: String = get_current_map()
     peerMaps[localPeerId] = currentMap
+    # Host transitioned from menu to in-game — tell waiting clients to load
+    if isHost && wasOnMenu && !_wasOnMenu:
+        var mapName: String = _get_current_map_name()
+        sync_game_start.rpc(mapName)
     # Despawn remote players from the old map
     for peerId: int in remoteNodes.keys():
         if !is_peer_on_same_map(peerId):
@@ -598,6 +623,8 @@ func _update_lobby_data() -> void:
     var mapName: String = _get_current_map_name()
     steamBridge.set_lobby_data("map", mapName)
     steamBridge.set_lobby_data("players", str(playerCount))
+    var state: String = "menu" if _is_on_menu() else "in_game"
+    steamBridge.set_lobby_data("state", state)
 
 
 ## Extracts a display-friendly map name from the current scene path.
@@ -609,6 +636,75 @@ func _get_current_map_name() -> String:
         return ""
     # "res://Scenes/Village.tscn" -> "Village"
     return path.get_file().get_basename()
+
+# ---------- Auto-Join ----------
+
+
+## Returns true if the current scene is the main menu (or no scene loaded).
+func _is_on_menu() -> bool:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return true
+    var path: String = scene.scene_file_path
+    return path.is_empty() || path == "res://Scenes/Menu.tscn"
+
+
+## Programmatically starts the game for a client joining via invite.
+## Loads the last shelter if a save exists, otherwise creates a new game.
+func _auto_load_game() -> void:
+    if isHost:
+        return
+    if !is_session_active():
+        _log("Auto-load skipped — no active session")
+        return
+    if !_is_on_menu():
+        _log("Auto-load skipped — already in game")
+        return
+    if _autoLoadInProgress:
+        _log("Auto-load skipped — already in progress")
+        return
+    _autoLoadInProgress = true
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader == null:
+        _log("Auto-load failed — Loader not found")
+        _autoLoadInProgress = false
+        return
+    var shelter: String = loader.ValidateShelter()
+    if !shelter.is_empty():
+        _log("Auto-load: continuing save (shelter: %s)" % shelter)
+        loader.LoadScene(shelter)
+    else:
+        _log("Auto-load: new game (Cabin)")
+        loader.NewGame(1, 1)
+        loader.LoadScene("Cabin")
+
+
+## Re-reads lobby state after ENet connects, in case host transitioned
+## from menu to in-game during P2P tunnel setup.
+func _recheck_host_state() -> void:
+    if !steamBridge.is_ready():
+        return
+    if currentLobbyID.is_empty():
+        return
+    steamBridge.get_lobby_data(currentLobbyID, "state", _on_recheck_state)
+
+
+func _on_recheck_state(response: Dictionary) -> void:
+    if !response.get("ok", false):
+        return
+    var data: Dictionary = response.get("data", {})
+    var hostState: String = data.get("value", "")
+    if hostState == "in_game" && _is_on_menu():
+        _log("Recheck: host is in-game — auto-loading")
+        _auto_load_game()
+
+
+## Host tells all clients that the game is starting (menu → in-game transition).
+@rpc("authority", "call_remote", "reliable")
+func sync_game_start(sceneName: String) -> void:
+    _log("Host started game (%s) — auto-loading" % sceneName)
+    _auto_load_game()
+
 
 # ---------- Map Tracking ----------
 
