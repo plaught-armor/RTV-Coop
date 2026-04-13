@@ -1,5 +1,3 @@
-github.com/badhex/go-steamworks v1.64.2 h1:SNurS80H9zMfYe6Dpdw94fEU0wECKAS0y0osicJ6eUs=
-github.com/badhex/go-steamworks v1.64.2/go.mod h1:xVuDDQ1L8G6p2iwy7gyODkz4GOS2r72EJjBtc+wBCLY=
 github.com/ebitengine/purego v0.10.0-alpha.4 h1:JzPbdf+cqbyT9sZtP4xnqelwUXwf7LvD8xKS6+ofTds=
 github.com/ebitengine/purego v0.10.0-alpha.4/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/jupiterrider/ffi v0.6.0 h1:UX378KcZvH5c8qgLi9KL/bL82SZTHdRspZ+jj7bvBng=

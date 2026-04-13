@@ -12,4 +12,4 @@ require (
 	github.com/jupiterrider/ffi v0.6.0 // indirect
 )
 
-replace github.com/badhex/go-steamworks => /home/king/Repos/go-steamworks
+replace github.com/badhex/go-steamworks => /mnt/based_backup/Repos/go-steamworks

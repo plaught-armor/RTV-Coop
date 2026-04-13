@@ -48,8 +48,7 @@ var connectTimer: float = 0.0
 var connecting: bool = false
 
 
-## Extracts the helper binary next to the game executable and launches it.
-## Under Proton, the exe's CWD is the game install dir — the DLL must be there too.
+## Extracts the helper binary to user://, launches it, and begins TCP connection.
 func launch() -> void:
     if helperPID >= 0:
         return
@@ -57,26 +56,21 @@ func launch() -> void:
     var helperSrc: String = get_helper_res_path()
     var libSrc: String = get_steam_lib_res_path()
 
-    # Extract to game install directory (next to RTV.exe) so the DLL is in CWD
-    var installDir: String = OS.get_executable_path().get_base_dir()
-    var helperName: String = "steam_helper.exe" if OS.get_name() == "Windows" else "steam_helper"
-    var libName: String = "steam_api64.dll" if OS.get_name() == "Windows" else "libsteam_api.so"
-    var helperDst: String = installDir.path_join(helperName)
-    var libDst: String = installDir.path_join(libName)
-    var appIdDst: String = installDir.path_join("steam_appid.txt")
-
-    extract_file_global(helperSrc, helperDst)
-    extract_file_global(libSrc, libDst)
-    extract_file_global("res://mod/bin/steam_appid.txt", appIdDst)
+    var helperDst: String = get_helper_user_path()
+    var libDst: String = get_steam_lib_user_path()
+    extract_file(helperSrc, helperDst)
+    extract_file(libSrc, libDst)
+    extract_file("res://mod/bin/steam_appid.txt", "user://steam_appid.txt")
 
     if OS.get_name() == "Linux":
-        OS.execute("chmod", ["+x", helperDst])
+        OS.execute("chmod", ["+x", ProjectSettings.globalize_path(helperDst)])
 
-    _log("Helper dir: %s" % installDir)
+    _log("Helper dir: %s" % ProjectSettings.globalize_path("user://"))
     _log("SteamAppId env: %s" % OS.get_environment("SteamAppId"))
 
+    var globalPath: String = ProjectSettings.globalize_path(helperDst)
     var args: PackedStringArray = ["--port", str(HELPER_PORT)]
-    helperPID = OS.create_process(helperDst, args)
+    helperPID = OS.create_process(globalPath, args)
 
     if helperPID < 0:
         _log("Failed to launch Steam helper")
@@ -403,23 +397,6 @@ func start_p2p_client(hostSteamID: String, callback: Callable) -> void:
     send_command("start_p2p_client", { "host_steam_id": hostSteamID }, callback)
 
 # ---------- File Extraction ----------
-
-
-## Extracts a resource file to an absolute filesystem path (game install dir).
-func extract_file_global(resPath: String, dstPath: String) -> void:
-    var data: PackedByteArray = read_from_res(resPath)
-    if data.is_empty():
-        data = read_from_vmz(resPath)
-    if data.is_empty():
-        _log("Cannot read: %s" % resPath)
-        return
-    var dst: FileAccess = FileAccess.open(dstPath, FileAccess.WRITE)
-    if dst == null:
-        _log("Cannot write: %s (err: %s)" % [dstPath, FileAccess.get_open_error()])
-        return
-    dst.store_buffer(data)
-    dst.close()
-    _log("Extracted: %s -> %s (%d bytes)" % [resPath, dstPath, data.size()])
 
 
 func extract_file(resPath: String, userPath: String) -> void:

@@ -31,12 +31,12 @@ func (pt *peerTunnel) closeTunnel() {
 
 // Aliases for readability.
 const (
-	stateNone                   = int32(ESteamNetworkingConnectionState_None)
-	stateConnecting             = int32(ESteamNetworkingConnectionState_Connecting)
-	stateFindingRoute           = int32(ESteamNetworkingConnectionState_FindingRoute)
-	stateConnected              = int32(ESteamNetworkingConnectionState_Connected)
-	stateClosedByPeer           = int32(ESteamNetworkingConnectionState_ClosedByPeer)
-	stateProblemDetectedLocally = int32(ESteamNetworkingConnectionState_ProblemDetectedLocally)
+	stateNone                   = int32(sw.ESteamNetworkingConnectionState_None)
+	stateConnecting             = int32(sw.ESteamNetworkingConnectionState_Connecting)
+	stateFindingRoute           = int32(sw.ESteamNetworkingConnectionState_FindingRoute)
+	stateConnected              = int32(sw.ESteamNetworkingConnectionState_Connected)
+	stateClosedByPeer           = int32(sw.ESteamNetworkingConnectionState_ClosedByPeer)
+	stateProblemDetectedLocally = int32(sw.ESteamNetworkingConnectionState_ProblemDetectedLocally)
 )
 
 var (
@@ -85,7 +85,7 @@ func getConnectionState(conn sw.HSteamNetConnection) int32 {
 	if fnGetConnectionInfo == 0 || socketsPtr == 0 {
 		return stateNone
 	}
-	var info SteamNetConnectionInfo_t
+	var info sw.SteamNetConnectionInfo_t
 	ret := sw.CallSymbolPtr(fnGetConnectionInfo, socketsPtr, uintptr(conn), uintptr(unsafe.Pointer(&info)))
 	if ret != 0 {
 		return int32(info.State)

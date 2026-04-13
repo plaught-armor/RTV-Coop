@@ -116,9 +116,9 @@ func handleCallback(msg callbackMsg) {
 			})
 		}
 
-	case CallbackIDSteamNetConnectionStatusChanged:
-		if msg.ParamSize >= int32(unsafe.Sizeof(SteamNetConnectionStatusChangedCallback_t{})) {
-			cb := (*SteamNetConnectionStatusChangedCallback_t)(unsafe.Pointer(msg.Param))
+	case sw.CallbackIDSteamNetConnectionStatusChanged:
+		if msg.ParamSize >= int32(unsafe.Sizeof(sw.SteamNetConnectionStatusChangedCallback_t{})) {
+			cb := (*sw.SteamNetConnectionStatusChangedCallback_t)(unsafe.Pointer(msg.Param))
 			if cb.Conn == 0 {
 				return // Ignore internal relay connections
 			}
