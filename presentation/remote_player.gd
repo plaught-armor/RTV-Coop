@@ -15,6 +15,14 @@ var displayName: String = ""
 
 var audioPlayer: AudioStreamPlayer3D = null
 
+## Occlusion state
+var occlusionRay: PhysicsRayQueryParameters3D = null
+var isOccluded: bool = false
+const OCCLUSION_CHECK_TICKS: int = 24  ## ~5Hz at 120Hz physics
+const OCCLUSION_DB_PENALTY: float = -8.0
+const OCCLUSION_CUTOFF_HZ: float = 800.0
+static var occludedBusName: StringName = &""
+static var occludedBusIdx: int = -1
 
 @onready var body: MeshInstance3D = $Body
 @onready var headPivot: Node3D = $HeadPivot
@@ -41,6 +49,8 @@ func init_manager(manager: Node) -> void:
     audioPlayer.max_distance = 50.0
     audioPlayer.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
     add_child(audioPlayer)
+
+    _ensure_occluded_bus()
 
     # Collision body for AI raycasts (LOS + fire) to detect this remote player
     _create_collision_body()
@@ -77,6 +87,58 @@ func _create_collision_body() -> void:
     add_child(staticBody)
 
 
+## Creates the shared "CoopOccluded" audio bus with a lowpass filter.
+## Called once per session — static vars persist across instances.
+static func _ensure_occluded_bus() -> void:
+    occludedBusName = &"CoopOccluded"
+    # Look up by name every time — bus indices can shift at runtime
+    var idx: int = AudioServer.get_bus_index(occludedBusName)
+    if idx >= 0:
+        occludedBusIdx = idx
+        return
+    # Create new bus
+    AudioServer.add_bus()
+    occludedBusIdx = AudioServer.bus_count - 1
+    AudioServer.set_bus_name(occludedBusIdx, occludedBusName)
+    AudioServer.set_bus_send(occludedBusIdx, &"Master")
+    AudioServer.set_bus_volume_db(occludedBusIdx, OCCLUSION_DB_PENALTY)
+    var lpf: AudioEffectLowPassFilter = AudioEffectLowPassFilter.new()
+    lpf.cutoff_hz = OCCLUSION_CUTOFF_HZ
+    AudioServer.add_bus_effect(occludedBusIdx, lpf)
+
+
+## Raycasts from listener to this remote player. If geometry blocks LOS, route audio
+## through the occluded bus (lowpass + volume reduction).
+func _update_occlusion() -> void:
+    if !is_instance_valid(audioPlayer) || occludedBusIdx < 0:
+        return
+    var cam: Camera3D = get_viewport().get_camera_3d()
+    if cam == null:
+        return
+
+    var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+    var from: Vector3 = cam.global_position
+    var to: Vector3 = global_position + Vector3(0, 1.0, 0)
+
+    if occlusionRay == null:
+        occlusionRay = PhysicsRayQueryParameters3D.create(from, to)
+        occlusionRay.collision_mask = 1
+        # Exclude local player's body so the ray doesn't immediately hit it
+        var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
+        if controller is PhysicsBody3D:
+            occlusionRay.exclude = [controller.get_rid()]
+    else:
+        occlusionRay.from = from
+        occlusionRay.to = to
+
+    var result: Dictionary = space.intersect_ray(occlusionRay)
+    var nowOccluded: bool = !result.is_empty()
+
+    if nowOccluded != isOccluded:
+        isOccluded = nowOccluded
+        audioPlayer.bus = occludedBusName if isOccluded else &"Master"
+
+
 func _physics_process(delta: float) -> void:
     if !is_instance_valid(_cm):
         return
@@ -90,6 +152,10 @@ func _physics_process(delta: float) -> void:
     else:
         body.scale.y = lerpf(body.scale.y, 1.0, delta * 5.0)
         headPivot.position.y = lerpf(headPivot.position.y, 1.6, delta * 5.0)
+
+    # Occlusion check at ~5Hz
+    if Engine.get_physics_frames() % OCCLUSION_CHECK_TICKS == 0:
+        _update_occlusion()
 
     # Update name label with health if available
     var health: int = get_meta(&"health", -1)
@@ -119,6 +185,7 @@ func play_remote_audio(audioPath: String) -> void:
         return
     if audioEvent.audioClips.is_empty():
         return
+    audioPlayer.bus = occludedBusName if isOccluded && occludedBusIdx >= 0 else &"Master"
     audioPlayer.stream = audioEvent.audioClips.pick_random()
     audioPlayer.volume_db = audioEvent.volume
     audioPlayer.pitch_scale = randf_range(0.9, 1.0) if audioEvent.randomPitch else 1.0
@@ -214,6 +281,8 @@ func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> v
             add_child(tailPlayer)
             tailPlayer.stream = tailEvent.audioClips.pick_random()
             tailPlayer.volume_db = tailEvent.volume
+            if isOccluded && occludedBusIdx >= 0:
+                tailPlayer.bus = occludedBusName
             tailPlayer.play()
             tailPlayer.finished.connect(tailPlayer.queue_free)
 
@@ -225,4 +294,9 @@ func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> v
         light.omni_range = 8.0
         light.position = Vector3(0, 1.4, -0.3)
         add_child(light)
-        get_tree().create_timer(0.05).timeout.connect(func(): if is_instance_valid(light): light.queue_free())
+        get_tree().create_timer(0.05).timeout.connect(_free_if_valid.bind(light))
+
+
+static func _free_if_valid(node: Node) -> void:
+    if is_instance_valid(node):
+        node.queue_free()
