@@ -69,7 +69,10 @@ func launch() -> void:
     _log("SteamAppId env: %s" % OS.get_environment("SteamAppId"))
 
     var globalPath: String = ProjectSettings.globalize_path(helperDst)
-    var args: PackedStringArray = ["--port", str(HELPER_PORT)]
+    # Log goes next to godot.log in user:// so both can be collected together.
+    var logPath: String = ProjectSettings.globalize_path("user://logs/steam_helper.log")
+    DirAccess.make_dir_recursive_absolute(logPath.get_base_dir())
+    var args: PackedStringArray = ["--port", str(HELPER_PORT), "--log-file", logPath]
     helperPID = OS.create_process(globalPath, args)
 
     if helperPID < 0:

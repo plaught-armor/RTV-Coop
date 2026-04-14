@@ -26,17 +26,22 @@ var inviteBtn: Button = null
 var friendsVisible: bool = false
 
 # World picker widgets
-var worldPickerPanel: PanelContainer = null
+var worldPickerPanel: Control = null
 var worldPickerList: VBoxContainer = null
 var worldPickerVisible: bool = false
 
 # New world dialog widgets
-var newWorldPanel: PanelContainer = null
+var newWorldPanel: Control = null
 var newWorldNameInput: LineEdit = null
 var newWorldDifficulty: int = 1
 var newWorldSeason: int = 1
 var diffButtons: Array[Button] = []
 var seasonButtons: Array[Button] = []
+
+# Menu-specific lobby browser (separate from F10 in-game panel)
+var menuLobbyBrowser: Control = null
+var menuLobbyList: VBoxContainer = null
+var menuLobbyLabelPool: Array[Button] = []
 
 const COOP_DIR: String = "user://coop/"
 const META_FILE: String = "meta.cfg"
@@ -186,6 +191,11 @@ func build_ui() -> void:
     disconnectBtn.pressed.connect(on_disconnect_pressed)
     vbox.add_child(disconnectBtn)
 
+    var collectLogsBtn: Button = Button.new()
+    collectLogsBtn.text = "Open Logs Folder"
+    collectLogsBtn.pressed.connect(_on_collect_logs_pressed)
+    vbox.add_child(collectLogsBtn)
+
     vbox.add_child(HSeparator.new())
 
     var playersLabel: Label = Label.new()
@@ -214,9 +224,11 @@ func _process(_delta: float) -> void:
         0:
             statusLabel.text = "Disconnected"
         1:
-            statusLabel.text = "Hosting (%d peers)" % currentPeerCount
+            var worldLabel: String = _get_active_world_name()
+            statusLabel.text = "Hosting — %s (%d peers)" % [worldLabel, currentPeerCount] if !worldLabel.is_empty() else "Hosting (%d peers)" % currentPeerCount
         2:
-            statusLabel.text = "Connected"
+            var worldLabel: String = _get_active_world_name()
+            statusLabel.text = "Connected — %s" % worldLabel if !worldLabel.is_empty() else "Connected"
 
     update_player_list()
 
@@ -313,6 +325,50 @@ func on_disconnect_pressed() -> void:
     _cm.disconnect_session()
 
 
+## Copies godot.log + steam_helper.log to a timestamped folder and opens it.
+func _on_collect_logs_pressed() -> void:
+    if !is_instance_valid(_cm):
+        return
+    _cm.collect_logs()
+
+
+## Shows a themed, menu-specific lobby browser (separate from the F10 in-game
+## panel which has cluttered controls). Called when the user clicks
+## Multiplayer → Browse Lobbies from the main menu.
+func show_lobby_browser() -> void:
+    _free_dialog(menuLobbyBrowser)
+    menuLobbyBrowser = _make_menu_dialog_panel("Browse Lobbies", "Join a friend's game")
+    add_child(menuLobbyBrowser)
+    _wire_return_button(menuLobbyBrowser, hide_lobby_browser)
+
+    var vbox: VBoxContainer = menuLobbyBrowser.get_node("VBox")
+
+    var refreshBtn: Button = Button.new()
+    refreshBtn.text = "Refresh"
+    refreshBtn.custom_minimum_size = Vector2(0, 36)
+    refreshBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    refreshBtn.pressed.connect(on_refresh_lobbies)
+    vbox.add_child(refreshBtn)
+
+    var scroll: ScrollContainer = ScrollContainer.new()
+    scroll.custom_minimum_size = Vector2(0, 260)
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    vbox.add_child(scroll)
+
+    menuLobbyList = VBoxContainer.new()
+    menuLobbyList.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    scroll.add_child(menuLobbyList)
+    menuLobbyLabelPool.clear()
+
+    on_refresh_lobbies()
+
+
+func hide_lobby_browser() -> void:
+    _free_dialog(menuLobbyBrowser)
+    menuLobbyBrowser = null
+    _show_mp_submenu_if_on_menu()
+
+
 func on_refresh_lobbies() -> void:
     if !_cm.steamBridge.is_ready():
         return
@@ -320,8 +376,11 @@ func on_refresh_lobbies() -> void:
 
 
 func on_lobby_list_received(response: Dictionary) -> void:
-    for i: int in range(lobbyLabelPool.size()):
-        lobbyLabelPool[i].hide()
+    # Active list & pool: menu browser takes priority when visible, else F10 panel.
+    var activePool: Array[Button] = menuLobbyLabelPool if menuLobbyBrowser != null else lobbyLabelPool
+
+    for i: int in range(activePool.size()):
+        activePool[i].hide()
 
     if !response.get("ok", false):
         return
@@ -343,8 +402,8 @@ func on_lobby_list_received(response: Dictionary) -> void:
             btn.pressed.disconnect(conn["callable"])
         btn.pressed.connect(on_lobby_join_pressed.bind(lobbyID))
 
-    for i: int in range(lobbies.size(), lobbyLabelPool.size()):
-        lobbyLabelPool[i].hide()
+    for i: int in range(lobbies.size(), activePool.size()):
+        activePool[i].hide()
 
 
 func on_lobby_join_pressed(lobbyID: String) -> void:
@@ -496,38 +555,53 @@ func get_pooled_friend_row(idx: int) -> HBoxContainer:
 # ---------- World Picker ----------
 
 
+## Reads the display name for the currently active co-op world from meta.cfg.
+## Returns empty string if no world is active or meta is missing.
+func _get_active_world_name() -> String:
+    if _cm == null || _cm.worldId.is_empty():
+        return ""
+    var cfgPath: String = COOP_DIR + _cm.worldId + "/" + META_FILE
+    if !FileAccess.file_exists(cfgPath):
+        return _cm.worldId
+    var cfg: ConfigFile = ConfigFile.new()
+    if cfg.load(cfgPath) != OK:
+        return _cm.worldId
+    return cfg.get_value("world", "name", _cm.worldId)
+
+
+## Creates an opaque dark stylebox so dialog panels don't show the panel behind them.
+func _make_dialog_stylebox() -> StyleBoxFlat:
+    var style: StyleBoxFlat = StyleBoxFlat.new()
+    style.bg_color = Color(0.08, 0.08, 0.08, 0.97)
+    style.border_color = Color(0.3, 0.3, 0.3, 1.0)
+    style.border_width_left = 1
+    style.border_width_right = 1
+    style.border_width_top = 1
+    style.border_width_bottom = 1
+    style.content_margin_left = 12
+    style.content_margin_right = 12
+    style.content_margin_top = 10
+    style.content_margin_bottom = 10
+    return style
+
+
 func show_world_picker() -> void:
-    if worldPickerPanel != null:
-        worldPickerPanel.queue_free()
-
-    worldPickerPanel = PanelContainer.new()
-    worldPickerPanel.custom_minimum_size = Vector2(380, 340)
-    worldPickerPanel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-    worldPickerPanel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-    worldPickerPanel.grow_vertical = Control.GROW_DIRECTION_BOTH
-    worldPickerPanel.mouse_filter = Control.MOUSE_FILTER_STOP
+    _free_dialog(worldPickerPanel)
+    worldPickerPanel = _make_menu_dialog_panel("Host World", "Select a world to host")
     add_child(worldPickerPanel)
+    _wire_return_button(worldPickerPanel, hide_world_picker)
 
-    var vbox: VBoxContainer = VBoxContainer.new()
-    worldPickerPanel.add_child(vbox)
-
-    var title: Label = Label.new()
-    title.text = "Select World"
-    title.add_theme_font_size_override("font_size", 18)
-    vbox.add_child(title)
-
-    vbox.add_child(HSeparator.new())
+    var vbox: VBoxContainer = worldPickerPanel.get_node("VBox")
 
     var newBtn: Button = Button.new()
     newBtn.text = "+ New World"
+    newBtn.custom_minimum_size = Vector2(0, 36)
     newBtn.mouse_filter = Control.MOUSE_FILTER_STOP
     newBtn.pressed.connect(show_new_world_dialog)
     vbox.add_child(newBtn)
 
-    vbox.add_child(HSeparator.new())
-
     var scroll: ScrollContainer = ScrollContainer.new()
-    scroll.custom_minimum_size = Vector2(0, 220)
+    scroll.custom_minimum_size = Vector2(0, 240)
     scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
     vbox.add_child(scroll)
 
@@ -537,22 +611,139 @@ func show_world_picker() -> void:
 
     populate_world_list()
 
-    vbox.add_child(HSeparator.new())
-
-    var cancelBtn: Button = Button.new()
-    cancelBtn.text = "Cancel"
-    cancelBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-    cancelBtn.pressed.connect(hide_world_picker)
-    vbox.add_child(cancelBtn)
-
     worldPickerVisible = true
 
 
+## Creates a full-screen menu scaffold matching the game's Modes/Settings style:
+## [br] - Transparent Control covering full rect (captures input)
+## [br] - Centered Header (font_size 20) + dim Subheader (alpha 0.5)
+## [br] - Empty VBox named "VBox" below the header for custom content
+## [br] - "← Return" button anchored bottom-center (256×40, connected via callback)
+## Returns the root Control; callers add to VBox and wire the Return callback
+## via [method _wire_return_button].
+func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control:
+    var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
+
+    var root: Control = Control.new()
+    root.name = "MenuDialog"
+    root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    root.mouse_filter = Control.MOUSE_FILTER_STOP
+    if gameTheme != null:
+        root.theme = gameTheme
+
+    # Header: centered at top third of screen
+    var header: Label = Label.new()
+    header.name = "Header"
+    header.text = titleText
+    header.add_theme_font_size_override("font_size", 20)
+    header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    header.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+    header.offset_left = -192
+    header.offset_right = 192
+    header.offset_top = 120
+    header.offset_bottom = 160
+    root.add_child(header)
+
+    if !subtitleText.is_empty():
+        var subheader: Label = Label.new()
+        subheader.name = "Subheader"
+        subheader.text = subtitleText
+        subheader.modulate = Color(1, 1, 1, 0.5)
+        subheader.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        subheader.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+        subheader.offset_left = -192
+        subheader.offset_right = 192
+        subheader.offset_top = 150
+        subheader.offset_bottom = 180
+        root.add_child(subheader)
+
+    # Content VBox: centered, below the subheader
+    var vbox: VBoxContainer = VBoxContainer.new()
+    vbox.name = "VBox"
+    vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    vbox.grow_horizontal = Control.GROW_DIRECTION_BOTH
+    vbox.grow_vertical = Control.GROW_DIRECTION_BOTH
+    vbox.custom_minimum_size = Vector2(420, 0)
+    vbox.add_theme_constant_override("separation", 10)
+    root.add_child(vbox)
+
+    # Return button: anchored bottom-center, same size as game's Modes_Return
+    var returnBtn: Button = Button.new()
+    returnBtn.name = "ReturnBtn"
+    returnBtn.text = "← Return"
+    returnBtn.custom_minimum_size = Vector2(256, 40)
+    returnBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    returnBtn.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+    returnBtn.offset_left = -128
+    returnBtn.offset_right = 128
+    returnBtn.offset_top = -96
+    returnBtn.offset_bottom = -56
+    root.add_child(returnBtn)
+
+    return root
+
+
+## Wires the Return button on a menu dialog to the given callback.
+func _wire_return_button(dialog: Control, callback: Callable) -> void:
+    var returnBtn: Button = dialog.get_node_or_null("ReturnBtn")
+    if returnBtn == null:
+        return
+    for conn: Dictionary in returnBtn.pressed.get_connections():
+        returnBtn.pressed.disconnect(conn["callable"])
+    returnBtn.pressed.connect(callback)
+
+
+## Legacy shim — older callers passed the VBox; now the Return lives on root.
+func _append_return_button(_vbox: VBoxContainer, _callback: Callable) -> void:
+    # Return button is now part of the dialog scaffold. Callers should use
+    # _wire_return_button(dialog, callback) instead.
+    pass
+
+
+## Hides the world picker. Returns to the Multiplayer submenu when opened from
+## the main menu, otherwise just closes silently.
 func hide_world_picker() -> void:
-    if worldPickerPanel != null:
-        worldPickerPanel.queue_free()
-        worldPickerPanel = null
+    _free_dialog(worldPickerPanel)
+    worldPickerPanel = null
     worldPickerVisible = false
+    _show_mp_submenu_if_on_menu()
+
+
+## Frees a dialog panel along with its wrapper (if present).
+func _free_dialog(dialog: Control) -> void:
+    if dialog == null:
+        return
+    var wrapper: Node = dialog.get_meta(&"wrapper") if dialog.has_meta(&"wrapper") else null
+    if wrapper != null && is_instance_valid(wrapper):
+        wrapper.queue_free()
+    else:
+        dialog.queue_free()
+
+
+## Shows the CoopMPSubmenu on the main menu. Used as the "Return" target for
+## any coop dialog that was opened from Multiplayer.
+func _show_mp_submenu_if_on_menu() -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene) || scene.scene_file_path != "res://Scenes/Menu.tscn":
+        return
+    var submenu: Node = scene.get_node_or_null("CoopMPSubmenu")
+    var main: Node = scene.get_node_or_null("Main")
+    if submenu != null:
+        submenu.show()
+    elif main != null:
+        # Fallback if submenu is missing
+        main.show()
+
+
+## When a coop dialog is cancelled from the main menu, restore Main visibility
+## so the player isn't left staring at an empty screen.
+func _restore_main_menu_if_open() -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene) || scene.scene_file_path != "res://Scenes/Menu.tscn":
+        return
+    var main: Node = scene.get_node_or_null("Main")
+    if main != null:
+        main.show()
 
 
 func populate_world_list() -> void:
@@ -590,28 +781,65 @@ func populate_world_list() -> void:
 
     for world: Dictionary in worlds:
         var row: HBoxContainer = HBoxContainer.new()
+        row.add_theme_constant_override("separation", 4)
         worldPickerList.add_child(row)
 
-        var btn: Button = Button.new()
+        var btn: Button = _make_two_line_row_button(world["name"], _format_world_meta(world))
         btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        btn.mouse_filter = Control.MOUSE_FILTER_STOP
-        btn.text = _format_world_label(world)
         btn.pressed.connect(on_world_selected.bind(world["id"]))
         row.add_child(btn)
 
         var delBtn: Button = Button.new()
-        delBtn.text = "X"
-        delBtn.custom_minimum_size = Vector2(30, 0)
+        delBtn.text = "×"
+        delBtn.custom_minimum_size = Vector2(40, 56)
         delBtn.mouse_filter = Control.MOUSE_FILTER_STOP
         delBtn.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+        delBtn.add_theme_font_size_override("font_size", 18)
         delBtn.pressed.connect(on_delete_world_pressed.bind(world["id"], world["name"]))
         row.add_child(delBtn)
+
+
+## Creates a clickable button with two stacked labels (title + metadata).
+## The Button handles click/hover; child labels render on top of its text area.
+func _make_two_line_row_button(titleText: String, metaText: String) -> Button:
+    var btn: Button = Button.new()
+    btn.mouse_filter = Control.MOUSE_FILTER_STOP
+    btn.custom_minimum_size = Vector2(0, 56)
+    btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+
+    var vbox: VBoxContainer = VBoxContainer.new()
+    vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    vbox.offset_left = 12
+    vbox.offset_right = -12
+    vbox.offset_top = 8
+    vbox.offset_bottom = -8
+    vbox.add_theme_constant_override("separation", 2)
+    btn.add_child(vbox)
+
+    var titleLabel: Label = Label.new()
+    titleLabel.text = titleText
+    titleLabel.add_theme_font_size_override("font_size", 15)
+    titleLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    vbox.add_child(titleLabel)
+
+    var metaLabel: Label = Label.new()
+    metaLabel.text = metaText
+    metaLabel.add_theme_font_size_override("font_size", 11)
+    metaLabel.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
+    metaLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    vbox.add_child(metaLabel)
+
+    return btn
 
 
 func _add_empty_label() -> void:
     var emptyLabel: Label = Label.new()
     emptyLabel.text = "No existing worlds"
-    emptyLabel.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+    emptyLabel.add_theme_color_override("font_color", Color(0.55, 0.55, 0.55))
+    emptyLabel.add_theme_font_size_override("font_size", 13)
+    emptyLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    emptyLabel.custom_minimum_size = Vector2(0, 80)
     worldPickerList.add_child(emptyLabel)
 
 
@@ -633,6 +861,39 @@ func _read_world_meta(worldDir: String, dirName: String) -> Dictionary:
 
     meta["players"] = _count_players_in_world(worldDir + "players/")
     return meta
+
+
+## Returns just the metadata line (day, difficulty, season, player count, last played)
+## for use below the world name in two-line list rows.
+func _format_world_meta(world: Dictionary) -> String:
+    var day: int = world.get("day", 1)
+    var season: int = world.get("season", 1)
+    var diff: int = world.get("difficulty", 1)
+    var players: int = world.get("players", 0)
+    var lastPlayed: int = world.get("last_played", 0)
+
+    var seasonText: String = "Summer" if season == 1 else "Winter"
+    var diffText: String = "Normal"
+    match diff:
+        2: diffText = "Hard"
+        3: diffText = "Permadeath"
+
+    var playerText: String = "1 player" if players == 1 else "%d players" % players
+    var base: String = "Day %d • %s • %s • %s" % [day, diffText, seasonText, playerText]
+
+    if lastPlayed > 0:
+        var now: int = int(Time.get_unix_time_from_system())
+        var elapsed: int = now - lastPlayed
+        var elapsedText: String = ""
+        if elapsed < 3600:
+            elapsedText = "%dm ago" % max(1, elapsed / 60)
+        elif elapsed < 86400:
+            elapsedText = "%dh ago" % (elapsed / 3600)
+        else:
+            elapsedText = "%dd ago" % (elapsed / 86400)
+        base += " • " + elapsedText
+
+    return base
 
 
 func _format_world_label(world: Dictionary) -> String:
@@ -684,74 +945,68 @@ func _count_players_in_world(playersDir: String) -> int:
 
 
 func show_new_world_dialog() -> void:
-    hide_world_picker()
+    # Close the world picker first (this is a forward transition, not a cancel).
+    _free_dialog(worldPickerPanel)
+    worldPickerPanel = null
+    worldPickerVisible = false
 
     newWorldDifficulty = 1
     newWorldSeason = 1
     diffButtons.clear()
     seasonButtons.clear()
 
-    newWorldPanel = PanelContainer.new()
-    newWorldPanel.custom_minimum_size = Vector2(340, 280)
-    newWorldPanel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-    newWorldPanel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-    newWorldPanel.grow_vertical = Control.GROW_DIRECTION_BOTH
-    newWorldPanel.mouse_filter = Control.MOUSE_FILTER_STOP
+    newWorldPanel = _make_menu_dialog_panel("New World", "Set up your co-op world")
     add_child(newWorldPanel)
+    _wire_return_button(newWorldPanel, on_new_world_back)
 
-    var vbox: VBoxContainer = VBoxContainer.new()
-    newWorldPanel.add_child(vbox)
+    var vbox: VBoxContainer = newWorldPanel.get_node("VBox")
 
-    var title: Label = Label.new()
-    title.text = "New World"
-    title.add_theme_font_size_override("font_size", 18)
-    vbox.add_child(title)
-
-    vbox.add_child(HSeparator.new())
-
-    # Name input
     var nameLabel: Label = Label.new()
     nameLabel.text = "World Name"
+    nameLabel.add_theme_font_size_override("font_size", 14)
     vbox.add_child(nameLabel)
 
     newWorldNameInput = LineEdit.new()
     newWorldNameInput.placeholder_text = "My World"
     newWorldNameInput.max_length = 32
     newWorldNameInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    newWorldNameInput.custom_minimum_size = Vector2(0, 32)
     vbox.add_child(newWorldNameInput)
 
-    vbox.add_child(HSeparator.new())
-
-    # Difficulty selection
     var diffLabel: Label = Label.new()
     diffLabel.text = "Difficulty"
+    diffLabel.add_theme_font_size_override("font_size", 14)
     vbox.add_child(diffLabel)
 
     var diffRow: HBoxContainer = HBoxContainer.new()
+    diffRow.add_theme_constant_override("separation", 8)
     vbox.add_child(diffRow)
 
     for pair: Array in [[1, "Normal"], [2, "Hard"], [3, "Permadeath"]]:
         var btn: Button = Button.new()
         btn.text = pair[1]
+        btn.custom_minimum_size = Vector2(0, 36)
+        btn.add_theme_font_size_override("font_size", 14)
         btn.mouse_filter = Control.MOUSE_FILTER_STOP
         btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         btn.pressed.connect(_on_difficulty_selected.bind(pair[0]))
         diffRow.add_child(btn)
         diffButtons.append(btn)
 
-    vbox.add_child(HSeparator.new())
-
-    # Season selection
     var seasonLabel: Label = Label.new()
     seasonLabel.text = "Season"
+    seasonLabel.add_theme_font_size_override("font_size", 14)
     vbox.add_child(seasonLabel)
 
     var seasonRow: HBoxContainer = HBoxContainer.new()
+    seasonRow.add_theme_constant_override("separation", 8)
     vbox.add_child(seasonRow)
 
     for pair: Array in [[1, "Summer"], [2, "Winter"]]:
         var btn: Button = Button.new()
         btn.text = pair[1]
+        btn.custom_minimum_size = Vector2(0, 36)
+        btn.add_theme_font_size_override("font_size", 14)
         btn.mouse_filter = Control.MOUSE_FILTER_STOP
         btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         btn.pressed.connect(_on_season_selected.bind(pair[0]))
@@ -760,25 +1015,13 @@ func show_new_world_dialog() -> void:
 
     _update_selection_colors()
 
-    vbox.add_child(HSeparator.new())
-
-    # Action buttons
-    var actionRow: HBoxContainer = HBoxContainer.new()
-    vbox.add_child(actionRow)
-
     var createBtn: Button = Button.new()
     createBtn.text = "Create"
+    createBtn.custom_minimum_size = Vector2(0, 40)
+    createBtn.add_theme_font_size_override("font_size", 16)
     createBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-    createBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     createBtn.pressed.connect(on_create_world_confirmed)
-    actionRow.add_child(createBtn)
-
-    var backBtn: Button = Button.new()
-    backBtn.text = "Back"
-    backBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-    backBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    backBtn.pressed.connect(on_new_world_back)
-    actionRow.add_child(backBtn)
+    vbox.add_child(createBtn)
 
 
 func _on_difficulty_selected(diff: int) -> void:
@@ -820,9 +1063,8 @@ func on_create_world_confirmed() -> void:
     _write_world_meta(worldDir, worldName)
 
     # Close dialog and host
-    if newWorldPanel != null:
-        newWorldPanel.queue_free()
-        newWorldPanel = null
+    _free_dialog(newWorldPanel)
+    newWorldPanel = null
 
     _cm.worldId = worldId
     _cm.host_game()
@@ -835,9 +1077,8 @@ func on_create_world_confirmed() -> void:
 
 
 func on_new_world_back() -> void:
-    if newWorldPanel != null:
-        newWorldPanel.queue_free()
-        newWorldPanel = null
+    _free_dialog(newWorldPanel)
+    newWorldPanel = null
     show_world_picker()
 
 
@@ -941,12 +1182,18 @@ func _update_world_last_played(worldId: String) -> void:
 
 
 func get_pooled_lobby_button(idx: int) -> Button:
-    if idx < lobbyLabelPool.size():
-        lobbyLabelPool[idx].show()
-        return lobbyLabelPool[idx]
+    # When the menu browser is open, pool buttons go there; otherwise F10 panel.
+    var useMenu: bool = menuLobbyBrowser != null
+    var pool: Array[Button] = menuLobbyLabelPool if useMenu else lobbyLabelPool
+    var container: VBoxContainer = menuLobbyList if useMenu else lobbyList
+
+    if idx < pool.size():
+        pool[idx].show()
+        return pool[idx]
 
     var btn: Button = Button.new()
     btn.mouse_filter = Control.MOUSE_FILTER_STOP
-    lobbyList.add_child(btn)
-    lobbyLabelPool.append(btn)
+    if container != null:
+        container.add_child(btn)
+    pool.append(btn)
     return btn

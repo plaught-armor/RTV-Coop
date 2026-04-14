@@ -78,16 +78,19 @@ func main() {
 	flag.IntVar(&port, "port", 27099, "TCP port to listen on")
 	var appIDFlag uint
 	flag.UintVar(&appIDFlag, "appid", 1963610, "Steam App ID (Road to Vostok)")
+	var logFilePath string
+	flag.StringVar(&logFilePath, "log-file", "steam_helper.log", "Log file path (absolute or relative to cwd)")
 	flag.Parse()
 	appID = uint32(appIDFlag)
 
 	log.SetPrefix("[steam_helper] ")
 	log.SetFlags(log.Ltime)
 
-	// Write log to file alongside the executable for debugging
-	if logFile, err := os.OpenFile("steam_helper.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+	// Write log to the configured path (co-located with godot.log when launched
+	// from the mod so both logs can be collected from a single folder).
+	if logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
 		log.SetOutput(logFile)
-		log.Println("Log file opened")
+		log.Printf("Log file opened: %s", logFilePath)
 	}
 
 	// Listen FIRST so the game can connect and get status

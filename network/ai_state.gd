@@ -139,6 +139,9 @@ var aiNodes: Array[Node] = []
 var aiBuffers: Array[AIBuffer] = []
 ## 0 = inactive on client, 1 = active (reparented to Agents).
 var activeOnClient: PackedInt32Array = []
+## Buffered receive_ai_activate calls that arrived before register_spawner_pools ran.
+## Flushed inside register_spawner_pools once aiNodes is populated.
+var pendingActivations: Array[Dictionary] = []
 
 # ---------- Registration ----------
 
@@ -193,6 +196,23 @@ func register_spawner_pools(spawner: Node) -> void:
             activeOnClient[idx] = 1
             activeCount += 1
     _log("register_spawner_pools: slotCount=%d nodes=%d active=%d" % [slotCount, allNodes.size(), activeCount])
+
+    # Flush any buffered activations that arrived before pools were ready.
+    if !pendingActivations.is_empty():
+        var flushed: int = 0
+        for pending: Dictionary in pendingActivations:
+            var pid: int = pending.get("syncId", -1)
+            if pid < 0 || pid >= slotCount:
+                continue
+            var pnode: Node = aiNodes[pid]
+            if !is_instance_valid(pnode):
+                continue
+            _activate_on_client(pid, pnode)
+            pnode.global_position = pending.get("pos", Vector3.ZERO)
+            pnode.global_rotation.y = pending.get("rotY", 0.0)
+            flushed += 1
+        _log("Flushed %d pending activations" % flushed)
+        pendingActivations.clear()
 
 ## Assigns deterministic sync IDs to AI pool children when the spawner patch's
 ## [code]_ready()[/code] couldn't (e.g. CoopManager wasn't available yet).
@@ -446,15 +466,17 @@ func broadcast_ai_activate(syncId: int, pos: Vector3, rotY: float, stateIdx: int
 
 
 ## Client receives activation — reparents the matching pool child.
+## If aiNodes isn't populated yet (register_spawner_pools hasn't run due to
+## deferred scheduling), buffer the activation and flush it in register_spawner_pools.
 @rpc("authority", "call_remote", "reliable")
 func receive_ai_activate(syncId: int, pos: Vector3, rotY: float, stateIdx: int) -> void:
-    if syncId < 0 || syncId >= slotCount:
-        _log("receive_ai_activate: REJECTED syncId=%d (slotCount=%d)" % [syncId, slotCount])
+    if slotCount == 0 || syncId < 0 || syncId >= slotCount || !is_instance_valid(aiNodes[syncId]):
+        pendingActivations.append({
+            "syncId": syncId, "pos": pos, "rotY": rotY, "stateIdx": stateIdx,
+        })
+        _log("receive_ai_activate: buffered syncId=%d (slotCount=%d)" % [syncId, slotCount])
         return
     var node: Node = aiNodes[syncId]
-    if !is_instance_valid(node):
-        _log("receive_ai_activate: INVALID node for syncId=%d" % syncId)
-        return
     _log("receive_ai_activate: syncId=%d pos=%s" % [syncId, str(pos)])
     _activate_on_client(syncId, node)
     node.global_position = pos
@@ -590,6 +612,7 @@ func clear() -> void:
     aiBuffers.clear()
     aiNodes.clear()
     activeOnClient.resize(0)
+    pendingActivations.clear()
 
 
 ## Removes a specific AI from tracking (e.g., after death + cleanup).

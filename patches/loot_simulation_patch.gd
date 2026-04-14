@@ -26,7 +26,15 @@ func _ready() -> void:
         return
 
     if _cm.isHost:
-        # Host generates items normally — register_scene_items() handles sync
+        # If this map was running headlessly (items already generated there),
+        # skip generation — the handoff in _apply_handoff_state will spawn the
+        # existing items from the headless snapshot.
+        var scenePath: String = get_tree().current_scene.scene_file_path if is_instance_valid(get_tree().current_scene) else ""
+        if !scenePath.is_empty() && scenePath in _cm.headlessMaps:
+            if get_child_count() > 0:
+                get_child(0).queue_free()
+            return
+        # Fresh map — generate items normally. register_scene_items() handles sync.
         super._ready()
     else:
         # Client: free placeholder Label3D, skip loot generation

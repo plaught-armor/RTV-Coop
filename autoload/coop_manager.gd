@@ -70,6 +70,10 @@ var currentLobbyID: String = ""
 var _wasOnMenu: bool = true
 ## Prevents double _auto_load_game calls during async scene loading.
 var _autoLoadInProgress: bool = false
+## Set while waiting on async lobby state recheck.
+var _recheckPending: bool = false
+## Timeout for async lobby state recheck callback (seconds).
+const _RECHECK_TIMEOUT_SEC: float = 5.0
 
 
 func _ready() -> void:
@@ -599,6 +603,200 @@ func inject_manager() -> void:
         if node.has_method("init_manager"):
             node.init_manager(self)
 
+    # Main menu — apply co-op customization directly to the running instance
+    # (patching Menu.gd doesn't work because ModLoader defers its init until
+    # after Menu.tscn is already loaded with the original script).
+    var scenePath: String = scene.scene_file_path if is_instance_valid(scene) else ""
+    if scenePath == "res://Scenes/Menu.tscn":
+        _customize_menu(scene)
+
+
+## Modifies the running Menu instance in-place: renames New→Singleplayer,
+## Load→Multiplayer, rebinds their signals, and creates submenu panels.
+func _customize_menu(menu: Node) -> void:
+    if menu.has_meta(&"coop_customized"):
+        return
+    menu.set_meta(&"coop_customized", true)
+
+    var newButton: Button = menu.get_node_or_null("Main/Buttons/New")
+    var loadButton: Button = menu.get_node_or_null("Main/Buttons/Load")
+    if newButton == null || loadButton == null:
+        _log("[menu] customize aborted: buttons missing")
+        return
+
+    newButton.text = "Singleplayer"
+    loadButton.text = "Multiplayer"
+    loadButton.disabled = false
+
+    # Disconnect original signals
+    var newSignalCallable: Callable = Callable(menu, "_on_new_pressed")
+    var loadSignalCallable: Callable = Callable(menu, "_on_load_pressed")
+    if newButton.pressed.is_connected(newSignalCallable):
+        newButton.pressed.disconnect(newSignalCallable)
+    if loadButton.pressed.is_connected(loadSignalCallable):
+        loadButton.pressed.disconnect(loadSignalCallable)
+
+    # Connect new handlers bound to the menu node
+    newButton.pressed.connect(_on_singleplayer_pressed.bind(menu))
+    loadButton.pressed.connect(_on_multiplayer_pressed.bind(menu))
+
+    # Build the Multiplayer submenu once
+    _build_mp_submenu(menu)
+    _log("[menu] customized: Singleplayer/Multiplayer active")
+
+
+func _on_singleplayer_pressed(menu: Node) -> void:
+    if menu.has_method("PlayClick"):
+        menu.PlayClick()
+    var main: Node = menu.get_node_or_null("Main")
+    var modes: Node = menu.get_node_or_null("Modes")
+    if main != null:
+        main.hide()
+    if modes != null:
+        modes.show()
+
+
+func _on_multiplayer_pressed(menu: Node) -> void:
+    if menu.has_method("PlayClick"):
+        menu.PlayClick()
+    var main: Node = menu.get_node_or_null("Main")
+    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    if main != null:
+        main.hide()
+    if submenu != null:
+        submenu.show()
+
+
+## Builds the Multiplayer submenu as a dark centered dialog matching the
+## coop_ui's menu dialogs (world picker, lobby browser, new world).
+func _build_mp_submenu(menu: Node) -> void:
+    if menu.get_node_or_null("CoopMPSubmenu") != null:
+        return
+
+    var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
+
+    # Full-rect wrapper captures input.
+    var wrapper: Control = Control.new()
+    wrapper.name = "CoopMPSubmenu"
+    wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
+    menu.add_child(wrapper)
+    wrapper.hide()
+
+    # Centered dark panel.
+    var panel: PanelContainer = PanelContainer.new()
+    panel.custom_minimum_size = Vector2(380, 0)
+    panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+    panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+    panel.mouse_filter = Control.MOUSE_FILTER_STOP
+    if gameTheme != null:
+        panel.theme = gameTheme
+
+    var style: StyleBoxFlat = StyleBoxFlat.new()
+    style.bg_color = Color(0.05, 0.05, 0.05, 0.97)
+    style.border_color = Color(0.25, 0.25, 0.25, 1.0)
+    style.border_width_left = 1
+    style.border_width_right = 1
+    style.border_width_top = 1
+    style.border_width_bottom = 1
+    style.content_margin_left = 20
+    style.content_margin_right = 20
+    style.content_margin_top = 18
+    style.content_margin_bottom = 18
+    panel.add_theme_stylebox_override("panel", style)
+    wrapper.add_child(panel)
+
+    var vbox: VBoxContainer = VBoxContainer.new()
+    vbox.add_theme_constant_override("separation", 10)
+    panel.add_child(vbox)
+
+    var title: Label = Label.new()
+    title.text = "Multiplayer"
+    title.add_theme_font_size_override("font_size", 20)
+    title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    vbox.add_child(title)
+
+    var subtitle: Label = Label.new()
+    subtitle.text = "Co-op mode"
+    subtitle.add_theme_font_size_override("font_size", 12)
+    subtitle.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+    subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    vbox.add_child(subtitle)
+
+    var topSpacer: Control = Control.new()
+    topSpacer.custom_minimum_size = Vector2(0, 8)
+    vbox.add_child(topSpacer)
+
+    var hostBtn: Button = _mp_submenu_button("Host World")
+    hostBtn.pressed.connect(_on_mp_host_pressed.bind(menu))
+    vbox.add_child(hostBtn)
+
+    var browseBtn: Button = _mp_submenu_button("Browse Lobbies")
+    browseBtn.pressed.connect(_on_mp_browse_pressed.bind(menu))
+    vbox.add_child(browseBtn)
+
+    var logsBtn: Button = _mp_submenu_button("Open Logs Folder")
+    logsBtn.pressed.connect(_on_mp_logs_pressed)
+    vbox.add_child(logsBtn)
+
+    var bottomSpacer: Control = Control.new()
+    bottomSpacer.custom_minimum_size = Vector2(0, 8)
+    vbox.add_child(bottomSpacer)
+
+    # Return button sits inside the panel, right below the main buttons.
+    var returnBtn: Button = Button.new()
+    returnBtn.text = "Return"
+    returnBtn.custom_minimum_size = Vector2(0, 36)
+    returnBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    returnBtn.add_theme_font_size_override("font_size", 14)
+    returnBtn.pressed.connect(_on_mp_back_pressed.bind(menu))
+    vbox.add_child(returnBtn)
+
+
+func _mp_submenu_button(btnText: String) -> Button:
+    var btn: Button = Button.new()
+    btn.text = btnText
+    btn.custom_minimum_size = Vector2(0, 40)
+    btn.mouse_filter = Control.MOUSE_FILTER_STOP
+    btn.add_theme_font_size_override("font_size", 16)
+    return btn
+
+
+func _on_mp_host_pressed(menu: Node) -> void:
+    if menu.has_method("PlayClick"):
+        menu.PlayClick()
+    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    if submenu != null:
+        submenu.hide()
+    if is_instance_valid(coopUI):
+        coopUI.show_world_picker()
+
+
+func _on_mp_browse_pressed(menu: Node) -> void:
+    if menu.has_method("PlayClick"):
+        menu.PlayClick()
+    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    if submenu != null:
+        submenu.hide()
+    if is_instance_valid(coopUI):
+        coopUI.show_lobby_browser()
+
+
+func _on_mp_logs_pressed() -> void:
+    collect_logs()
+
+
+func _on_mp_back_pressed(menu: Node) -> void:
+    if menu.has_method("PlayClick"):
+        menu.PlayClick()
+    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    var main: Node = menu.get_node_or_null("Main")
+    if submenu != null:
+        submenu.hide()
+    if main != null:
+        main.show()
+
 
 ## Registers AI spawner pools with aiState for the current scene.
 ## Called deferred after scene load so the spawner's _ready() has completed.
@@ -650,6 +848,73 @@ func _get_current_map_name() -> String:
         return ""
     # "res://Scenes/Village.tscn" -> "Village"
     return path.get_file().get_basename()
+
+# ---------- Log Collection ----------
+
+
+## Collects godot.log and steam_helper.log into a timestamped folder under
+## user://rtv-coop-logs/ and opens that folder in the system file manager.
+## Cross-platform: user:// abstracts the path (Proton prefix on Linux, AppData
+## on Windows), and OS.shell_open dispatches to the native file manager.
+func collect_logs() -> String:
+    var stamp: String = Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
+    var snapDir: String = "user://rtv-coop-logs/%s/" % stamp
+    var absDir: String = ProjectSettings.globalize_path(snapDir)
+    DirAccess.make_dir_recursive_absolute(absDir)
+
+    var sources: Array[String] = [
+        "user://logs/godot.log",
+        "user://logs/steam_helper.log",
+    ]
+    var copied: int = 0
+    for src: String in sources:
+        if !FileAccess.file_exists(src):
+            continue
+        var dst: String = snapDir + src.get_file()
+        var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
+        var file: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
+        if file != null:
+            file.store_buffer(bytes)
+            file.close()
+            copied += 1
+
+    # Include recent session rollovers (godot writes godot<timestamp>.log for
+    # restarts) — pick the last three by modification time.
+    var logsDir: DirAccess = DirAccess.open("user://logs/")
+    if logsDir != null:
+        var candidates: Array[String] = []
+        logsDir.list_dir_begin()
+        var entry: String = logsDir.get_next()
+        while entry != "":
+            if entry.ends_with(".log") && entry != "godot.log" && entry != "steam_helper.log":
+                candidates.append(entry)
+            entry = logsDir.get_next()
+        logsDir.list_dir_end()
+        candidates.sort()
+        for i: int in range(max(0, candidates.size() - 3), candidates.size()):
+            var src: String = "user://logs/" + candidates[i]
+            var dst: String = snapDir + candidates[i]
+            var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
+            var file: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
+            if file != null:
+                file.store_buffer(bytes)
+                file.close()
+                copied += 1
+
+    # Write a small info file with mod version + OS so testers don't have to explain.
+    var info: FileAccess = FileAccess.open(snapDir + "info.txt", FileAccess.WRITE)
+    if info != null:
+        info.store_line("RTV Co-op Mod log snapshot")
+        info.store_line("Timestamp: %s" % stamp)
+        info.store_line("OS: %s" % OS.get_name())
+        info.store_line("Godot: %s" % Engine.get_version_info().string)
+        info.store_line("Files: %d" % copied)
+        info.close()
+
+    _log("[logs] snapshot: %s (%d files)" % [absDir, copied])
+    OS.shell_open(absDir)
+    return absDir
+
 
 # ---------- Auto-Join ----------
 
@@ -704,10 +969,14 @@ func _recheck_host_state() -> void:
         return
     if currentLobbyID.is_empty():
         return
+    _recheckPending = true
     steamBridge.get_lobby_data(currentLobbyID, "state", _on_recheck_state)
+    # Fallback — if callback never fires, clear the pending flag.
+    get_tree().create_timer(_RECHECK_TIMEOUT_SEC).timeout.connect(_on_recheck_timeout)
 
 
 func _on_recheck_state(response: Dictionary) -> void:
+    _recheckPending = false
     if !response.get("ok", false):
         return
     var data: Dictionary = response.get("data", {})
@@ -715,6 +984,13 @@ func _on_recheck_state(response: Dictionary) -> void:
     if hostState == "in_game" && _is_on_menu():
         _log("Recheck: host is in-game — auto-loading")
         _auto_load_game()
+
+
+func _on_recheck_timeout() -> void:
+    if !_recheckPending:
+        return
+    _recheckPending = false
+    _log("Recheck timed out — staying on menu")
 
 
 ## Host tells all clients that the game is starting (menu → in-game transition).
@@ -765,12 +1041,23 @@ func _request_world_id() -> void:
     if !isHost:
         return
     var peerId: int = multiplayer.get_remote_sender_id()
-    _receive_world_id.rpc_id(peerId, worldId)
+    # Include difficulty/season so client can match if they need a fresh save.
+    var diff: int = 1
+    var season: int = 1
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader != null:
+        var worldPath: String = loader.savePath + "World.tres"
+        if FileAccess.file_exists(worldPath):
+            var world: Resource = load(worldPath)
+            if world != null:
+                diff = world.get("difficulty") if world.get("difficulty") != null else 1
+                season = world.get("season") if world.get("season") != null else 1
+    _receive_world_id.rpc_id(peerId, worldId, diff, season)
 
 
 ## Client receives the world ID and sets up save paths, then triggers auto-load.
 @rpc("authority", "call_remote", "reliable")
-func _receive_world_id(hostWorldId: String) -> void:
+func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int) -> void:
     if !_sanitize_path_component(hostWorldId):
         _log("Invalid worldId from host: %s" % hostWorldId)
         return
@@ -782,7 +1069,10 @@ func _receive_world_id(hostWorldId: String) -> void:
     var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else str(localPeerId)
     loader.playerSavePath = "user://coop/%s/players/%s/" % [worldId, localSteamId]
     loader._ensure_save_dir()
-    _log("Client save paths: world=%s player=%s" % [loader.savePath, loader.playerSavePath])
+    # Store host's difficulty/season so _auto_load_game uses them if fresh save needed.
+    set_meta(&"new_world_difficulty", hostDifficulty)
+    set_meta(&"new_world_season", hostSeason)
+    _log("Client save paths: world=%s player=%s diff=%d season=%d" % [loader.savePath, loader.playerSavePath, hostDifficulty, hostSeason])
     # Now safe to auto-load since save paths are configured
     if pendingAutoJoin:
         pendingAutoJoin = false
@@ -991,7 +1281,32 @@ func _apply_handoff_state(snap: Dictionary) -> void:
             sw.Activate()
         elif !active && sw.active:
             sw.Deactivate()
-    _log("Handoff applied: %d doors, %d switches" % [doors.size(), switches.size()])
+    # Spawn items from headless snapshot (LootSimulation was skipped, so the
+    # scene has no items yet — we transfer the ones generated in the SubViewport).
+    var items: Array = snap.get("items", [])
+    var spawnedCount: int = 0
+    for entry: Dictionary in items:
+        var itemFile: String = entry.get("file", "")
+        if itemFile.is_empty():
+            continue
+        var packed: PackedScene = Database.get(itemFile)
+        if packed == null:
+            continue
+        var pickup: Node3D = packed.instantiate()
+        scene.add_child(pickup)
+        pickup.global_position = entry.get("pos", Vector3.ZERO)
+        pickup.global_rotation = entry.get("rot", Vector3.ZERO)
+        var slotData: Resource = entry.get("slotData")
+        if slotData != null && pickup.get("slotData") != null:
+            pickup.slotData.Update(slotData)
+        # Freeze at snapshot position so physics doesn't pull items off the
+        # ground or jitter them (matches shelter-load pattern in Loader.gd).
+        if pickup.has_method("Freeze"):
+            pickup.Freeze()
+        if pickup.has_method("UpdateAttachments"):
+            pickup.UpdateAttachments()
+        spawnedCount += 1
+    _log("Handoff applied: %d doors, %d switches, %d items" % [doors.size(), switches.size(), spawnedCount])
 
 
 ## Forwards a client's position to the appropriate headless map.

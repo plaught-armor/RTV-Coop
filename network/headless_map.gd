@@ -35,7 +35,10 @@ func setup(path: String) -> bool:
     viewport.process_mode = Node.PROCESS_MODE_DISABLED
     add_child(viewport)
 
-    var scene: PackedScene = load(path)
+    # CACHE_MODE_REPLACE_DEEP forces dependency tree re-parse so ext_resources
+    # (like AI.gd) resolve through take_over_path redirects. Without this, AI
+    # prefabs cached before register_patches() keep their original script refs.
+    var scene: PackedScene = ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REPLACE_DEEP)
     if scene == null:
         push_error("[HeadlessMap] Failed to load scene: %s" % path)
         return false
@@ -45,6 +48,11 @@ func setup(path: String) -> bool:
     var core: Node = mapScene.get_node_or_null("Core")
     if core != null:
         core.queue_free()
+
+    # Belt-and-suspenders: reassign the patched script on every patched node class.
+    # This handles cases where the PackedScene already baked in the original script
+    # despite CACHE_MODE_REPLACE_DEEP (e.g., deeply nested instance references).
+    _reassign_patched_scripts(mapScene)
 
     _inject_proxy_gamedata()
     _log("SubViewport created for %s" % path)
@@ -57,6 +65,43 @@ func start() -> void:
     viewport.process_mode = Node.PROCESS_MODE_INHERIT
     _register_ai_sync_ids.call_deferred()
     _log("SubViewport started for %s" % mapPath)
+
+
+## Walks the newly-instantiated scene and force-reassigns patched scripts onto
+## each matching node. Required because PackedScenes bake in Script references
+## at load time — scenes cached before CoopManager.register_patches() still
+## reference the original scripts even though take_over_path has redirected
+## the paths. Resolving via load() picks up the redirect, then set_script
+## replaces the baked-in reference.
+func _reassign_patched_scripts(root: Node) -> void:
+    var patchMap: Dictionary = {
+        "res://Scripts/AI.gd": load("res://Scripts/AI.gd"),
+        "res://Scripts/Door.gd": load("res://Scripts/Door.gd"),
+        "res://Scripts/Switch.gd": load("res://Scripts/Switch.gd"),
+        "res://Scripts/Pickup.gd": load("res://Scripts/Pickup.gd"),
+        "res://Scripts/LootContainer.gd": load("res://Scripts/LootContainer.gd"),
+        "res://Scripts/LootSimulation.gd": load("res://Scripts/LootSimulation.gd"),
+        "res://Scripts/AISpawner.gd": load("res://Scripts/AISpawner.gd"),
+        "res://Scripts/Transition.gd": load("res://Scripts/Transition.gd"),
+        "res://Scripts/Fire.gd": load("res://Scripts/Fire.gd"),
+        "res://Scripts/Mine.gd": load("res://Scripts/Mine.gd"),
+        "res://Scripts/Explosion.gd": load("res://Scripts/Explosion.gd"),
+    }
+    _walk_and_reassign(root, patchMap)
+
+
+func _walk_and_reassign(node: Node, patchMap: Dictionary) -> void:
+    var script: Script = node.get_script()
+    if script != null:
+        var origPath: String = script.resource_path
+        if origPath in patchMap:
+            var patched: Script = patchMap[origPath]
+            # Only reassign if the currently-assigned script is not already the
+            # patched version (avoids redundant work and potential state loss).
+            if patched != null && script != patched:
+                node.set_script(patched)
+    for child: Node in node.get_children():
+        _walk_and_reassign(child, patchMap)
 
 
 func _inject_proxy_gamedata() -> void:
@@ -268,6 +313,7 @@ func snapshot() -> Dictionary:
         "ai": [],
         "doors": extract_door_states(),
         "switches": extract_switch_states(),
+        "items": extract_item_states(),
     }
     for syncId: int in syncedAI:
         var ai: Node = syncedAI[syncId]
@@ -281,6 +327,29 @@ func snapshot() -> Dictionary:
             "health": ai.get("health") if ai.get("health") != null else 100,
         })
     return snap
+
+
+## Captures all items in the headless scene for transfer to the real scene.
+## Each entry stores the item file path, position/rotation, and SlotData resource.
+func extract_item_states() -> Array[Dictionary]:
+    var result: Array[Dictionary] = []
+    if mapScene == null:
+        return result
+    for node: Node in mapScene.get_tree().get_nodes_in_group("Item"):
+        if !is_instance_valid(node) || !mapScene.is_ancestor_of(node):
+            continue
+        if !(node is Node3D):
+            continue
+        var slotData: Resource = node.get("slotData")
+        if slotData == null || slotData.itemData == null:
+            continue
+        result.append({
+            "file": slotData.itemData.file,
+            "pos": node.global_position,
+            "rot": node.global_rotation,
+            "slotData": slotData,
+        })
+    return result
 
 
 func restore(snap: Dictionary) -> void:

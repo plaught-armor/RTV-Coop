@@ -13,7 +13,23 @@ func _ready():
     super._ready()
 
 
+## Lazy lookup of CoopManager by walking root children. Needed because
+## inject_manager() may not have reached this door yet when AI calls Interact()
+## immediately after Initialize (e.g., combat state opens a door on first frame).
+func _ensure_cm() -> void:
+    if is_instance_valid(_cm):
+        return
+    var root: Node = get_tree().root if get_tree() != null else null
+    if root == null:
+        return
+    for child: Node in root.get_children():
+        if child.has_meta(&"is_coop_manager"):
+            _cm = child
+            return
+
+
 func Interact():
+    _ensure_cm()
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Interact()
         return
@@ -27,6 +43,7 @@ func Interact():
 
 
 func CheckKey():
+    _ensure_cm()
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.CheckKey()
         return

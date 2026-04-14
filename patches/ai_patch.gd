@@ -33,6 +33,75 @@ func init_manager(manager: Node) -> void:
     if LOS != null:
         LOS.collision_mask |= COOP_HIT_LAYER
 
+
+## Override _ready to log that the patch is active (diagnostic).
+## Must call super to preserve base game's deferred Initialize call.
+func _ready() -> void:
+    print("[ai_patch] _ready fired on %s" % get_path())
+    super._ready()
+
+
+## Override Initialize to find map/AISpawner by walking up from self instead of
+## using absolute /root/Map path. The original absolute path breaks when Village
+## or other maps are instantiated inside a headless SubViewport (for cross-map
+## AI simulation). When the node isn't inside a SubViewport, walking up still
+## finds the scene root correctly so solo behaviour is preserved.
+func Initialize():
+    print("[ai_patch] Initialize fired on %s" % get_path())
+    await get_tree().physics_frame
+
+    navigationMap = get_world_3d().get_navigation_map()
+    # Find the map node by walking up the ancestor chain — works both for
+    # the real scene (map at /root/Map) and for headless SubViewports.
+    var mapAncestor: Node = _find_map_ancestor()
+    if mapAncestor != null:
+        map = mapAncestor
+        var aiNode: Node = mapAncestor.get_node_or_null("AI")
+        if aiNode != null:
+            AISpawner = aiNode
+            print("[ai_patch] Initialize: AISpawner set to %s" % aiNode.get_path())
+        else:
+            push_warning("[ai_patch] Initialize: Map found (%s) but no AI child" % mapAncestor.get_path())
+    else:
+        push_warning("[ai_patch] Initialize: could not find map ancestor for %s" % get_path())
+
+    if boss:
+        health = 300.0
+    else:
+        health = 100.0
+
+    DeactivateEquipment()
+    DeactivateContainer()
+
+    SelectWeapon()
+    if allowBackpacks:
+        SelectBackpack()
+    if allowClothing:
+        SelectClothing()
+
+    HideGizmos()
+
+    await get_tree().create_timer(10.0, false).timeout
+
+    voiceCycle = randf_range(10.0, 60.0)
+    sensorActive = true
+
+
+## Walks up from self to find the map node. Identifies it by having an "AI" child
+## (which every gameplay map has) or by being the scene root below a SubViewport.
+## More robust than matching by name since .scn scene roots may vary.
+func _find_map_ancestor() -> Node:
+    var node: Node = self
+    while node != null:
+        if node.get_node_or_null("AI") != null:
+            return node
+        var parent: Node = node.get_parent()
+        # If parent is a SubViewport, this node is the scene root of the headless map.
+        if parent is SubViewport:
+            return node
+        node = parent
+    return null
+
 # ---------- Physics Process ----------
 
 
