@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"syscall"
@@ -78,17 +79,33 @@ func main() {
 	flag.IntVar(&port, "port", 27099, "TCP port to listen on")
 	var appIDFlag uint
 	flag.UintVar(&appIDFlag, "appid", 1963610, "Steam App ID (Road to Vostok)")
-	var logFilePath string
-	flag.StringVar(&logFilePath, "log-file", "steam_helper.log", "Log file path (absolute or relative to cwd)")
+	var logFileFlag string
+	flag.StringVar(&logFileFlag, "log-file", "", "Log file path (optional; defaults to <exe_dir>/steam_helper.log)")
 	flag.Parse()
 	appID = uint32(appIDFlag)
 
 	log.SetPrefix("[steam_helper] ")
 	log.SetFlags(log.Ltime)
 
-	// Write log to the configured path (co-located with godot.log when launched
-	// from the mod so both logs can be collected from a single folder).
-	if logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+	// Self-locate the log file at <exe_dir>/logs/steam_helper.log so it sits
+	// next to godot.log (both end up in user://logs/ when launched by the mod).
+	// Self-locating avoids passing space-containing paths through Proton/Wine
+	// arg parsing.
+	logFilePath := logFileFlag
+	if logFilePath == "" {
+		if exePath, err := os.Executable(); err == nil {
+			logsDir := filepath.Join(filepath.Dir(exePath), "logs")
+			_ = os.MkdirAll(logsDir, 0755)
+			logFilePath = filepath.Join(logsDir, "steam_helper.log")
+		} else {
+			logFilePath = "steam_helper.log"
+		}
+	}
+
+	logFile, logErr := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if logErr != nil {
+		fmt.Fprintf(os.Stderr, "[steam_helper] failed to open %q: %v (logging to stderr)\n", logFilePath, logErr)
+	} else {
 		log.SetOutput(logFile)
 		log.Printf("Log file opened: %s", logFilePath)
 	}

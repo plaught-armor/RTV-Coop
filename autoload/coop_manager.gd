@@ -128,6 +128,10 @@ func _ready() -> void:
     multiplayer.connection_failed.connect(on_connection_failed)
     multiplayer.server_disconnected.connect(on_server_disconnected)
 
+    # One-time migration: move pre-mod solo saves out of user:// root so they
+    # don't get clobbered when the player hosts a coop world.
+    migrate_solo_saves_if_needed()
+
     inject_manager.call_deferred()
     _register_ai_pools.call_deferred()
     # Defer Steam helper launch until after ModLoader finishes
@@ -261,7 +265,12 @@ func disconnect_session() -> void:
     pendingAutoJoin = false
     currentLobbyID = ""
     _autoLoadInProgress = false
-    worldId = ""
+    # Final mirror + clear active world marker so user:// is clean for the next
+    # session (or for a future solo play). Only does anything if we hosted.
+    if !worldId.is_empty():
+        mirror_user_to_world()
+        wipe_user_saves()
+    clear_active_world()
     worldState.stop_item_tracking()
     _reset_save_paths()
     steamBridge.leave_lobby()
@@ -552,6 +561,7 @@ func notify_scene_loaded() -> void:
 ## Called after every scene change so patches don't need [code]get_node_or_null[/code].
 func inject_manager() -> void:
     var scene: Node = get_tree().current_scene
+    print("[coop] inject_manager: scene=%s" % (scene.scene_file_path if is_instance_valid(scene) else "<null>"))
     if !is_instance_valid(scene):
         return
 
@@ -609,6 +619,10 @@ func inject_manager() -> void:
     var scenePath: String = scene.scene_file_path if is_instance_valid(scene) else ""
     if scenePath == "res://Scenes/Menu.tscn":
         _customize_menu(scene)
+        # Returning to menu from solo play — capture final state into the solo
+        # dir. Skip if a coop session is active (disconnect_session handles that).
+        if !is_session_active():
+            mirror_user_to_solo()
 
 
 ## Modifies the running Menu instance in-place: renames New→Singleplayer,
@@ -648,6 +662,11 @@ func _customize_menu(menu: Node) -> void:
 func _on_singleplayer_pressed(menu: Node) -> void:
     if menu.has_method("PlayClick"):
         menu.PlayClick()
+    # Restore the solo save into user:// so vanilla Continue/New Game flows see
+    # the player's solo state. Wipe first to clear any leftover from a prior
+    # coop session that didn't clean up properly.
+    wipe_user_saves()
+    mirror_solo_to_user()
     var main: Node = menu.get_node_or_null("Main")
     var modes: Node = menu.get_node_or_null("Modes")
     if main != null:
@@ -667,99 +686,80 @@ func _on_multiplayer_pressed(menu: Node) -> void:
         submenu.show()
 
 
-## Builds the Multiplayer submenu as a dark centered dialog matching the
-## coop_ui's menu dialogs (world picker, lobby browser, new world).
+## Builds the Multiplayer submenu using the same full-screen single-VBox layout
+## as the other coop dialogs (Host World / Browse Lobbies / New World) so all
+## menus look stylistically consistent.
 func _build_mp_submenu(menu: Node) -> void:
     if menu.get_node_or_null("CoopMPSubmenu") != null:
         return
 
     var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
 
-    # Full-rect wrapper captures input.
     var wrapper: Control = Control.new()
     wrapper.name = "CoopMPSubmenu"
     wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
+    if gameTheme != null:
+        wrapper.theme = gameTheme
     menu.add_child(wrapper)
     wrapper.hide()
 
-    # Centered dark panel.
-    var panel: PanelContainer = PanelContainer.new()
-    panel.custom_minimum_size = Vector2(380, 0)
-    panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-    panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-    panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-    panel.mouse_filter = Control.MOUSE_FILTER_STOP
-    if gameTheme != null:
-        panel.theme = gameTheme
+    var outer: VBoxContainer = VBoxContainer.new()
+    outer.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    outer.grow_horizontal = Control.GROW_DIRECTION_BOTH
+    outer.grow_vertical = Control.GROW_DIRECTION_BOTH
+    outer.custom_minimum_size = Vector2(560, 0)
+    outer.add_theme_constant_override("separation", 4)
+    wrapper.add_child(outer)
 
-    var style: StyleBoxFlat = StyleBoxFlat.new()
-    style.bg_color = Color(0.05, 0.05, 0.05, 0.97)
-    style.border_color = Color(0.25, 0.25, 0.25, 1.0)
-    style.border_width_left = 1
-    style.border_width_right = 1
-    style.border_width_top = 1
-    style.border_width_bottom = 1
-    style.content_margin_left = 20
-    style.content_margin_right = 20
-    style.content_margin_top = 18
-    style.content_margin_bottom = 18
-    panel.add_theme_stylebox_override("panel", style)
-    wrapper.add_child(panel)
+    var header: Label = Label.new()
+    header.text = "Multiplayer"
+    header.add_theme_font_size_override("font_size", 20)
+    header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    outer.add_child(header)
 
-    var vbox: VBoxContainer = VBoxContainer.new()
-    vbox.add_theme_constant_override("separation", 10)
-    panel.add_child(vbox)
-
-    var title: Label = Label.new()
-    title.text = "Multiplayer"
-    title.add_theme_font_size_override("font_size", 20)
-    title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    vbox.add_child(title)
-
-    var subtitle: Label = Label.new()
-    subtitle.text = "Co-op mode"
-    subtitle.add_theme_font_size_override("font_size", 12)
-    subtitle.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-    subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    vbox.add_child(subtitle)
+    var subheader: Label = Label.new()
+    subheader.text = "Co-op mode"
+    subheader.modulate = Color(1, 1, 1, 0.5)
+    subheader.add_theme_font_size_override("font_size", 12)
+    subheader.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    outer.add_child(subheader)
 
     var topSpacer: Control = Control.new()
-    topSpacer.custom_minimum_size = Vector2(0, 8)
-    vbox.add_child(topSpacer)
+    topSpacer.custom_minimum_size = Vector2(0, 16)
+    outer.add_child(topSpacer)
 
     var hostBtn: Button = _mp_submenu_button("Host World")
     hostBtn.pressed.connect(_on_mp_host_pressed.bind(menu))
-    vbox.add_child(hostBtn)
+    outer.add_child(hostBtn)
 
     var browseBtn: Button = _mp_submenu_button("Browse Lobbies")
     browseBtn.pressed.connect(_on_mp_browse_pressed.bind(menu))
-    vbox.add_child(browseBtn)
+    outer.add_child(browseBtn)
 
     var logsBtn: Button = _mp_submenu_button("Open Logs Folder")
     logsBtn.pressed.connect(_on_mp_logs_pressed)
-    vbox.add_child(logsBtn)
+    outer.add_child(logsBtn)
 
     var bottomSpacer: Control = Control.new()
-    bottomSpacer.custom_minimum_size = Vector2(0, 8)
-    vbox.add_child(bottomSpacer)
+    bottomSpacer.custom_minimum_size = Vector2(0, 16)
+    outer.add_child(bottomSpacer)
 
-    # Return button sits inside the panel, right below the main buttons.
     var returnBtn: Button = Button.new()
-    returnBtn.text = "Return"
-    returnBtn.custom_minimum_size = Vector2(0, 36)
+    returnBtn.text = "← Return"
+    returnBtn.custom_minimum_size = Vector2(256, 40)
     returnBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-    returnBtn.add_theme_font_size_override("font_size", 14)
+    returnBtn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
     returnBtn.pressed.connect(_on_mp_back_pressed.bind(menu))
-    vbox.add_child(returnBtn)
+    outer.add_child(returnBtn)
 
 
 func _mp_submenu_button(btnText: String) -> Button:
     var btn: Button = Button.new()
     btn.text = btnText
-    btn.custom_minimum_size = Vector2(0, 40)
+    btn.custom_minimum_size = Vector2(256, 40)
     btn.mouse_filter = Control.MOUSE_FILTER_STOP
-    btn.add_theme_font_size_override("font_size", 16)
+    btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
     return btn
 
 
@@ -849,6 +849,176 @@ func _get_current_map_name() -> String:
     # "res://Scenes/Village.tscn" -> "Village"
     return path.get_file().get_basename()
 
+# ---------- Per-World Save Mirroring ----------
+# Vanilla Loader hard-codes user:// for save paths and we can't safely swap its
+# script at runtime (breaks @onready references). Instead we mirror saves
+# between user:// (Loader's working dir) and user://coop/<world_id>/ (persistent
+# per-world storage). The world dir is loaded into user:// before play and
+# user:// is written back into the world dir after every save event.
+
+const COOP_WORLDS_DIR: String = "user://coop/"
+const SOLO_SAVES_DIR: String = "user://solo/"
+## File names that are world-level (shared by all players in the world).
+const COOP_WORLD_SAVES: PackedStringArray = [
+    "World.tres", "Cabin.tres", "Attic.tres", "Classroom.tres",
+    "Tent.tres", "Bunker.tres", "Traders.tres",
+]
+## File name that is per-player and lives under players/<steam_id>/.
+const COOP_PLAYER_SAVE: String = "Character.tres"
+## Plain-text file at user:// root that holds the currently-active world ID.
+## Persists across launches so a crash mid-session resumes the same world,
+## and so save events know which world dir to mirror into.
+const COOP_ACTIVE_WORLD_FILE: String = "user://coop_active.txt"
+
+
+## Writes the active world ID to disk so subsequent save events (and the next
+## launch in case of a crash) know which world dir to mirror into.
+func set_active_world(activeWorldId: String) -> void:
+    worldId = activeWorldId
+    var f: FileAccess = FileAccess.open(COOP_ACTIVE_WORLD_FILE, FileAccess.WRITE)
+    if f != null:
+        f.store_string(activeWorldId)
+        f.close()
+
+
+## Returns the active world ID from disk (empty if no active world).
+func get_active_world() -> String:
+    if !FileAccess.file_exists(COOP_ACTIVE_WORLD_FILE):
+        return ""
+    var f: FileAccess = FileAccess.open(COOP_ACTIVE_WORLD_FILE, FileAccess.READ)
+    if f == null:
+        return ""
+    var contents: String = f.get_as_text().strip_edges()
+    f.close()
+    return contents
+
+
+## Clears the active world marker. Called on clean disconnect/return to menu.
+func clear_active_world() -> void:
+    worldId = ""
+    if FileAccess.file_exists(COOP_ACTIVE_WORLD_FILE):
+        DirAccess.remove_absolute(ProjectSettings.globalize_path(COOP_ACTIVE_WORLD_FILE))
+
+
+## Copies each user://*.tres into the world dir after a save event. The host
+## calls this from transition_patch after super.Interact() commits saves.
+func mirror_user_to_world() -> void:
+    if worldId.is_empty() || !isHost:
+        return
+    var worldDir: String = COOP_WORLDS_DIR + worldId + "/"
+    DirAccess.make_dir_recursive_absolute(worldDir)
+    for saveName: String in COOP_WORLD_SAVES:
+        var src: String = "user://" + saveName
+        if FileAccess.file_exists(src):
+            _copy_file(src, worldDir + saveName)
+    # Per-player character lands in players/<steam_id>/Character.tres
+    var steamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
+    if FileAccess.file_exists("user://" + COOP_PLAYER_SAVE):
+        var playerDir: String = worldDir + "players/" + steamId + "/"
+        DirAccess.make_dir_recursive_absolute(playerDir)
+        _copy_file("user://" + COOP_PLAYER_SAVE, playerDir + COOP_PLAYER_SAVE)
+
+
+## Copies the world dir into user:// before the host loads a world. Vanilla
+## Loader then reads from user:// as if it were the regular save.
+func mirror_world_to_user(forWorldId: String) -> void:
+    var worldDir: String = COOP_WORLDS_DIR + forWorldId + "/"
+    if !DirAccess.dir_exists_absolute(worldDir):
+        return
+    for saveName: String in COOP_WORLD_SAVES:
+        var src: String = worldDir + saveName
+        if FileAccess.file_exists(src):
+            _copy_file(src, "user://" + saveName)
+    var steamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
+    var playerSrc: String = worldDir + "players/" + steamId + "/" + COOP_PLAYER_SAVE
+    if FileAccess.file_exists(playerSrc):
+        _copy_file(playerSrc, "user://" + COOP_PLAYER_SAVE)
+
+
+## One-time migration on mod startup: if vanilla saves exist at user:// root and
+## the solo dir doesn't exist yet, move them into user://solo/. Protects the
+## player's pre-mod single-player progress from being wiped by coop sessions.
+func migrate_solo_saves_if_needed() -> void:
+    if DirAccess.dir_exists_absolute(SOLO_SAVES_DIR):
+        return
+    if !FileAccess.file_exists("user://World.tres"):
+        return
+    DirAccess.make_dir_recursive_absolute(SOLO_SAVES_DIR)
+    var dir: DirAccess = DirAccess.open("user://")
+    if dir == null:
+        return
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    var migrated: int = 0
+    while entry != "":
+        if entry.ends_with(".tres") && entry != "Validator.tres" && entry != "Preferences.tres":
+            _copy_file("user://" + entry, SOLO_SAVES_DIR + entry)
+            DirAccess.remove_absolute(ProjectSettings.globalize_path("user://" + entry))
+            migrated += 1
+        entry = dir.get_next()
+    dir.list_dir_end()
+    print("[coop] Migrated %d solo save files to %s" % [migrated, SOLO_SAVES_DIR])
+
+
+## Copies user://*.tres into the solo dir. Called from transition_patch when
+## the player saves outside of a coop session, and from on_scene_changed when
+## returning to the menu.
+func mirror_user_to_solo() -> void:
+    if !FileAccess.file_exists("user://World.tres"):
+        return  # nothing to mirror
+    DirAccess.make_dir_recursive_absolute(SOLO_SAVES_DIR)
+    var dir: DirAccess = DirAccess.open("user://")
+    if dir == null:
+        return
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    while entry != "":
+        if entry.ends_with(".tres") && entry != "Validator.tres" && entry != "Preferences.tres":
+            _copy_file("user://" + entry, SOLO_SAVES_DIR + entry)
+        entry = dir.get_next()
+    dir.list_dir_end()
+
+
+## Copies the solo dir into user:// so vanilla Loader picks them up. Called
+## when the player clicks Singleplayer from the main menu.
+func mirror_solo_to_user() -> void:
+    if !DirAccess.dir_exists_absolute(SOLO_SAVES_DIR):
+        return
+    var dir: DirAccess = DirAccess.open(SOLO_SAVES_DIR)
+    if dir == null:
+        return
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    while entry != "":
+        if entry.ends_with(".tres"):
+            _copy_file(SOLO_SAVES_DIR + entry, "user://" + entry)
+        entry = dir.get_next()
+    dir.list_dir_end()
+
+
+## Removes all .tres files from user:// (except Validator/Preferences) so a new
+## world starts clean. Mirrors the wipe Loader.NewGame's FormatSave does.
+func wipe_user_saves() -> void:
+    var dir: DirAccess = DirAccess.open("user://")
+    if dir == null:
+        return
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    while entry != "":
+        if entry.ends_with(".tres") && entry != "Validator.tres" && entry != "Preferences.tres":
+            DirAccess.remove_absolute("user://" + entry)
+        entry = dir.get_next()
+    dir.list_dir_end()
+
+
+func _copy_file(src: String, dst: String) -> void:
+    var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
+    var f: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
+    if f != null:
+        f.store_buffer(bytes)
+        f.close()
+
+
 # ---------- Log Collection ----------
 
 
@@ -862,7 +1032,7 @@ func collect_logs() -> String:
     var absDir: String = ProjectSettings.globalize_path(snapDir)
     DirAccess.make_dir_recursive_absolute(absDir)
 
-    var sources: Array[String] = [
+    var sources: PackedStringArray = [
         "user://logs/godot.log",
         "user://logs/steam_helper.log",
     ]

@@ -341,7 +341,7 @@ func show_lobby_browser() -> void:
     add_child(menuLobbyBrowser)
     _wire_return_button(menuLobbyBrowser, hide_lobby_browser)
 
-    var vbox: VBoxContainer = menuLobbyBrowser.get_node("VBox")
+    var vbox: VBoxContainer = _dialog_vbox(menuLobbyBrowser)
 
     var refreshBtn: Button = Button.new()
     refreshBtn.text = "Refresh"
@@ -591,7 +591,7 @@ func show_world_picker() -> void:
     add_child(worldPickerPanel)
     _wire_return_button(worldPickerPanel, hide_world_picker)
 
-    var vbox: VBoxContainer = worldPickerPanel.get_node("VBox")
+    var vbox: VBoxContainer = _dialog_vbox(worldPickerPanel)
 
     var newBtn: Button = Button.new()
     newBtn.text = "+ New World"
@@ -614,35 +614,34 @@ func show_world_picker() -> void:
     worldPickerVisible = true
 
 
-## Creates a full-screen menu scaffold matching the game's Modes/Settings style:
-## [br] - Transparent Control covering full rect (captures input)
-## [br] - Centered Header (font_size 20) + dim Subheader (alpha 0.5)
-## [br] - Empty VBox named "VBox" below the header for custom content
-## [br] - "← Return" button anchored bottom-center (256×40, connected via callback)
-## Returns the root Control; callers add to VBox and wire the Return callback
-## via [method _wire_return_button].
+## Full-screen menu scaffold matching the game's Modes/Difficulty layout:
+## everything (header, subheader, content, return) stacks tightly in a single
+## centered VBox so spacing between elements stays compact.
 func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control:
     var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
 
-    var root: Control = Control.new()
-    root.name = "MenuDialog"
-    root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    root.mouse_filter = Control.MOUSE_FILTER_STOP
+    var wrapper: Control = Control.new()
+    wrapper.name = "MenuDialog"
+    wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
     if gameTheme != null:
-        root.theme = gameTheme
+        wrapper.theme = gameTheme
 
-    # Header: centered at top third of screen
+    # Single centered column — everything stacks together (no large screen-edge anchors).
+    var outer: VBoxContainer = VBoxContainer.new()
+    outer.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    outer.grow_horizontal = Control.GROW_DIRECTION_BOTH
+    outer.grow_vertical = Control.GROW_DIRECTION_BOTH
+    outer.custom_minimum_size = Vector2(560, 0)
+    outer.add_theme_constant_override("separation", 4)
+    wrapper.add_child(outer)
+
     var header: Label = Label.new()
     header.name = "Header"
     header.text = titleText
     header.add_theme_font_size_override("font_size", 20)
     header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    header.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-    header.offset_left = -192
-    header.offset_right = 192
-    header.offset_top = 120
-    header.offset_bottom = 160
-    root.add_child(header)
+    outer.add_child(header)
 
     if !subtitleText.is_empty():
         var subheader: Label = Label.new()
@@ -650,47 +649,50 @@ func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control
         subheader.text = subtitleText
         subheader.modulate = Color(1, 1, 1, 0.5)
         subheader.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-        subheader.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-        subheader.offset_left = -192
-        subheader.offset_right = 192
-        subheader.offset_top = 150
-        subheader.offset_bottom = 180
-        root.add_child(subheader)
+        subheader.add_theme_font_size_override("font_size", 12)
+        outer.add_child(subheader)
 
-    # Content VBox: centered, below the subheader
+    var topSpacer: Control = Control.new()
+    topSpacer.custom_minimum_size = Vector2(0, 16)
+    outer.add_child(topSpacer)
+
+    # Content slot — callers append world/lobby lists, action buttons, etc.
     var vbox: VBoxContainer = VBoxContainer.new()
     vbox.name = "VBox"
-    vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-    vbox.grow_horizontal = Control.GROW_DIRECTION_BOTH
-    vbox.grow_vertical = Control.GROW_DIRECTION_BOTH
-    vbox.custom_minimum_size = Vector2(420, 0)
-    vbox.add_theme_constant_override("separation", 10)
-    root.add_child(vbox)
+    vbox.add_theme_constant_override("separation", 8)
+    outer.add_child(vbox)
 
-    # Return button: anchored bottom-center, same size as game's Modes_Return
+    var bottomSpacer: Control = Control.new()
+    bottomSpacer.custom_minimum_size = Vector2(0, 16)
+    outer.add_child(bottomSpacer)
+
     var returnBtn: Button = Button.new()
     returnBtn.name = "ReturnBtn"
     returnBtn.text = "← Return"
     returnBtn.custom_minimum_size = Vector2(256, 40)
     returnBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-    returnBtn.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-    returnBtn.offset_left = -128
-    returnBtn.offset_right = 128
-    returnBtn.offset_top = -96
-    returnBtn.offset_bottom = -56
-    root.add_child(returnBtn)
+    returnBtn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+    outer.add_child(returnBtn)
 
-    return root
+    return wrapper
 
 
 ## Wires the Return button on a menu dialog to the given callback.
+## Uses find_child so the lookup works regardless of nesting depth.
 func _wire_return_button(dialog: Control, callback: Callable) -> void:
-    var returnBtn: Button = dialog.get_node_or_null("ReturnBtn")
+    var returnBtn: Button = dialog.find_child("ReturnBtn", true, false) as Button
     if returnBtn == null:
         return
     for conn: Dictionary in returnBtn.pressed.get_connections():
         returnBtn.pressed.disconnect(conn["callable"])
     returnBtn.pressed.connect(callback)
+
+
+## Returns the content VBox slot inside a menu dialog (where callers append
+## buttons/lists). Uses find_child so callers don't need to know the panel's
+## internal node hierarchy.
+func _dialog_vbox(dialog: Control) -> VBoxContainer:
+    return dialog.find_child("VBox", true, false) as VBoxContainer
 
 
 ## Legacy shim — older callers passed the VBox; now the Return lives on root.
@@ -945,6 +947,7 @@ func _count_players_in_world(playersDir: String) -> int:
 
 
 func show_new_world_dialog() -> void:
+    print("[coop_ui] show_new_world_dialog called")
     # Close the world picker first (this is a forward transition, not a cancel).
     _free_dialog(worldPickerPanel)
     worldPickerPanel = null
@@ -959,7 +962,7 @@ func show_new_world_dialog() -> void:
     add_child(newWorldPanel)
     _wire_return_button(newWorldPanel, on_new_world_back)
 
-    var vbox: VBoxContainer = newWorldPanel.get_node("VBox")
+    var vbox: VBoxContainer = _dialog_vbox(newWorldPanel)
 
     var nameLabel: Label = Label.new()
     nameLabel.text = "World Name"
@@ -1051,29 +1054,33 @@ func _update_selection_colors() -> void:
 
 
 func on_create_world_confirmed() -> void:
+    print("[coop_ui] on_create_world_confirmed called")
     var worldName: String = newWorldNameInput.text.strip_edges()
     if worldName.is_empty():
         worldName = "World"
 
     var worldId: String = "world_%d" % Time.get_unix_time_from_system()
 
-    # Write meta.cfg
     var worldDir: String = COOP_DIR + worldId + "/"
     DirAccess.make_dir_recursive_absolute(worldDir)
     _write_world_meta(worldDir, worldName)
 
-    # Close dialog and host
     _free_dialog(newWorldPanel)
     newWorldPanel = null
 
-    _cm.worldId = worldId
+    _cm.set_active_world(worldId)
     _cm.host_game()
 
-    # NewGame with selected difficulty/season will be called by _auto_load_game
-    # when the host transitions from menu to game. We store the settings
-    # so coop_manager can pass them to Loader.NewGame().
-    _cm.set_meta(&"new_world_difficulty", newWorldDifficulty)
-    _cm.set_meta(&"new_world_season", newWorldSeason)
+    # Vanilla NewGame writes user://World.tres + Character.tres. We then mirror
+    # those (plus shelter/trader saves once they exist) into user://coop/<id>/
+    # so the world persists separately.
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader == null:
+        return
+    _cm.wipe_user_saves()
+    loader.NewGame(newWorldDifficulty, newWorldSeason)
+    _cm.mirror_user_to_world()
+    loader.LoadScene("Cabin")
 
 
 func on_new_world_back() -> void:
@@ -1085,8 +1092,22 @@ func on_new_world_back() -> void:
 func on_world_selected(worldId: String) -> void:
     hide_world_picker()
     _update_world_last_played(worldId)
-    _cm.worldId = worldId
+    _cm.set_active_world(worldId)
+
+    # Mirror the world dir into user:// so vanilla Loader picks up its saves.
+    _cm.wipe_user_saves()
+    _cm.mirror_world_to_user(worldId)
+
     _cm.host_game()
+
+    # Resume from the most recently visited shelter (or Cabin if none).
+    var loader: Node = get_node_or_null("/root/Loader")
+    if loader == null:
+        return
+    var shelter: String = loader.ValidateShelter() if loader.has_method("ValidateShelter") else ""
+    if shelter.is_empty():
+        shelter = "Cabin"
+    loader.LoadScene(shelter)
 
 
 # ---------- Delete World ----------

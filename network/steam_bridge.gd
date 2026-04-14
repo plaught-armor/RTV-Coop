@@ -69,16 +69,19 @@ func launch() -> void:
     _log("SteamAppId env: %s" % OS.get_environment("SteamAppId"))
 
     var globalPath: String = ProjectSettings.globalize_path(helperDst)
-    # Log goes next to godot.log in user:// so both can be collected together.
+    # Pass the log path explicitly so the helper writes to user://logs/
+    # alongside godot.log. os.Executable() under Wine resolves to the Linux
+    # install dir, not the user prefix, so self-locating doesn't work.
     var logPath: String = ProjectSettings.globalize_path("user://logs/steam_helper.log")
     DirAccess.make_dir_recursive_absolute(logPath.get_base_dir())
     var args: PackedStringArray = ["--port", str(HELPER_PORT), "--log-file", logPath]
+    print("[SteamBridge] launching: %s args=%s" % [globalPath, args])
     helperPID = OS.create_process(globalPath, args)
 
     if helperPID < 0:
-        _log("Failed to launch Steam helper")
+        print("[SteamBridge] Failed to launch Steam helper")
         return
-    _log("Steam helper launched (PID: %d)" % helperPID)
+    print("[SteamBridge] Steam helper launched (PID: %d)" % helperPID)
 
     connecting = true
     connectTimer = 0.0

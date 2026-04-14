@@ -364,6 +364,7 @@ func _client_interpolate() -> void:
         node = aiNodes[idx]
         if !is_instance_valid(node):
             continue
+        
 
         # Ensure this AI is visually active on the client
         if activeOnClient[idx] == 0:
