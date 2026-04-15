@@ -270,12 +270,7 @@ const _AI_PATH_TYPE_IDX: int = 9  # length of "res://AI/"
 
 
 func _get_ai_type(node: Node) -> int:
-    var path: String = node.scene_file_path
-    if path.length() <= _AI_PATH_TYPE_IDX:
-        return AIType.BANDIT
-    match path[_AI_PATH_TYPE_IDX]:
-        "B":
-            return AIType.BANDIT
+    match node.scene_file_path[_AI_PATH_TYPE_IDX]:
         "G":
             return AIType.GUARD
         "M":
