@@ -11,11 +11,23 @@ var proxyGameData: Resource = null
 var clientPeers: Array[int] = []
 var aiSyncIdCounter: int = 0
 var syncedAI: Dictionary[int, Node] = {}
-var clientPositions: Dictionary[int, Dictionary] = {}
+## Per-peer position cache. Each value is a reused typed Array [pos, camPos, rot, flags]
+## so we don't allocate a fresh Dictionary on every 20Hz position update.
+var clientPositions: Dictionary[int, Array] = {}
 var savedSnapshot: Dictionary = {}
+## Cached AI centroid — invalidated once per physics frame. Avoids walking
+## all syncedAI N times per frame when N clients all call update_client_position
+## on the same tick (N*M → M work).
+var _centroidCache: Vector3 = Vector3.ZERO
+var _centroidCacheFrame: int = -1
 
 enum AIType { BANDIT, GUARD, MILITARY, PUNISHER }
-const AI_SYNC_FRAMES: int = 12
+
+## Preloaded patched scripts keyed by original resource path. static so a single
+## load happens per mod session instead of per-SubViewport setup. Populated
+## lazily on first setup() after take_over_path has registered redirects.
+static var _patchMap: Dictionary = {}
+static var _patchMapReady: bool = false
 
 var _realGameData: Resource = preload("res://Resources/GameData.tres")
 
@@ -26,13 +38,7 @@ func init_manager(manager: Node) -> void:
 
 func setup(path: String) -> bool:
     mapPath = path
-    viewport = SubViewport.new()
-    viewport.name = "Headless_%s" % path.get_file().get_basename()
-    viewport.own_world_3d = true
-    viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-    viewport.physics_object_picking = false
-    viewport.gui_disable_input = true
-    viewport.process_mode = Node.PROCESS_MODE_DISABLED
+    viewport = _make_headless_viewport(path)
     add_child(viewport)
 
     # CACHE_MODE_REPLACE_DEEP forces dependency tree re-parse so ext_resources
@@ -45,9 +51,13 @@ func setup(path: String) -> bool:
     mapScene = scene.instantiate()
     viewport.add_child(mapScene)
 
+    # Kill anything that doesn't belong in a headless simulation: the Core node
+    # (player/UI) and any WorldEnvironment (sky/glow/SSAO/SSR buffers even with
+    # UPDATE_DISABLED can hold GPU memory after environment assignment).
     var core: Node = mapScene.get_node_or_null("Core")
     if core != null:
         core.queue_free()
+    _strip_world_environments(mapScene)
 
     # Belt-and-suspenders: reassign the patched script on every patched node class.
     # This handles cases where the PackedScene already baked in the original script
@@ -57,6 +67,47 @@ func setup(path: String) -> bool:
     _inject_proxy_gamedata()
     _log("SubViewport created for %s" % path)
     return true
+
+
+## Builds a SubViewport configured for maximum "do as little as possible"
+## mode — rendering is disabled, audio listeners off, all render buffers
+## zeroed so nothing is allocated for MSAA/glow/TAA/shadow atlas/etc.
+## Settings applied BEFORE add_child() to avoid Godot #102016 (own_world_3d
+## toggle after tree entry can crash).
+func _make_headless_viewport(path: String) -> SubViewport:
+    var vp: SubViewport = SubViewport.new()
+    vp.name = "Headless_%s" % path.get_file().get_basename()
+    vp.own_world_3d = true
+    vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+    vp.physics_object_picking = false
+    vp.gui_disable_input = true
+    vp.process_mode = Node.PROCESS_MODE_DISABLED
+    # Defensive render-buffer zeros — these don't allocate when
+    # UPDATE_DISABLED is set, but prevent regressions if a future code path
+    # flips update_mode. All free, no downside.
+    vp.audio_listener_enable_2d = false
+    vp.audio_listener_enable_3d = false
+    vp.msaa_2d = Viewport.MSAA_DISABLED
+    vp.msaa_3d = Viewport.MSAA_DISABLED
+    vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+    vp.use_taa = false
+    vp.use_debanding = false
+    vp.use_occlusion_culling = false
+    vp.positional_shadow_atlas_size = 0
+    vp.canvas_cull_mask = 0
+    vp.debug_draw = Viewport.DEBUG_DRAW_DISABLED
+    return vp
+
+
+## Removes any WorldEnvironment nodes from the scene. These allocate sky/glow/
+## SSAO buffers on environment-assignment in some code paths, even though we
+## never render — useless GPU memory in a headless simulation.
+func _strip_world_environments(root: Node) -> void:
+    for child: Node in root.get_children():
+        if child is WorldEnvironment:
+            child.queue_free()
+        else:
+            _strip_world_environments(child)
 
 
 func start() -> void:
@@ -74,34 +125,43 @@ func start() -> void:
 ## the paths. Resolving via load() picks up the redirect, then set_script
 ## replaces the baked-in reference.
 func _reassign_patched_scripts(root: Node) -> void:
-    var patchMap: Dictionary = {
-        "res://Scripts/AI.gd": load("res://Scripts/AI.gd"),
-        "res://Scripts/Door.gd": load("res://Scripts/Door.gd"),
-        "res://Scripts/Switch.gd": load("res://Scripts/Switch.gd"),
-        "res://Scripts/Pickup.gd": load("res://Scripts/Pickup.gd"),
-        "res://Scripts/LootContainer.gd": load("res://Scripts/LootContainer.gd"),
-        "res://Scripts/LootSimulation.gd": load("res://Scripts/LootSimulation.gd"),
-        "res://Scripts/AISpawner.gd": load("res://Scripts/AISpawner.gd"),
-        "res://Scripts/Transition.gd": load("res://Scripts/Transition.gd"),
-        "res://Scripts/Fire.gd": load("res://Scripts/Fire.gd"),
-        "res://Scripts/Mine.gd": load("res://Scripts/Mine.gd"),
-        "res://Scripts/Explosion.gd": load("res://Scripts/Explosion.gd"),
-    }
-    _walk_and_reassign(root, patchMap)
+    if !_patchMapReady:
+        _init_patch_map()
+    _walk_and_reassign(root)
 
 
-func _walk_and_reassign(node: Node, patchMap: Dictionary) -> void:
+## Populates the shared static _patchMap. Called once per mod session.
+## Must run AFTER CoopManager.register_patches() so load() resolves through
+## take_over_path redirects to the patched scripts.
+static func _init_patch_map() -> void:
+    if _patchMapReady:
+        return
+    var paths: PackedStringArray = [
+        "res://Scripts/AI.gd", "res://Scripts/Door.gd", "res://Scripts/Switch.gd",
+        "res://Scripts/Pickup.gd", "res://Scripts/LootContainer.gd",
+        "res://Scripts/LootSimulation.gd", "res://Scripts/AISpawner.gd",
+        "res://Scripts/Transition.gd", "res://Scripts/Fire.gd",
+        "res://Scripts/Mine.gd", "res://Scripts/Explosion.gd",
+    ]
+    for p: String in paths:
+        var script: Script = load(p)
+        if script != null:
+            _patchMap[p] = script
+    _patchMapReady = true
+
+
+func _walk_and_reassign(node: Node) -> void:
     var script: Script = node.get_script()
     if script != null:
         var origPath: String = script.resource_path
-        if origPath in patchMap:
-            var patched: Script = patchMap[origPath]
+        if origPath in _patchMap:
+            var patched: Script = _patchMap[origPath]
             # Only reassign if the currently-assigned script is not already the
             # patched version (avoids redundant work and potential state loss).
             if patched != null && script != patched:
                 node.set_script(patched)
     for child: Node in node.get_children():
-        _walk_and_reassign(child, patchMap)
+        _walk_and_reassign(child)
 
 
 func _inject_proxy_gamedata() -> void:
@@ -124,11 +184,11 @@ func _register_ai_sync_ids() -> void:
     if mapScene == null:
         return
     for node: Node in _get_all_ai_nodes():
-        if node.has_meta(&"ai_sync_id"):
+        if node.has_meta(_M_AI_SYNC_ID):
             continue
         aiSyncIdCounter += 1
-        node.set_meta(&"ai_sync_id", aiSyncIdCounter)
-        node.set_meta(&"ai_type", _get_ai_type(node))
+        node.set_meta(_M_AI_SYNC_ID, aiSyncIdCounter)
+        node.set_meta(_M_AI_TYPE, _get_ai_type(node))
         syncedAI[aiSyncIdCounter] = node
 
 
@@ -178,27 +238,45 @@ func remove_client(peerId: int) -> void:
 # ---------- Position Injection ----------
 
 
+## Index slots inside the reused Array[Variant] held in clientPositions.
+## Accessing by fixed int index avoids Dictionary string-key hashing that
+## the old { "pos": ..., "camPos": ... } version paid on every 20Hz update.
+const _CP_POS: int = 0
+const _CP_CAM: int = 1
+const _CP_ROT: int = 2
+const _CP_FLAGS: int = 3
+
+
 func update_client_position(peerId: int, pos: Vector3, camPos: Vector3, rot: Vector3, flags: int) -> void:
     if proxyGameData == null:
         return
-    clientPositions[peerId] = {
-        "pos": pos, "camPos": camPos, "rot": rot, "flags": flags,
-    }
+    # Reuse the slot array for this peer — no per-call Dictionary allocation.
+    var slot: Array = clientPositions.get(peerId)
+    if slot == null:
+        slot = [pos, camPos, rot, flags]
+        clientPositions[peerId] = slot
+    else:
+        slot[_CP_POS] = pos
+        slot[_CP_CAM] = camPos
+        slot[_CP_ROT] = rot
+        slot[_CP_FLAGS] = flags
+
     if clientPositions.size() == 1:
         _apply_client_to_proxy(pos, camPos, rot, flags)
         return
-    # Multiple clients: use nearest to AI centroid
+    # Multiple clients: pick the one nearest the AI centroid. Centroid is the
+    # running sum maintained elsewhere — no per-call tree walk.
     var centroid: Vector3 = _get_ai_centroid()
     var nearestDist: float = INF
-    var nearestData: Dictionary = {}
+    var nearest: Array
     for pid: int in clientPositions:
-        var data: Dictionary = clientPositions[pid]
-        var dist: float = centroid.distance_squared_to(data["pos"])
+        var s: Array = clientPositions[pid]
+        var dist: float = centroid.distance_squared_to(s[_CP_POS])
         if dist < nearestDist:
             nearestDist = dist
-            nearestData = data
-    if !nearestData.is_empty():
-        _apply_client_to_proxy(nearestData["pos"], nearestData["camPos"], nearestData["rot"], nearestData["flags"])
+            nearest = s
+    if nearest != null:
+        _apply_client_to_proxy(nearest[_CP_POS], nearest[_CP_CAM], nearest[_CP_ROT], nearest[_CP_FLAGS])
 
 
 func _apply_client_to_proxy(pos: Vector3, camPos: Vector3, rot: Vector3, flags: int) -> void:
@@ -210,20 +288,36 @@ func _apply_client_to_proxy(pos: Vector3, camPos: Vector3, rot: Vector3, flags: 
     proxyGameData.isMoving = (flags & 1) != 0
 
 
+## StringName constants for hot-path ai property lookups. StringName is a
+## cached interned string; using String literals would re-intern every call.
+const _P_DEAD: StringName = &"dead"
+const _P_PAUSE: StringName = &"pause"
+const _P_HEALTH: StringName = &"health"
+const _P_CURRENT_STATE: StringName = &"currentState"
+const _P_MOVEMENT_SPEED: StringName = &"movementSpeed"
+const _P_MOVEMENT_ROTATION: StringName = &"movementRotation"
+const _M_AI_SYNC_ID: StringName = &"ai_sync_id"
+const _M_AI_TYPE: StringName = &"ai_type"
+const _M_SPAWN_NOTIFIED: StringName = &"spawn_notified"
+
+
 func _get_ai_centroid() -> Vector3:
+    var frame: int = Engine.get_physics_frames()
+    if frame == _centroidCacheFrame:
+        return _centroidCache
     var sum: Vector3 = Vector3.ZERO
     var count: int = 0
     for syncId: int in syncedAI:
         var ai: Node = syncedAI[syncId]
         if !is_instance_valid(ai):
             continue
-        if ai.get("dead") == true || ai.get("pause") == true:
+        if ai.get(_P_DEAD) == true || ai.get(_P_PAUSE) == true:
             continue
         sum += ai.global_position
         count += 1
-    if count == 0:
-        return Vector3.ZERO
-    return sum / float(count)
+    _centroidCache = (sum / float(count)) if count > 0 else Vector3.ZERO
+    _centroidCacheFrame = frame
+    return _centroidCache
 
 # ---------- AI State Extraction ----------
 
@@ -236,18 +330,23 @@ func extract_ai_state() -> Array[Dictionary]:
         if !is_instance_valid(ai):
             toErase.append(syncId)
             continue
-        if ai.get("dead") == true || ai.get("pause") == true:
+        var isDead: Variant = ai.get(_P_DEAD)
+        if isDead == true || ai.get(_P_PAUSE) == true:
             continue
+        var curState: Variant = ai.get(_P_CURRENT_STATE)
+        var speed: Variant = ai.get(_P_MOVEMENT_SPEED)
+        var moveRot: Variant = ai.get(_P_MOVEMENT_ROTATION)
+        var health: Variant = ai.get(_P_HEALTH)
         states.append({
             "id": syncId,
-            "type": ai.get_meta(&"ai_type", 0),
+            "type": ai.get_meta(_M_AI_TYPE, 0),
             "pos": ai.global_position,
             "rot_y": ai.global_rotation.y,
-            "state": ai.get("currentState") if ai.get("currentState") != null else 0,
-            "speed": ai.get("movementSpeed") if ai.get("movementSpeed") != null else 0.0,
-            "move_rot": ai.get("movementRotation") if ai.get("movementRotation") != null else 0.0,
-            "health": ai.get("health") if ai.get("health") != null else 100,
-            "dead": ai.get("dead") == true,
+            "state": curState if curState != null else 0,
+            "speed": speed if speed != null else 0.0,
+            "move_rot": moveRot if moveRot != null else 0.0,
+            "health": health if health != null else 100,
+            "dead": isDead == true,
         })
     for id: int in toErase:
         syncedAI.erase(id)
@@ -260,12 +359,12 @@ func get_new_spawns() -> Array[Dictionary]:
         var ai: Node = syncedAI[syncId]
         if !is_instance_valid(ai):
             continue
-        if ai.has_meta(&"spawn_notified"):
+        if ai.has_meta(_M_SPAWN_NOTIFIED):
             continue
-        ai.set_meta(&"spawn_notified", true)
+        ai.set_meta(_M_SPAWN_NOTIFIED, true)
         spawns.append({
             "id": syncId,
-            "type": ai.get_meta(&"ai_type", 0),
+            "type": ai.get_meta(_M_AI_TYPE, 0),
             "pos": ai.global_position,
         })
     return spawns
@@ -317,14 +416,16 @@ func snapshot() -> Dictionary:
     }
     for syncId: int in syncedAI:
         var ai: Node = syncedAI[syncId]
-        if !is_instance_valid(ai) || ai.get("dead") == true:
+        if !is_instance_valid(ai) || ai.get(_P_DEAD) == true:
             continue
+        var curState: Variant = ai.get(_P_CURRENT_STATE)
+        var health: Variant = ai.get(_P_HEALTH)
         snap["ai"].append({
-            "type": ai.get_meta(&"ai_type", 0),
+            "type": ai.get_meta(_M_AI_TYPE, 0),
             "pos": ai.global_position,
             "rot_y": ai.global_rotation.y,
-            "state": ai.get("currentState") if ai.get("currentState") != null else 0,
-            "health": ai.get("health") if ai.get("health") != null else 100,
+            "state": curState if curState != null else 0,
+            "health": health if health != null else 100,
         })
     return snap
 
