@@ -269,7 +269,7 @@ func _collect_ai_recursive(node: Node, result: Array[Node]) -> void:
 const _AI_PATH_TYPE_IDX: int = 9  # length of "res://AI/"
 
 
-func _get_ai_type(node: Node) -> int:
+func _get_ai_type(node: Node) -> AIType:
     match node.scene_file_path[_AI_PATH_TYPE_IDX]:
         "G":
             return AIType.GUARD
@@ -551,7 +551,7 @@ func restore(snap: Dictionary) -> void:
     # (snapshot × candidate) pair.
     var poolByType: Dictionary = {}
     for ai: Node in _get_all_ai_nodes():
-        var t: int = _get_ai_type(ai)
+        var t: AIType = _get_ai_type(ai)
         if !poolByType.has(t):
             poolByType[t] = []
         poolByType[t].append(ai)
