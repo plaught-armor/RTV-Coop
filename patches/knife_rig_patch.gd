@@ -49,7 +49,7 @@ func HitCheck() -> void:
 	if wasColliding:
 		hitPoint = raycast.get_collision_point()
 		hitNormal = raycast.get_collision_normal()
-		hitSurface = raycast.get_collider().get("surface")
+		hitSurface = raycast.get_collider().get(&"surface")
 		isFlesh = raycast.get_collider() is Hitbox
 
 	super.HitCheck()

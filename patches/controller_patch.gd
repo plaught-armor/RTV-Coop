@@ -236,41 +236,41 @@ func _broadcast_fire_event() -> void:
     if rm == null || rm.get_child_count() == 0:
         return
     var rig: Node = rm.get_child(rm.get_child_count() - 1)
-    var weaponData: Resource = rig.get("data")
+    var weaponData: Resource = rig.get(&"data")
     if weaponData == null:
         return
 
     # Pick the correct fire audio based on mode and attachments
     var fireAudio: String = ""
     var tailAudio: String = ""
-    var hasSuppressor: bool = rig.get("activeMuzzle") != null || (weaponData.get("nativeSuppressor") == true)
+    var hasSuppressor: bool = rig.get(&"activeMuzzle") != null || (weaponData.get(&"nativeSuppressor") == true)
 
     if hasSuppressor:
-        var res: Resource = weaponData.get("fireSuppressed")
+        var res: Resource = weaponData.get(&"fireSuppressed")
         if res != null:
             fireAudio = res.resource_path
         var tailRes: Resource = null
-        if _cm.gd.get("indoor") == true:
-            tailRes = weaponData.get("tailIndoorSuppressed")
+        if _cm.gd.get(&"indoor") == true:
+            tailRes = weaponData.get(&"tailIndoorSuppressed")
         else:
-            tailRes = weaponData.get("tailOutdoorSuppressed")
+            tailRes = weaponData.get(&"tailOutdoorSuppressed")
         if tailRes != null:
             tailAudio = tailRes.resource_path
     else:
-        var mode: int = _cm.gd.get("firemode") if _cm.gd.get("firemode") != null else 1
+        var mode: int = _cm.gd.get(&"firemode") if _cm.gd.get(&"firemode") != null else 1
         if mode == 2:
-            var res: Resource = weaponData.get("fireAuto")
+            var res: Resource = weaponData.get(&"fireAuto")
             if res != null:
                 fireAudio = res.resource_path
         else:
-            var res: Resource = weaponData.get("fireSemi")
+            var res: Resource = weaponData.get(&"fireSemi")
             if res != null:
                 fireAudio = res.resource_path
         var tailRes: Resource = null
-        if _cm.gd.get("indoor") == true:
-            tailRes = weaponData.get("tailIndoor")
+        if _cm.gd.get(&"indoor") == true:
+            tailRes = weaponData.get(&"tailIndoor")
         else:
-            tailRes = weaponData.get("tailOutdoor")
+            tailRes = weaponData.get(&"tailOutdoor")
         if tailRes != null:
             tailAudio = tailRes.resource_path
 
@@ -292,8 +292,8 @@ func _broadcast_fire_event() -> void:
             hitPoint = result["position"]
             hitNormal = result["normal"]
             var collider: Object = result["collider"]
-            if collider != null && collider.get("surface") != null:
-                hitSurface = collider.get("surface")
+            if collider != null && collider.get(&"surface") != null:
+                hitSurface = collider.get(&"surface")
             elif hitSurface.is_empty():
                 hitSurface = "Generic"
 

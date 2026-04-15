@@ -372,22 +372,22 @@ func on_lobby_list_received(response: Dictionary) -> void:
     for i: int in range(activePool.size()):
         activePool[i].hide()
 
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
 
-    var lobbies: Array = response.get("data", [])
+    var lobbies: Array = response.get(&"data", [])
     for i: int in range(lobbies.size()):
         var lobby: Dictionary = lobbies[i]
         var btn: Button = get_pooled_lobby_button(i)
-        var hostName: String = lobby.get("host_name", "Unknown")
-        var players: int = lobby.get("players", 0)
-        var maxPlayers: int = lobby.get("max_players", 0)
-        var mapName: String = lobby.get("map", "")
+        var hostName: String = lobby.get(&"host_name", "Unknown")
+        var players: int = lobby.get(&"players", 0)
+        var maxPlayers: int = lobby.get(&"max_players", 0)
+        var mapName: String = lobby.get(&"map", "")
         if mapName.is_empty():
             btn.text = "%s (%d/%d)" % [hostName, players, maxPlayers]
         else:
             btn.text = "%s — %s (%d/%d)" % [hostName, mapName, players, maxPlayers]
-        var lobbyID: String = lobby.get("lobby_id", "")
+        var lobbyID: String = lobby.get(&"lobby_id", "")
         for conn: Dictionary in btn.pressed.get_connections():
             btn.pressed.disconnect(conn["callable"])
         btn.pressed.connect(on_lobby_join_pressed.bind(lobbyID))
@@ -401,11 +401,11 @@ func on_lobby_join_pressed(lobbyID: String) -> void:
 
 
 func on_lobby_joined(response: Dictionary) -> void:
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get("data", { })
-    var hostSteamID: String = data.get("host_steam_id", "")
-    var lobbyID: String = data.get("lobby_id", "")
+    var data: Dictionary = response.get(&"data", { })
+    var hostSteamID: String = data.get(&"host_steam_id", "")
+    var lobbyID: String = data.get(&"lobby_id", "")
     if hostSteamID.is_empty():
         _cm._log("Lobby has no host Steam ID")
         return
@@ -418,10 +418,10 @@ func on_lobby_joined(response: Dictionary) -> void:
 
 
 func _on_host_state_received(response: Dictionary) -> void:
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get("data", {})
-    var hostState: String = data.get("value", "")
+    var data: Dictionary = response.get(&"data", {})
+    var hostState: String = data.get(&"value", "")
     _cm._log("Host lobby state: %s" % hostState)
     if hostState == "in_game":
         _cm.pendingAutoJoin = true
@@ -442,19 +442,19 @@ func on_friends_received(response: Dictionary) -> void:
     for i: int in range(friendLabelPool.size()):
         friendLabelPool[i].hide()
 
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
 
-    var friends: Array = response.get("data", [])
+    var friends: Array = response.get(&"data", [])
     for i: int in range(friends.size()):
         var friend: Dictionary = friends[i]
         var row: HBoxContainer = get_pooled_friend_row(i)
         var avatar: TextureRect = row.get_child(0)
         var nameLabel: Label = row.get_child(1)
         var btn: Button = row.get_child(2)
-        var friendName: String = friend.get("name", "Unknown")
-        var state: int = friend.get("state", 0)
-        var gameID: String = friend.get("game_id", "")
+        var friendName: String = friend.get(&"name", "Unknown")
+        var state: int = friend.get(&"state", 0)
+        var gameID: String = friend.get(&"game_id", "")
         var inGame: bool = !gameID.is_empty()
 
         var stateText: String = ""
@@ -484,7 +484,7 @@ func on_friends_received(response: Dictionary) -> void:
         nameLabel.add_theme_color_override("font_color", nameColor)
 
         # Fetch avatar via binary channel (faster than inline base64)
-        var steamID: String = friend.get("steam_id", "")
+        var steamID: String = friend.get(&"steam_id", "")
         if steamID in _cm.avatarCache:
             avatar.texture = _cm.avatarCache[steamID]
             avatar.show()
@@ -509,10 +509,10 @@ func on_invite_friend_pressed(steamID: String, friendName: String) -> void:
 
 
 func on_invite_sent(response: Dictionary, friendName: String) -> void:
-    if response.get("ok", false):
+    if response.get(&"ok", false):
         _cm._log("Invite sent to %s" % friendName)
     else:
-        _cm._log("Invite failed: %s" % response.get("error", "unknown"))
+        _cm._log("Invite failed: %s" % response.get(&"error", "unknown"))
 
 
 func get_pooled_friend_row(idx: int) -> HBoxContainer:
@@ -769,7 +769,7 @@ func populate_world_list() -> void:
         return
 
     # Sort by last_played descending (most recent first)
-    worlds.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.get("last_played", 0) > b.get("last_played", 0))
+    worlds.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.get(&"last_played", 0) > b.get(&"last_played", 0))
 
     for world: Dictionary in worlds:
         var row: HBoxContainer = HBoxContainer.new()
@@ -847,9 +847,9 @@ func _read_world_meta(worldDir: String, dirName: String) -> Dictionary:
     # Read World.tres for game data
     var worldSave: Resource = load(worldDir + "World.tres")
     if worldSave != null:
-        meta["day"] = worldSave.get("day") if worldSave.get("day") != null else 1
-        meta["season"] = worldSave.get("season") if worldSave.get("season") != null else 1
-        meta["difficulty"] = worldSave.get("difficulty") if worldSave.get("difficulty") != null else 1
+        meta["day"] = worldSave.get(&"day") if worldSave.get(&"day") != null else 1
+        meta["season"] = worldSave.get(&"season") if worldSave.get(&"season") != null else 1
+        meta["difficulty"] = worldSave.get(&"difficulty") if worldSave.get(&"difficulty") != null else 1
 
     meta["players"] = _count_players_in_world(worldDir + "players/")
     return meta
@@ -858,11 +858,11 @@ func _read_world_meta(worldDir: String, dirName: String) -> Dictionary:
 ## Returns just the metadata line (day, difficulty, season, player count, last played)
 ## for use below the world name in two-line list rows.
 func _format_world_meta(world: Dictionary) -> String:
-    var day: int = world.get("day", 1)
-    var season: int = world.get("season", 1)
-    var diff: int = world.get("difficulty", 1)
-    var players: int = world.get("players", 0)
-    var lastPlayed: int = world.get("last_played", 0)
+    var day: int = world.get(&"day", 1)
+    var season: int = world.get(&"season", 1)
+    var diff: int = world.get(&"difficulty", 1)
+    var players: int = world.get(&"players", 0)
+    var lastPlayed: int = world.get(&"last_played", 0)
 
     var seasonText: String = "Summer" if season == 1 else "Winter"
     var diffText: String = "Normal"
@@ -889,12 +889,12 @@ func _format_world_meta(world: Dictionary) -> String:
 
 
 func _format_world_label(world: Dictionary) -> String:
-    var name: String = world.get("name", "Unknown")
-    var day: int = world.get("day", 1)
-    var season: int = world.get("season", 1)
-    var diff: int = world.get("difficulty", 1)
-    var players: int = world.get("players", 0)
-    var lastPlayed: int = world.get("last_played", 0)
+    var name: String = world.get(&"name", "Unknown")
+    var day: int = world.get(&"day", 1)
+    var season: int = world.get(&"season", 1)
+    var diff: int = world.get(&"difficulty", 1)
+    var players: int = world.get(&"players", 0)
+    var lastPlayed: int = world.get(&"last_played", 0)
 
     var seasonText: String = "Summer" if season == 1 else "Winter"
     var diffText: String = "Normal"
@@ -1129,7 +1129,7 @@ func on_world_selected(worldId: String) -> void:
     var loader: Node = get_node_or_null("/root/Loader")
     if loader == null:
         return
-    var shelter: String = loader.ValidateShelter() if loader.has_method("ValidateShelter") else ""
+    var shelter: String = loader.ValidateShelter() if loader.has_method(&"ValidateShelter") else ""
     if shelter.is_empty():
         shelter = "Cabin"
     loader.LoadScene(shelter)

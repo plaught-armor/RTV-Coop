@@ -201,15 +201,15 @@ func register_spawner_pools(spawner: Node) -> void:
     if !pendingActivations.is_empty():
         var flushed: int = 0
         for pending: Dictionary in pendingActivations:
-            var pid: int = pending.get("syncId", -1)
+            var pid: int = pending.get(&"syncId", -1)
             if pid < 0 || pid >= slotCount:
                 continue
             var pnode: Node = aiNodes[pid]
             if !is_instance_valid(pnode):
                 continue
             _activate_on_client(pid, pnode)
-            pnode.global_position = pending.get("pos", Vector3.ZERO)
-            pnode.global_rotation.y = pending.get("rotY", 0.0)
+            pnode.global_position = pending.get(&"pos", Vector3.ZERO)
+            pnode.global_rotation.y = pending.get(&"rotY", 0.0)
             flushed += 1
         _log("Flushed %d pending activations" % flushed)
         pendingActivations.clear()
@@ -287,20 +287,20 @@ func _host_tick() -> void:
         speeds.append(child.movementSpeed)
         # Strafe direction from combat poles
         var strafe: float = 0.0
-        if child.get("north") == true:
+        if child.get(&"north") == true:
             strafe = 1.0
-        elif child.get("south") == true:
+        elif child.get(&"south") == true:
             strafe = -1.0
         strafes.append(strafe)
         healths.append(clampi(roundi(child.health), 0, 255))
         var f: int = 0
         if child.dead:
             f |= AIFlag.DEAD
-        if child.get("impact") == true:
+        if child.get(&"impact") == true:
             f |= AIFlag.IMPACT
-        if child.get("weapon") != null:
-            var wData: Variant = child.get("weaponData")
-            if wData != null && wData.get("weaponType") == "Pistol":
+        if child.get(&"weapon") != null:
+            var wData: Variant = child.get(&"weaponData")
+            if wData != null && wData.get(&"weaponType") == "Pistol":
                 f |= AIFlag.PISTOL
         flagsArr.append(f)
 
@@ -412,7 +412,7 @@ func _apply_snapshot(node: Node, snap: AISnapshot) -> void:
     node.global_rotation.y = snap.rotation_y
 
     # Drive animator if available
-    var animator: AnimationTree = node.get("animator")
+    var animator: AnimationTree = node.get(&"animator")
     if !is_instance_valid(animator):
         return
     if !animator.active:
@@ -454,8 +454,8 @@ func _activate_on_client(idx: int, node: Node) -> void:
         node.reparent(agentsNode)
     node.show()
     # Keep AI paused on client — we drive it via snapshots, not AI logic
-    node.set("pause", true)
-    node.set("sensorActive", false)
+    node.set(&"pause", true)
+    node.set(&"sensorActive", false)
 
 # ---------- Activation / Deactivation Events ----------
 
@@ -499,9 +499,9 @@ func receive_ai_death(syncId: int, direction: Vector3, force: float) -> void:
     var node: Node = aiNodes[syncId]
     if !is_instance_valid(node):
         return
-    if node.get("dead") == true:
+    if node.get(&"dead") == true:
         return
-    if node.has_method("Death"):
+    if node.has_method(&"Death"):
         node.Death(direction, force)
 
 
@@ -519,9 +519,9 @@ func receive_ai_fire(syncId: int) -> void:
     var node: Node = aiNodes[syncId]
     if !is_instance_valid(node):
         return
-    if node.has_method("PlayFire"):
+    if node.has_method(&"PlayFire"):
         node.PlayFire()
-    if node.has_method("MuzzleVFX"):
+    if node.has_method(&"MuzzleVFX"):
         node.MuzzleVFX()
 
 
@@ -535,9 +535,9 @@ func request_ai_damage_from_client(syncId: int, hitbox: String, damage: float) -
     var node: Node = aiNodes[syncId]
     if !is_instance_valid(node):
         return
-    if node.get("dead") == true:
+    if node.get(&"dead") == true:
         return
-    if node.has_method("WeaponDamage"):
+    if node.has_method(&"WeaponDamage"):
         # Call the original (super) WeaponDamage, not the patched one,
         # to avoid re-routing back to the client
         node.WeaponDamage(hitbox, damage)
@@ -558,7 +558,7 @@ func receive_ai_damage(damage: float, penetration: int) -> void:
         return
     # Character is the first child of Controller, same as original AI.gd:1389
     var character: Node = controller.get_child(0) if controller.get_child_count() > 0 else null
-    if is_instance_valid(character) && character.has_method("WeaponDamage"):
+    if is_instance_valid(character) && character.has_method(&"WeaponDamage"):
         character.WeaponDamage(damage, penetration)
 
 
@@ -574,7 +574,7 @@ func receive_explosion_damage() -> void:
     if !is_instance_valid(controller):
         return
     var character: Node = controller.get_child(0) if controller.get_child_count() > 0 else null
-    if is_instance_valid(character) && character.has_method("ExplosionDamage"):
+    if is_instance_valid(character) && character.has_method(&"ExplosionDamage"):
         character.ExplosionDamage()
 
 # ---------- Full State (Late Join) ----------
@@ -596,7 +596,7 @@ func send_full_state(peerId: int) -> void:
     for child: Node in agentsNode.get_children():
         if !child.has_meta(&"ai_sync_id"):
             continue
-        if child.get("dead") == true:
+        if child.get(&"dead") == true:
             continue
         var idx: int = child.get_meta(&"ai_sync_id")
         receive_ai_activate.rpc_id(peerId, idx, child.global_position, child.global_rotation.y, child.currentState)

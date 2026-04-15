@@ -175,7 +175,7 @@ func Parameters(delta: float) -> void:
             bestPos = pos
             targetPeerId = peerId
             # Approximate remote player's facing direction from their rotation
-            var rotY: float = remote.get("targetRotationY") if remote.get("targetRotationY") != null else remote.rotation.y
+            var rotY: float = remote.get(&"targetRotationY") if remote.get(&"targetRotationY") != null else remote.rotation.y
             bestVector = Vector3(-sin(rotY), 0, -cos(rotY))
 
     playerPosition = bestPos
@@ -260,7 +260,7 @@ func LOSCheck(target: Vector3) -> void:
         var collider: Node = LOS.get_collider()
         # Original: check "Player" group (host's local player)
         # Co-op: also check "CoopRemote" group (remote players)
-        if collider.is_in_group("Player") || collider.is_in_group("CoopRemote"):
+        if collider.is_in_group(&"Player") || collider.is_in_group(&"CoopRemote"):
             lastKnownLocation = playerPosition
             playerVisible = true
 
@@ -294,7 +294,7 @@ func Hearing() -> void:
         if !is_instance_valid(remote):
             continue
         var dist: float = global_position.distance_to(remote.global_position)
-        var flags: int = remote.get("moveFlags") if remote.get("moveFlags") != null else 0
+        var flags: int = remote.get(&"moveFlags") if remote.get(&"moveFlags") != null else 0
         var isRunning: bool = (flags & _cm.PlayerStateScript.MoveFlag.RUNNING) != 0
         var isWalking: bool = (flags & _cm.PlayerStateScript.MoveFlag.WALKING) != 0
         if (dist < 20 && isRunning) || (dist < 5 && isWalking):
@@ -338,7 +338,7 @@ func FireDetection(delta: float) -> void:
         var remote: Node3D = _cm.remoteNodes[peerId]
         if !is_instance_valid(remote):
             continue
-        var isFiring: bool = remote.get("isFiring") == true if remote.get("isFiring") != null else false
+        var isFiring: bool = remote.get(&"isFiring") == true if remote.get(&"isFiring") != null else false
         if !isFiring:
             continue
         if playerVisible:
@@ -374,7 +374,7 @@ func Raycast() -> void:
     if fire.is_colliding():
         var hitCollider: Node = fire.get_collider()
 
-        if hitCollider.is_in_group("CoopRemote"):
+        if hitCollider.is_in_group(&"CoopRemote"):
             # Hit a remote player — find their peer ID and send damage RPC
             var remoteRoot: Node3D = _find_remote_root(hitCollider)
             if remoteRoot != null:
@@ -383,7 +383,7 @@ func Raycast() -> void:
                     var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
                     _cm.aiState.send_ai_damage_to_peer(peerId, dmg, weaponData.penetration)
 
-        elif hitCollider.is_in_group("Player"):
+        elif hitCollider.is_in_group(&"Player"):
             # Hit host's local player (original behavior)
             var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
             hitCollider.get_child(0).WeaponDamage(dmg, weaponData.penetration)
@@ -391,7 +391,7 @@ func Raycast() -> void:
         else:
             var hitPoint: Vector3 = fire.get_collision_point()
             var hitNormal: Vector3 = fire.get_collision_normal()
-            var hitSurface: Variant = hitCollider.get("surface")
+            var hitSurface: Variant = hitCollider.get(&"surface")
             BulletDecal(hitCollider, hitPoint, hitNormal, hitSurface)
 
     elif playerDistance3D > 50:
@@ -485,7 +485,7 @@ func Death(direction: Vector3, force: float) -> void:
 func _find_remote_root(node: Node) -> Node3D:
     var current: Node = node
     while current != null && is_instance_valid(current):
-        if current.is_in_group("CoopRemote"):
+        if current.is_in_group(&"CoopRemote"):
             if current.has_meta(&"peer_id"):
                 return current as Node3D
         current = current.get_parent()

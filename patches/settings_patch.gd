@@ -513,14 +513,14 @@ func _on_friends_received(response: Dictionary) -> void:
     var friendList: VBoxContainer = find_child("MPFriendsList", true, false) as VBoxContainer
     if friendList == null:
         return
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
     # Clear and rebuild the list. Friend lists are short (~50 max) so we just
     # rebuild rather than diffing.
     for child: Node in friendList.get_children():
         child.queue_free()
     _avatarSlots.clear()
-    var friends: Array = response.get("data", [])
+    var friends: Array = response.get(&"data", [])
     for friend: Dictionary in friends:
         var row: HBoxContainer = _make_friend_row(friend)
         friendList.add_child(row)
@@ -548,9 +548,9 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
     row.add_child(inviteBtn)
 
     # Populate from friend data (reuses cached avatars when possible).
-    var friendName: String = friend.get("name", "Unknown")
-    var state: int = friend.get("state", 0)
-    var gameID: String = friend.get("game_id", "")
+    var friendName: String = friend.get(&"name", "Unknown")
+    var state: int = friend.get(&"state", 0)
+    var gameID: String = friend.get(&"game_id", "")
     var inGame: bool = !gameID.is_empty()
     var stateText: String = ""
     var nameColor: Color = Color("#57cbde")
@@ -575,7 +575,7 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
     nameLabel.text = "%s%s" % [friendName, stateText]
     nameLabel.add_theme_color_override("font_color", nameColor)
 
-    var steamID: String = friend.get("steam_id", "")
+    var steamID: String = friend.get(&"steam_id", "")
     if steamID in _cm.avatarCache:
         avatar.texture = _cm.avatarCache[steamID]
     elif !steamID.is_empty():
@@ -613,10 +613,10 @@ func _on_invite_friend(steamID: String, friendName: String) -> void:
 func _on_invite_sent(response: Dictionary, friendName: String) -> void:
     if !is_instance_valid(_cm):
         return
-    if response.get("ok", false):
+    if response.get(&"ok", false):
         _cm._log("Invite sent to %s" % friendName)
     else:
-        _cm._log("Invite failed: %s" % response.get("error", "unknown"))
+        _cm._log("Invite failed: %s" % response.get(&"error", "unknown"))
 
 
 ## Override vanilla Menu/Quit/Return-from-warning handlers so our CoopTabs

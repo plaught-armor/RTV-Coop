@@ -324,7 +324,7 @@ func SaveShelter(targetShelter):
 	shelter.initialVisit = false
 	shelter.lastVisit = (Simulation.day * 10000) + Simulation.time
 
-	for furniture in get_tree().get_nodes_in_group("Furniture"):
+	for furniture in get_tree().get_nodes_in_group(&"Furniture"):
 		var furnitureComponent: Furniture
 		for child in furniture.owner.get_children():
 			if child is Furniture:
@@ -341,7 +341,7 @@ func SaveShelter(targetShelter):
 					furnitureSave.storage = furniture.owner.storage
 			shelter.furnitures.append(furnitureSave)
 
-	for item in get_tree().get_nodes_in_group("Item"):
+	for item in get_tree().get_nodes_in_group(&"Item"):
 		if !item.global_position.is_finite() || !item.global_rotation.is_finite():
 			continue
 		if item.global_position.y < -10.0:
@@ -353,7 +353,7 @@ func SaveShelter(targetShelter):
 		itemSave.rotation = item.global_rotation
 		shelter.items.append(itemSave)
 
-	for switch in get_tree().get_nodes_in_group("Switch"):
+	for switch in get_tree().get_nodes_in_group(&"Switch"):
 		var switchSave = SwitchSave.new()
 		switchSave.name = switch.name
 		switchSave.active = switch.active
@@ -375,7 +375,7 @@ func LoadShelter(targetShelter):
 		UpdateProgression()
 
 	if !shelter.initialVisit:
-		for furniture in get_tree().get_nodes_in_group("Furniture"):
+		for furniture in get_tree().get_nodes_in_group(&"Furniture"):
 			furniture.owner.global_position.y = -100.0
 			furniture.queue_free()
 
@@ -413,7 +413,7 @@ func LoadShelter(targetShelter):
 		pickup.Freeze()
 		pickup.UpdateAttachments()
 
-	for switch in get_tree().get_nodes_in_group("Switch"):
+	for switch in get_tree().get_nodes_in_group(&"Switch"):
 		for switchSave in shelter.switches:
 			if switchSave.name == switch.name:
 				if switchSave.active:

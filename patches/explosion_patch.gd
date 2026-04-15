@@ -44,9 +44,9 @@ func CheckOverlap() -> void:
 		return
 
 	for target: Node3D in bodies:
-		if target.is_in_group("CoopRemote"):
+		if target.is_in_group(&"CoopRemote"):
 			_check_los_remote(target)
-		elif target.get("head") != null:
+		elif target.get(&"head") != null:
 			CheckLOS(target)
 
 
@@ -64,11 +64,11 @@ func CheckLOS(target) -> void:
 
 	var collider: Node = LOS.get_collider()
 
-	if collider.is_in_group("AI"):
+	if collider.is_in_group(&"AI"):
 		target.ExplosionDamage(LOS.global_basis.z)
 
 	# Host-only: prevents double damage on clients (local explosion + host RPC)
-	if collider.is_in_group("Player") && _cm.isHost:
+	if collider.is_in_group(&"Player") && _cm.isHost:
 		target.get_child(0).ExplosionDamage()
 
 
@@ -85,7 +85,7 @@ func _check_los_remote(target: Node3D) -> void:
 		return
 
 	var collider: Node = LOS.get_collider()
-	if collider.is_in_group("CoopRemote"):
+	if collider.is_in_group(&"CoopRemote"):
 		var remoteRoot: Node3D = _find_remote_root(collider)
 		if remoteRoot != null:
 			var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
@@ -96,7 +96,7 @@ func _check_los_remote(target: Node3D) -> void:
 func _find_remote_root(node: Node) -> Node3D:
 	var current: Node = node
 	while current != null && is_instance_valid(current):
-		if current.is_in_group("CoopRemote"):
+		if current.is_in_group(&"CoopRemote"):
 			if current.has_meta(&"peer_id"):
 				return current as Node3D
 		current = current.get_parent()

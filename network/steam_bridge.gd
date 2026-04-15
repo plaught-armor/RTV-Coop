@@ -130,9 +130,9 @@ func poll_connect(delta: float) -> void:
 
 
 func on_initial_user(response: Dictionary) -> void:
-    var data: Dictionary = response.get("data", { })
-    localSteamName = data.get("name", "")
-    localSteamID = data.get("steam_id", "")
+    var data: Dictionary = response.get(&"data", { })
+    localSteamName = data.get(&"name", "")
+    localSteamID = data.get(&"steam_id", "")
     ownsGame = true # Assume ownership — launched through Steam
     _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
     # Cache our own avatar
@@ -143,8 +143,8 @@ func on_initial_user(response: Dictionary) -> void:
 
 
 func on_ownership_result(response: Dictionary) -> void:
-    var data: Dictionary = response.get("data", { })
-    ownsGame = data.get("owns", false)
+    var data: Dictionary = response.get(&"data", { })
+    ownsGame = data.get(&"owns", false)
     if ownsGame:
         _log("Ownership verified")
     else:
@@ -226,7 +226,7 @@ func _dispatch_response(line: String) -> void:
     if response == null || !(response is Dictionary):
         return
 
-    var cmd: String = response.get("cmd", "")
+    var cmd: String = response.get(&"cmd", "")
 
     # Handle push events from the helper (no pending callback, no req_id)
     if cmd == "invite_received":
@@ -234,7 +234,7 @@ func _dispatch_response(line: String) -> void:
         return
 
     # Match by req_id for normal command responses
-    var reqId: int = response.get("req_id", 0)
+    var reqId: int = response.get(&"req_id", 0)
     if reqId > 0 && reqId in pendingCallbacks:
         var cb: Callable = pendingCallbacks[reqId]
         pendingCallbacks.erase(reqId)
@@ -336,10 +336,10 @@ func get_avatar_binary(steamID: String, callback: Callable) -> void:
 
 
 func on_invite_received(response: Dictionary) -> void:
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get("data", { })
-    var lobbyID: String = data.get("lobby_id", "")
+    var data: Dictionary = response.get(&"data", { })
+    var lobbyID: String = data.get(&"lobby_id", "")
     if lobbyID.is_empty():
         return
     if _cm.is_session_active():
@@ -349,10 +349,10 @@ func on_invite_received(response: Dictionary) -> void:
 
 
 func on_launch_invite_checked(response: Dictionary) -> void:
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get("data", { })
-    var lobbyID: String = data.get("lobby_id", "")
+    var data: Dictionary = response.get(&"data", { })
+    var lobbyID: String = data.get(&"lobby_id", "")
     if lobbyID.is_empty():
         return
     _log("Launch invite detected — joining lobby %s" % lobbyID)

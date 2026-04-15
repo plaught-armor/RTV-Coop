@@ -499,7 +499,7 @@ func extract_door_states() -> Dictionary[NodePath, int]:
     var doors: Dictionary[NodePath, int] = {}
     if mapScene == null:
         return doors
-    for node: Node in mapScene.get_tree().get_nodes_in_group("Interactable"):
+    for node: Node in mapScene.get_tree().get_nodes_in_group(&"Interactable"):
         var obj: Node = node.owner if node.owner != null else node
         if !(obj is Door):
             continue
@@ -518,9 +518,9 @@ func extract_switch_states() -> Dictionary[NodePath, bool]:
     var switches: Dictionary[NodePath, bool] = {}
     if mapScene == null:
         return switches
-    for node: Node in mapScene.get_tree().get_nodes_in_group("Switch"):
+    for node: Node in mapScene.get_tree().get_nodes_in_group(&"Switch"):
         var obj: Node = node.owner if node.owner != null else node
-        if !obj.has_method("Activate"):
+        if !obj.has_method(&"Activate"):
             continue
         if !mapScene.is_ancestor_of(obj):
             continue
@@ -553,12 +553,12 @@ func extract_item_states() -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     if mapScene == null:
         return result
-    for node: Node in mapScene.get_tree().get_nodes_in_group("Item"):
+    for node: Node in mapScene.get_tree().get_nodes_in_group(&"Item"):
         if !is_instance_valid(node) || !mapScene.is_ancestor_of(node):
             continue
         if !(node is Node3D):
             continue
-        var slotData: Resource = node.get("slotData")
+        var slotData: Resource = node.get(&"slotData")
         if slotData == null || slotData.itemData == null:
             continue
         result.append({
@@ -644,7 +644,7 @@ func _restore_switches(switches: Dictionary) -> void:
     var i: int = 0
     for switchPath: NodePath in switches:
         var sw: Node = mapScene.get_node_or_null(switchPath)
-        if is_instance_valid(sw) && sw.has_method("Activate"):
+        if is_instance_valid(sw) && sw.has_method(&"Activate"):
             var active: bool = switches[switchPath]
             if active && !sw.active:
                 sw.Activate()

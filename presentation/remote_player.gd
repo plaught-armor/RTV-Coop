@@ -71,7 +71,7 @@ func _create_collision_body() -> void:
     staticBody.name = "HitBody"
     staticBody.collision_layer = COOP_HIT_LAYER
     staticBody.collision_mask = 0
-    staticBody.add_to_group("CoopRemote")
+    staticBody.add_to_group(&"CoopRemote")
     # Copy peer_id meta so ai_patch can find the peer from the collider
     if has_meta(&"peer_id"):
         staticBody.set_meta(&"peer_id", get_meta(&"peer_id"))
@@ -181,7 +181,7 @@ func play_remote_audio(audioPath: String) -> void:
     if !audioPath.begins_with("res://Resources/") && !audioPath.begins_with("res://Audio/"):
         return
     var audioEvent: Resource = load(audioPath)
-    if audioEvent == null || !audioEvent.has_method("get"):
+    if audioEvent == null || !audioEvent.has_method(&"get"):
         return
     if audioEvent.audioClips.is_empty():
         return
