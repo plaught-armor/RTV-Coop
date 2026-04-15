@@ -243,7 +243,16 @@ func _register_ai_sync_ids() -> void:
         aiSyncIdCounter += 1
         node.set_meta(_M_AI_SYNC_ID, aiSyncIdCounter)
         node.set_meta(_M_AI_TYPE, _get_ai_type(node))
+        # Self-cleaning registry: when the AI node leaves the tree (queue_free
+        # from AISpawner, scene unload, etc.), the bound sync id gets erased
+        # from syncedAI immediately. Avoids building a toErase list during
+        # every extract_ai_state call to collect dead refs lazily.
+        node.tree_exiting.connect(_on_ai_tree_exiting.bind(aiSyncIdCounter))
         syncedAI[aiSyncIdCounter] = node
+
+
+func _on_ai_tree_exiting(syncId: int) -> void:
+    syncedAI.erase(syncId)
 
 
 func _get_all_ai_nodes() -> Array[Node]:
@@ -408,19 +417,19 @@ func _build_ai_state_dict(syncId: int, ai: Node) -> Dictionary:
 
 func extract_ai_state() -> Array[Dictionary]:
     var states: Array[Dictionary] = []
-    var toErase: Array[int] = []
     for syncId: int in syncedAI:
         var ai: Node = syncedAI[syncId]
+        # is_instance_valid remains as a belt-and-suspenders guard — the
+        # tree_exiting hook in _register_ai_sync_ids should have already
+        # removed any freed AI, but nodes can be marked invalid between
+        # queue_free() and the signal firing.
         if !is_instance_valid(ai):
-            toErase.append(syncId)
             continue
         # Live sync: skip dead and paused — paused AI have no meaningful state
         # for clients to replicate, and dead AI are already removed via RPC.
         if ai.get(_P_DEAD) == true || ai.get(_P_PAUSE) == true:
             continue
         states.append(_build_ai_state_dict(syncId, ai))
-    for id: int in toErase:
-        syncedAI.erase(id)
     return states
 
 
