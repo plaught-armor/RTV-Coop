@@ -3,6 +3,10 @@
 ## isolates AI detection from the host's real GameData.
 extends Node
 
+## Emitted once the threaded scene load + finalize completes. Callers register
+## with CONNECT_ONE_SHOT and apply snapshot restore / start() only after success.
+signal setup_finished(success: bool)
+
 var _cm: Node
 var mapPath: String = ""
 var viewport: SubViewport = null
@@ -11,6 +15,13 @@ var proxyGameData: Resource = null
 var clientPeers: Array[int] = []
 var aiSyncIdCounter: int = 0
 var syncedAI: Dictionary[int, Node] = {}
+## Threaded-load state. While true, _process polls load_threaded_get_status each
+## frame until LOADED/FAILED, then toggles itself off. Scene parse (20-40MB of
+## meshes/deps) runs on a Godot worker thread; the blocking instantiate() call
+## happens on the main thread but can't be avoided in Godot 4.x.
+var _loadInProgress: bool = false
+var _setupComplete: bool = false
+var _setupCancelled: bool = false
 ## Per-peer position cache. Each value is a reused typed Array [pos, camPos, rot, flags]
 ## so we don't allocate a fresh Dictionary on every 20Hz position update.
 var clientPositions: Dictionary[int, Array] = {}
@@ -36,6 +47,10 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
+## Kicks off the threaded scene load. Returns true if the request was queued
+## successfully — the actual scene is not ready until [signal setup_finished]
+## fires. Callers must wait for that signal before calling [method start] or
+## [method restore].
 func setup(path: String) -> bool:
     mapPath = path
     viewport = _make_headless_viewport(path)
@@ -44,10 +59,48 @@ func setup(path: String) -> bool:
     # CACHE_MODE_REPLACE_DEEP forces dependency tree re-parse so ext_resources
     # (like AI.gd) resolve through take_over_path redirects. Without this, AI
     # prefabs cached before register_patches() keep their original script refs.
-    var scene: PackedScene = ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REPLACE_DEEP)
-    if scene == null:
-        push_error("[HeadlessMap] Failed to load scene: %s" % path)
+    var err: int = ResourceLoader.load_threaded_request(
+        path, "PackedScene", true, ResourceLoader.CACHE_MODE_REPLACE_DEEP
+    )
+    if err != OK:
+        push_error("[HeadlessMap] Failed to queue threaded load (err %d): %s" % [err, path])
         return false
+    _loadInProgress = true
+    set_process(true)
+    _log("Threaded load started for %s" % path)
+    return true
+
+
+## Polls threaded-load status on the main thread. Self-disables once the load
+## resolves. Cheap while active (one C++ atomic check + branch per frame);
+## zero cost after completion.
+func _process(_delta: float) -> void:
+    if !_loadInProgress:
+        set_process(false)
+        return
+    var status: int = ResourceLoader.load_threaded_get_status(mapPath)
+    if status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+        return
+    _loadInProgress = false
+    set_process(false)
+    if status != ResourceLoader.THREAD_LOAD_LOADED:
+        push_error("[HeadlessMap] Threaded load failed (status %d): %s" % [status, mapPath])
+        setup_finished.emit(false)
+        return
+    _finalize_setup()
+
+
+## Runs after the threaded load completes. instantiate() still happens on the
+## main thread (Godot 4.x constraint) but parse/deps/texture decode were done
+## on a worker during the load phase.
+func _finalize_setup() -> void:
+    if _setupCancelled || !is_instance_valid(viewport):
+        return
+    var scene: PackedScene = ResourceLoader.load_threaded_get(mapPath)
+    if scene == null:
+        push_error("[HeadlessMap] Failed to retrieve threaded scene: %s" % mapPath)
+        setup_finished.emit(false)
+        return
     mapScene = scene.instantiate()
     viewport.add_child(mapScene)
 
@@ -65,8 +118,9 @@ func setup(path: String) -> bool:
     _reassign_patched_scripts(mapScene)
 
     _inject_proxy_gamedata()
-    _log("SubViewport created for %s" % path)
-    return true
+    _setupComplete = true
+    _log("SubViewport ready for %s" % mapPath)
+    setup_finished.emit(true)
 
 
 ## Builds a SubViewport configured for maximum "do as little as possible"
@@ -506,6 +560,12 @@ func restore(snap: Dictionary) -> void:
 
 
 func teardown() -> void:
+    # If the threaded load is still in flight we can't cancel it, but we can
+    # flag finalize to skip its side effects so nothing gets re-added to a
+    # freed viewport.
+    _setupCancelled = true
+    _loadInProgress = false
+    set_process(false)
     savedSnapshot = snapshot()
     if viewport != null:
         viewport.queue_free()

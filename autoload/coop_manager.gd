@@ -982,21 +982,27 @@ func clear_active_world() -> void:
 
 ## Copies each user://*.tres into the world dir after a save event. The host
 ## calls this from transition_patch after super.Interact() commits saves.
+## Fire-and-forget: I/O is dispatched to [WorkerThreadPool] so the transition
+## scene load isn't stalled by 5-50MB of save-file copying. Directory creation
+## stays on the main thread (fast, and avoids DirAccess races with the worker).
 func mirror_user_to_world() -> void:
     if worldId.is_empty() || !isHost:
         return
     var worldDir: String = COOP_WORLDS_DIR + worldId + "/"
     DirAccess.make_dir_recursive_absolute(worldDir)
+    var jobs: Array = []
     for saveName: String in COOP_WORLD_SAVES:
         var src: String = "user://" + saveName
         if FileAccess.file_exists(src):
-            _copy_file(src, worldDir + saveName)
+            jobs.append([src, worldDir + saveName])
     # Per-player character lands in players/<steam_id>/Character.tres
     var steamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
     if FileAccess.file_exists("user://" + COOP_PLAYER_SAVE):
         var playerDir: String = worldDir + "players/" + steamId + "/"
         DirAccess.make_dir_recursive_absolute(playerDir)
-        _copy_file("user://" + COOP_PLAYER_SAVE, playerDir + COOP_PLAYER_SAVE)
+        jobs.append(["user://" + COOP_PLAYER_SAVE, playerDir + COOP_PLAYER_SAVE])
+    if !jobs.is_empty():
+        WorkerThreadPool.add_task(_run_copy_jobs.bind(jobs), false, "coop:mirror_user_to_world")
 
 
 ## Copies the world dir into user:// before the host loads a world. Vanilla
@@ -1047,16 +1053,20 @@ func mirror_user_to_solo() -> void:
     if !FileAccess.file_exists("user://World.tres"):
         return  # nothing to mirror
     DirAccess.make_dir_recursive_absolute(SOLO_SAVES_DIR)
+    # Enumerate on main thread (quick), dispatch byte copies to worker pool.
     var dir: DirAccess = DirAccess.open("user://")
     if dir == null:
         return
+    var jobs: Array = []
     dir.list_dir_begin()
     var entry: String = dir.get_next()
     while entry != "":
         if entry.ends_with(".tres") && entry != "Validator.tres" && entry != "Preferences.tres":
-            _copy_file("user://" + entry, SOLO_SAVES_DIR + entry)
+            jobs.append(["user://" + entry, SOLO_SAVES_DIR + entry])
         entry = dir.get_next()
     dir.list_dir_end()
+    if !jobs.is_empty():
+        WorkerThreadPool.add_task(_run_copy_jobs.bind(jobs), false, "coop:mirror_user_to_solo")
 
 
 ## Copies the solo dir into user:// so vanilla Loader picks them up. Called
@@ -1103,37 +1113,52 @@ func _copy_file(src: String, dst: String) -> void:
         f.close()
 
 
+## Batch copy helper executed by [WorkerThreadPool]. Each entry in [param jobs]
+## is a [src, dst] pair. Runs on a worker thread — must not touch the scene
+## tree or any Node state. FileAccess is safe across threads as long as each
+## thread uses its own handle (one per job here).
+static func _run_copy_jobs(jobs: Array) -> void:
+    for pair: Array in jobs:
+        var src: String = pair[0]
+        var dst: String = pair[1]
+        var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
+        if bytes.is_empty():
+            continue
+        var f: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
+        if f != null:
+            f.store_buffer(bytes)
+            f.close()
+
+
 # ---------- Log Collection ----------
+
+
+## Emitted once the async log snapshot finishes. [param absDir] is the absolute
+## snapshot directory that was opened in the file manager.
+signal logs_collected(absDir: String, fileCount: int)
 
 
 ## Collects godot.log and steam_helper.log into a timestamped folder under
 ## user://rtv-coop-logs/ and opens that folder in the system file manager.
 ## Cross-platform: user:// abstracts the path (Proton prefix on Linux, AppData
 ## on Windows), and OS.shell_open dispatches to the native file manager.
-func collect_logs() -> String:
+##
+## Fire-and-forget: file I/O runs on [WorkerThreadPool] (snapshots can be tens
+## of MB — used to freeze the UI for hundreds of ms on a button press). The
+## directory enumeration runs on main thread (fast) so we can snapshot file
+## names atomically before the worker starts. [signal logs_collected] fires
+## once the snapshot is written and opened.
+func collect_logs() -> void:
     var stamp: String = Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
     var snapDir: String = "user://rtv-coop-logs/%s/" % stamp
-    var absDir: String = ProjectSettings.globalize_path(snapDir)
-    DirAccess.make_dir_recursive_absolute(absDir)
+    DirAccess.make_dir_recursive_absolute(snapDir)
 
     var sources: PackedStringArray = [
         "user://logs/godot.log",
         "user://logs/steam_helper.log",
     ]
-    var copied: int = 0
-    for src: String in sources:
-        if !FileAccess.file_exists(src):
-            continue
-        var dst: String = snapDir + src.get_file()
-        var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
-        var file: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
-        if file != null:
-            file.store_buffer(bytes)
-            file.close()
-            copied += 1
-
     # Include recent session rollovers (godot writes godot<timestamp>.log for
-    # restarts) — pick the last three by modification time.
+    # restarts) — pick the last three by name (timestamp-sortable).
     var logsDir: DirAccess = DirAccess.open("user://logs/")
     if logsDir != null:
         var candidates: Array[String] = []
@@ -1146,28 +1171,53 @@ func collect_logs() -> String:
         logsDir.list_dir_end()
         candidates.sort()
         for i: int in range(max(0, candidates.size() - 3), candidates.size()):
-            var src: String = "user://logs/" + candidates[i]
-            var dst: String = snapDir + candidates[i]
-            var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
-            var file: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
-            if file != null:
-                file.store_buffer(bytes)
-                file.close()
-                copied += 1
+            sources.append("user://logs/" + candidates[i])
 
-    # Write a small info file with mod version + OS so testers don't have to explain.
-    var info: FileAccess = FileAccess.open(snapDir + "info.txt", FileAccess.WRITE)
-    if info != null:
-        info.store_line("RTV Co-op Mod log snapshot")
-        info.store_line("Timestamp: %s" % stamp)
-        info.store_line("OS: %s" % OS.get_name())
-        info.store_line("Godot: %s" % Engine.get_version_info().string)
-        info.store_line("Files: %d" % copied)
-        info.close()
+    var info: Dictionary = {
+        "stamp": stamp,
+        "os": OS.get_name(),
+        "godot": Engine.get_version_info().string,
+    }
+    WorkerThreadPool.add_task(
+        _run_log_snapshot.bind(snapDir, sources, info), false, "coop:collect_logs"
+    )
 
+
+## Worker-thread body for [method collect_logs]. Writes every source file plus
+## an info.txt into [param snapDir], then defers a callback to the main thread
+## so [method OS.shell_open] fires from the scene tree (safe dispatch).
+func _run_log_snapshot(snapDir: String, sources: PackedStringArray, info: Dictionary) -> void:
+    var copied: int = 0
+    for src: String in sources:
+        if !FileAccess.file_exists(src):
+            continue
+        var dst: String = snapDir + src.get_file()
+        var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
+        if bytes.is_empty():
+            continue
+        var outFile: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
+        if outFile != null:
+            outFile.store_buffer(bytes)
+            outFile.close()
+            copied += 1
+    var infoFile: FileAccess = FileAccess.open(snapDir + "info.txt", FileAccess.WRITE)
+    if infoFile != null:
+        infoFile.store_line("RTV Co-op Mod log snapshot")
+        infoFile.store_line("Timestamp: %s" % info.get("stamp", ""))
+        infoFile.store_line("OS: %s" % info.get("os", ""))
+        infoFile.store_line("Godot: %s" % info.get("godot", ""))
+        infoFile.store_line("Files: %d" % copied)
+        infoFile.close()
+    _on_log_snapshot_done.call_deferred(snapDir, copied)
+
+
+## Main-thread callback for log snapshot completion — opens the folder in the
+## native file manager and emits [signal logs_collected].
+func _on_log_snapshot_done(snapDir: String, copied: int) -> void:
+    var absDir: String = ProjectSettings.globalize_path(snapDir)
     _log("[logs] snapshot: %s (%d files)" % [absDir, copied])
     OS.shell_open(absDir)
-    return absDir
+    logs_collected.emit(absDir, copied)
 
 
 # ---------- Auto-Join ----------
@@ -1477,24 +1527,49 @@ func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
             headlessMaps.erase(oldMap)
             _log("Headless map freed: %s (snapshot saved)" % oldMap)
 
-    # Add peer to new headless map (if host isn't on that map)
+    # Add peer to new headless map (if host isn't on that map).
+    # setup() kicks off a threaded scene load — restore + start are deferred
+    # to the setup_finished handler so the main thread isn't blocked parsing
+    # a 20-40MB PackedScene. Subsequent peers joining the same map before the
+    # load completes just add to clientPeers; they'll see AI state once the
+    # scene finalizes.
     if !newMap.is_empty() && newMap != localMap:
         if newMap not in headlessMaps:
             var hmap: Node = HeadlessMapScript.new()
             hmap.name = "Headless_%s" % newMap.get_file().get_basename()
             add_child(hmap)
             hmap.init_manager(self)
-            if hmap.setup(newMap):
-                headlessMaps[newMap] = hmap
-                if newMap in mapSnapshots:
-                    hmap.restore(mapSnapshots[newMap])
-                    mapSnapshots.erase(newMap)
-                hmap.start.call_deferred()
-                _log("Headless map created: %s" % newMap)
-            else:
+            if !hmap.setup(newMap):
                 hmap.queue_free()
                 return
+            headlessMaps[newMap] = hmap
+            hmap.setup_finished.connect(
+                _on_headless_setup_finished.bind(newMap),
+                CONNECT_ONE_SHOT
+            )
+            _log("Headless map queued (threaded load): %s" % newMap)
         headlessMaps[newMap].add_client(peerId)
+
+
+## Called once the threaded scene load finishes for a headless map. Applies any
+## pending snapshot restore and starts the SubViewport.
+func _on_headless_setup_finished(success: bool, mapPath: String) -> void:
+    if mapPath not in headlessMaps:
+        return
+    var hmap: Node = headlessMaps[mapPath]
+    if !success:
+        _log("Headless map setup failed: %s" % mapPath)
+        if is_instance_valid(hmap):
+            hmap.queue_free()
+        headlessMaps.erase(mapPath)
+        return
+    if !is_instance_valid(hmap):
+        return
+    if mapPath in mapSnapshots:
+        hmap.restore(mapSnapshots[mapPath])
+        mapSnapshots.erase(mapPath)
+    hmap.start()
+    _log("Headless map ready: %s" % mapPath)
 
 
 ## Tears down a headless map and returns its snapshot for handoff.

@@ -7,6 +7,28 @@ extends RefCounted
 ## Returned as a fresh array each call to avoid const PackedArray mutation bug (#88753).
 static var ALLOWED_PREFIXES: PackedStringArray = PackedStringArray(["res://Items/", "res://Loot/"])
 
+## Cache of validated [ItemData] resources keyed by resource path. RPC inventory
+## sync hits this path many times per unpack — a full inventory resolves 10-50
+## items plus nested attachments, each previously doing a fresh [method load].
+## Godot's ResourceCache is still involved but this skips the path-validation
+## and typecheck on every call. Populated lazily on first resolve.
+static var _itemCache: Dictionary[String, Resource] = {}
+
+
+## Resolves an item path to its [ItemData] resource with validation. Returns
+## null if the path is disallowed or the resource isn't an [ItemData].
+static func _resolve_item(path: String) -> Resource:
+    var cached: Resource = _itemCache.get(path)
+    if cached != null:
+        return cached
+    if !is_allowed_path(path):
+        return null
+    var res: Resource = load(path)
+    if !(res is ItemData):
+        return null
+    _itemCache[path] = res
+    return res
+
 
 ## Converts a [SlotData] to a [Dictionary] suitable for RPC transmission.
 ## Returns empty dict for null/invalid slots (preserved as-is in arrays).
@@ -46,10 +68,8 @@ static func unpack(data: Dictionary) -> SlotData:
     if data.is_empty():
         return null
     var itemPath: String = data.get(&"item_path", "")
-    if !is_allowed_path(itemPath):
-        return null
-    var itemRes: Resource = load(itemPath)
-    if !(itemRes is ItemData):
+    var itemRes: Resource = _resolve_item(itemPath)
+    if itemRes == null:
         return null
 
     var slot: SlotData = SlotData.new()
@@ -68,11 +88,8 @@ static func unpack(data: Dictionary) -> SlotData:
     for path: String in nestedPaths:
         if path.is_empty():
             slot.nested.append(null)
-        elif is_allowed_path(path):
-            var attachment: Resource = load(path)
-            slot.nested.append(attachment if attachment is ItemData else null)
         else:
-            slot.nested.append(null)
+            slot.nested.append(_resolve_item(path))
 
     # Recursive storage
     var packedStorage: Array = data.get(&"storage", [])
