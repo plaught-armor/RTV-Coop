@@ -34,6 +34,13 @@ var _centroidCacheFrame: int = -1
 
 enum AIType { BANDIT, GUARD, MILITARY, PUNISHER }
 
+## Packed door state — [code]isOpen[/code] and [code]locked[/code] are the
+## only two fields [method extract_door_states] captures, so a bitmask is
+## strictly cheaper than the prior [code]{isOpen: bool, locked: bool}[/code]
+## nested dict: one int vs. a Dictionary allocation + two key/value slots
+## per door. Snapshot restore reads via bitwise AND.
+enum DoorFlag { OPEN = 1, LOCKED = 2 }
+
 ## Preloaded patched scripts keyed by original resource path. static so a single
 ## load happens per mod session instead of per-SubViewport setup. Populated
 ## lazily on first setup() after take_over_path has registered redirects.
@@ -452,8 +459,8 @@ func get_new_spawns() -> Array[Dictionary]:
 # ---------- World State ----------
 
 
-func extract_door_states() -> Dictionary:
-    var doors: Dictionary = {}
+func extract_door_states() -> Dictionary[NodePath, int]:
+    var doors: Dictionary[NodePath, int] = {}
     if mapScene == null:
         return doors
     for node: Node in mapScene.get_tree().get_nodes_in_group("Interactable"):
@@ -462,16 +469,17 @@ func extract_door_states() -> Dictionary:
             continue
         if !mapScene.is_ancestor_of(obj):
             continue
-        var doorPath: String = mapScene.get_path_to(obj)
-        doors[doorPath] = {
-            &"isOpen": obj.get(&"isOpen") if obj.get(&"isOpen") != null else false,
-            &"locked": obj.get(&"locked") if obj.get(&"locked") != null else false,
-        }
+        var flags: int = 0
+        if obj.get(&"isOpen") == true:
+            flags |= DoorFlag.OPEN
+        if obj.get(&"locked") == true:
+            flags |= DoorFlag.LOCKED
+        doors[mapScene.get_path_to(obj)] = flags
     return doors
 
 
-func extract_switch_states() -> Dictionary:
-    var switches: Dictionary = {}
+func extract_switch_states() -> Dictionary[NodePath, bool]:
+    var switches: Dictionary[NodePath, bool] = {}
     if mapScene == null:
         return switches
     for node: Node in mapScene.get_tree().get_nodes_in_group("Switch"):
@@ -480,8 +488,7 @@ func extract_switch_states() -> Dictionary:
             continue
         if !mapScene.is_ancestor_of(obj):
             continue
-        var switchPath: String = mapScene.get_path_to(obj)
-        switches[switchPath] = obj.get(&"active") if obj.get(&"active") != null else false
+        switches[mapScene.get_path_to(obj)] = obj.get(&"active") == true
     return switches
 
 # ---------- Snapshot / Restore ----------
@@ -531,17 +538,17 @@ func restore(snap: Dictionary) -> void:
     if mapScene == null:
         return
     var doors: Dictionary = snap.get("doors", {})
-    for doorPath: String in doors:
+    for doorPath: NodePath in doors:
         var door: Node = mapScene.get_node_or_null(doorPath)
         if !is_instance_valid(door) || !(door is Door):
             continue
-        var state: Dictionary = doors[doorPath]
-        door.isOpen = state.get("isOpen", false)
-        door.locked = state.get("locked", false)
+        var flags: int = doors[doorPath]
+        door.isOpen = (flags & DoorFlag.OPEN) != 0
+        door.locked = (flags & DoorFlag.LOCKED) != 0
         if door.isOpen:
             door.animationTime = 4.0
     var switches: Dictionary = snap.get("switches", {})
-    for switchPath: String in switches:
+    for switchPath: NodePath in switches:
         var sw: Node = mapScene.get_node_or_null(switchPath)
         if !is_instance_valid(sw) || !sw.has_method("Activate"):
             continue
