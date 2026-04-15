@@ -10,8 +10,10 @@ extends "res://Scripts/Settings.gd"
 
 var _cm: Node
 ## Path-based mapping from group name to the section node names inside
-## Settings/Row_NN that should land in that tab.
-const TAB_GROUPS: Array[Array] = [
+## Settings/Row_NN that should land in that tab. static var (not const)
+## because const Array[Array] inner arrays are mutable shared refs per
+## Godot #61274 — accidental mutation would corrupt every Settings instance.
+static var TAB_GROUPS: Array[Array] = [
     ["Multiplayer", []],
     ["Controls", ["Inputs", "Mouse"]],
     ["Audio", ["Audio", "Music"]],
@@ -397,6 +399,10 @@ var _avatarSlots: Dictionary[String, TextureRect] = {}
 ## and button enable states. Also re-fetches the friends list every 5s while
 ## a session is active so invite buttons reflect online/in-game status.
 func _process(_delta: float) -> void:
+    # Skip the whole tick when the Settings panel isn't visible — the player
+    # isn't paused and doesn't need the MP status poll.
+    if !visible:
+        return
     # Patch in late-arriving avatars every frame — cheap, no IPC.
     _patch_pending_avatars()
     if Engine.get_process_frames() % 30 != 0:
@@ -479,7 +485,7 @@ func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxCo
 
 
 func _maybe_refresh_friends() -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(_cm) || !is_instance_valid(_cm.steamBridge):
         return
     var hint: Label = find_child("MPFriendsHint", true, false) as Label
     var friendList: VBoxContainer = find_child("MPFriendsList", true, false) as VBoxContainer
@@ -500,6 +506,10 @@ func _maybe_refresh_friends() -> void:
 
 
 func _on_friends_received(response: Dictionary) -> void:
+    # Callback fires asynchronously after an IPC round-trip — this Settings
+    # node may have been freed (pause menu closed) in the meantime.
+    if !is_inside_tree():
+        return
     var friendList: VBoxContainer = find_child("MPFriendsList", true, false) as VBoxContainer
     if friendList == null:
         return
@@ -543,7 +553,7 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
     var gameID: String = friend.get("game_id", "")
     var inGame: bool = !gameID.is_empty()
     var stateText: String = ""
-    var nameColor: Color
+    var nameColor: Color = Color("#57cbde")
     if inGame:
         stateText = " (In-Game)"
         nameColor = Color("#90ba3c")
@@ -601,10 +611,66 @@ func _on_invite_friend(steamID: String, friendName: String) -> void:
 
 
 func _on_invite_sent(response: Dictionary, friendName: String) -> void:
+    if !is_instance_valid(_cm):
+        return
     if response.get("ok", false):
         _cm._log("Invite sent to %s" % friendName)
     else:
         _cm._log("Invite failed: %s" % response.get("error", "unknown"))
+
+
+## Override vanilla Menu/Quit/Return-from-warning handlers so our CoopTabs
+## layout is shown/hidden correctly (vanilla targets `settings`, the flat
+## BoxContainer that we hid during restructure).
+func _on_menu_pressed() -> void:
+    if gameData.shelter || gameData.tutorial:
+        _on_exit_menu_pressed()
+        return
+    _hide_coop_tabs()
+    warning.show()
+    exitMenu.show()
+    exitQuit.hide()
+    pause.hide()
+    PlayClick()
+
+
+func _on_quit_pressed() -> void:
+    if gameData.shelter || gameData.tutorial:
+        _on_exit_quit_pressed()
+        return
+    _hide_coop_tabs()
+    warning.show()
+    exitMenu.hide()
+    exitQuit.show()
+    pause.hide()
+    PlayClick()
+
+
+func _on_exit_return_pressed() -> void:
+    _show_coop_tabs()
+    if warning != null:
+        warning.hide()
+    if pause != null:
+        pause.show()
+    PlayClick()
+
+
+func _hide_coop_tabs() -> void:
+    var tabs: Node = get_node_or_null("CoopTabs")
+    if tabs != null:
+        (tabs as Control).hide()
+    var exitBar: Node = get_node_or_null("ExitBar")
+    if exitBar != null:
+        (exitBar as Control).hide()
+
+
+func _show_coop_tabs() -> void:
+    var tabs: Node = get_node_or_null("CoopTabs")
+    if tabs != null:
+        (tabs as Control).show()
+    var exitBar: Node = get_node_or_null("ExitBar")
+    if exitBar != null:
+        (exitBar as Control).show()
 
 
 func _on_mp_host() -> void:

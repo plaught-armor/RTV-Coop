@@ -64,6 +64,11 @@ var worldId: String = ""
 const SCENE_CHECK_FRAMES: int = 60
 ## Set when lobby state says host is in-game; consumed in on_connected_to_server.
 var pendingAutoJoin: bool = false
+## Set while we were in any coop session (host or client). Used to suppress
+## mirror_user_to_solo on the subsequent menu return — client user:// may
+## hold stale .tres files written by vanilla save paths during transitions,
+## and we don't want those promoted into the solo save.
+var _wasInCoop: bool = false
 ## Lobby ID of the currently joined lobby (for reading lobby metadata).
 var currentLobbyID: String = ""
 ## Tracks previous scene to detect menu→game transitions.
@@ -244,6 +249,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
     worldState.start_item_tracking()
     _setup_save_paths()
     _update_rich_presence()
+    _wasInCoop = true
     _log("Hosting on port %d (id: %d)" % [port, localPeerId])
 
 
@@ -275,6 +281,19 @@ func join_game(address: String, port: int = DEFAULT_PORT) -> void:
 func disconnect_session() -> void:
     if !is_session_active():
         return
+
+    # Stop subsystems FIRST so no in-flight RPCs or tracking writes fire
+    # after we start cleaning up file state.
+    worldState.stop_item_tracking()
+
+    # Mirror final state to the world dir BEFORE nulling the peer — any late
+    # save events from the current frame still have valid state. Host-only
+    # since only the host has authoritative saves in user://.
+    var wasHost: bool = isHost
+    if wasHost && !worldId.is_empty():
+        mirror_user_to_world()
+
+    # Now tear down networking state.
     for peerId: int in connectedPeers:
         playerState.clear_peer(peerId)
     for peerId: int in remoteNodes:
@@ -299,17 +318,16 @@ func disconnect_session() -> void:
     pendingAutoJoin = false
     currentLobbyID = ""
     _autoLoadInProgress = false
-    # Final mirror + clear active world marker so user:// is clean for the next
-    # session (or for a future solo play). Only does anything if we hosted.
-    if !worldId.is_empty():
-        mirror_user_to_world()
-        wipe_user_saves()
+
+    # Wipe user:// for BOTH host and client — clients may have stale .tres
+    # files written by vanilla save paths during transitions, which would
+    # otherwise promote into solo on next menu return.
+    wipe_user_saves()
     clear_active_world()
-    worldState.stop_item_tracking()
     _reset_save_paths()
     steamBridge.leave_lobby()
     steamBridge.clear_rich_presence()
-    _log("Disconnected")
+    _log("Disconnected (was host: %s)" % str(wasHost))
 
 # ---------- Signal Handlers ----------
 
@@ -367,6 +385,7 @@ func on_connected_to_server() -> void:
     set_peer_timeout(1) # Server is always peer ID 1
     worldState.start_item_tracking()
     _update_rich_presence()
+    _wasInCoop = true
     _log("Connected to server (id: %d)" % localPeerId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
     sync_name.rpc(get_local_name(), localSteamID)
@@ -659,9 +678,12 @@ func inject_manager() -> void:
     if scenePath == "res://Scenes/Menu.tscn":
         _customize_menu(scene)
         # Returning to menu from solo play — capture final state into the solo
-        # dir. Skip if a coop session is active (disconnect_session handles that).
-        if !is_session_active():
+        # dir. Skip if a coop session is active (disconnect_session handles that)
+        # or if we just came back from coop (user:// may hold stale client saves
+        # that would pollute the solo save).
+        if !is_session_active() && !_wasInCoop:
             mirror_user_to_solo()
+        _wasInCoop = false
 
 
 ## Modifies the running Menu instance in-place: renames New→Singleplayer,
@@ -701,6 +723,12 @@ func _customize_menu(menu: Node) -> void:
 func _on_singleplayer_pressed(menu: Node) -> void:
     if menu.has_method("PlayClick"):
         menu.PlayClick()
+    # Should be impossible (button only exists on the main menu and a live
+    # session means you're in-game), but guard anyway — wipe_user_saves()
+    # would destroy the active session's state.
+    if is_session_active():
+        _log("[menu] Singleplayer pressed during active session — ignored")
+        return
     # Restore the solo save into user:// so vanilla Continue/New Game flows see
     # the player's solo state. Wipe first to clear any leftover from a prior
     # coop session that didn't clean up properly.
@@ -1009,7 +1037,7 @@ func migrate_solo_saves_if_needed() -> void:
             migrated += 1
         entry = dir.get_next()
     dir.list_dir_end()
-    print("[coop] Migrated %d solo save files to %s" % [migrated, SOLO_SAVES_DIR])
+    _log("Migrated %d solo save files to %s" % [migrated, SOLO_SAVES_DIR])
 
 
 ## Copies user://*.tres into the solo dir. Called from transition_patch when
@@ -1065,6 +1093,10 @@ func wipe_user_saves() -> void:
 
 func _copy_file(src: String, dst: String) -> void:
     var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
+    # get_file_as_bytes returns empty on read failure — don't truncate dst
+    # to zero bytes and silently corrupt the save.
+    if bytes.is_empty():
+        return
     var f: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
     if f != null:
         f.store_buffer(bytes)

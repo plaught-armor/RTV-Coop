@@ -12,7 +12,7 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
-func _ready():
+func _ready() -> void:
     super._ready()
 
 
@@ -30,9 +30,30 @@ func _ensure_cm() -> void:
             return
 
 
-func Interact():
-    super.Interact()
+func Interact() -> void:
     _ensure_cm()
+    # CLIENT in coop: don't run vanilla Interact's save block — it would
+    # write replicated host state into the client's user:// and pollute
+    # their solo save when they return to the menu. Just trigger the scene
+    # change and let the host be authoritative.
+    if is_instance_valid(_cm) && _cm.is_session_active() && !_cm.isHost:
+        if locked:
+            CheckKey()
+            return
+        Simulation.simulate = false
+        if tutorialExit:
+            Loader.LoadScene(nextMap)
+        else:
+            UpdateSimulation()
+            Simulation.simulate = true
+            gameData.currentMap = nextMap
+            gameData.previousMap = currentMap
+            gameData.energy -= energy
+            gameData.hydration -= hydration
+            Loader.LoadScene(nextMap)
+        return
+
+    super.Interact()
     if !is_instance_valid(_cm):
         return
     # Vanilla Interact already saved Character/World/Shelter to user://. Mirror

@@ -72,13 +72,13 @@ func launch() -> void:
     # Helper self-locates its log. Passing --log-file with a space-containing
     # Wine path seemed to break launch on Proton — revert to self-locate.
     var args: PackedStringArray = ["--port", str(HELPER_PORT)]
-    print("[SteamBridge] launching: %s args=%s" % [globalPath, args])
+    _log("launching: %s args=%s" % [globalPath, args])
     helperPID = OS.create_process(globalPath, args)
 
     if helperPID < 0:
-        print("[SteamBridge] Failed to launch Steam helper")
+        _log("Failed to launch Steam helper")
         return
-    print("[SteamBridge] Steam helper launched (PID: %d)" % helperPID)
+    _log("Steam helper launched (PID: %d)" % helperPID)
 
     connecting = true
     connectTimer = 0.0
