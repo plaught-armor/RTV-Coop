@@ -544,29 +544,30 @@ func restore(snap: Dictionary) -> void:
     var aiSnaps: Array = snap.get("ai", [])
     if aiSnaps.is_empty():
         return
-    var poolAI: Array[Node] = _get_all_ai_nodes()
-    var usedNodes: Array[Node] = []
+    # Bucket the pool by AI type once so each snapshot consumes a node in O(1)
+    # via pop_back. Old version nested (aiSnaps × poolAI) with an `ai in
+    # usedNodes` linear scan on top — effectively O(S² · P). New version is
+    # O(S + P) and calls _get_ai_type once per pool entry instead of once per
+    # (snapshot × candidate) pair.
+    var poolByType: Dictionary = {}
+    for ai: Node in _get_all_ai_nodes():
+        var t: int = _get_ai_type(ai)
+        if !poolByType.has(t):
+            poolByType[t] = []
+        poolByType[t].append(ai)
+    var restored: int = 0
     for aiSnap: Dictionary in aiSnaps:
-        var targetType: int = aiSnap.get("type", 0)
-        var targetPos: Vector3 = aiSnap.get("pos", Vector3.ZERO)
-        var targetRotY: float = aiSnap.get("rot_y", 0.0)
-        var targetHealth: int = aiSnap.get("health", 100)
-        var matched: Node = null
-        for ai: Node in poolAI:
-            if ai in usedNodes:
-                continue
-            if _get_ai_type(ai) == targetType:
-                matched = ai
-                break
-        if matched == null:
+        var bucket: Array = poolByType.get(aiSnap.get("type", 0), [])
+        if bucket.is_empty():
             continue
-        usedNodes.append(matched)
-        matched.global_position = targetPos
-        matched.global_rotation.y = targetRotY
+        var matched: Node = bucket.pop_back()
+        matched.global_position = aiSnap.get("pos", Vector3.ZERO)
+        matched.global_rotation.y = aiSnap.get("rot_y", 0.0)
         if "health" in matched:
-            matched.health = targetHealth
+            matched.health = aiSnap.get("health", 100)
+        restored += 1
     _log("Restored %d AI, %d doors, %d switches from snapshot" % [
-        usedNodes.size(), doors.size(), switches.size()
+        restored, doors.size(), switches.size()
     ])
 
 
