@@ -9,10 +9,7 @@
 extends "res://Scripts/Fire.gd"
 
 var _cm: Node
-## Cached scene-relative path to this campfire. Stable for the node's lifetime
-## in the scene; mirrors the pattern used in door/switch/loot_container patches.
-## Scene-relative keeps validation consistent with is_valid_path (which rejects
-## absolute paths) and lets the receiver resolve via _scene_node().
+## Scene-relative path, cached at _ready.
 var _cachedPath: String = ""
 
 

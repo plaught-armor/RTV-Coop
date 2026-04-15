@@ -10,10 +10,7 @@
 extends "res://Scripts/Mine.gd"
 
 var _cm: Node
-## Cached scene-relative path to this mine. Mirrors the door/switch/fire
-## pattern — scene-relative paths pass is_valid_path and resolve via
-## _scene_node() on the receiver. Mine.gd has _ready, so super._ready()
-## must be called first per project rules.
+## Scene-relative path, cached at _ready.
 var _cachedPath: String = ""
 
 

@@ -3,28 +3,14 @@
 extends Node
 
 var _cm: Node
-## Cached scene refs — repopulated from [method refresh_scene_cache] on every
-## scene transition. Every RPC here previously started with
-## [code]_scene_node(...)[/code]; that's a
-## get_tree + current_scene property read + node lookup per RPC. With the
-## cache it's one typed-var read + a node lookup. The UI manager and
-## Interface are at well-known paths under each map's Core/UI subtree, so
-## we pre-resolve those too and skip the redundant path walks in sync_container_open,
-## grant_pickup_to_client, and apply_pickup_patch.
+## Cached scene refs, refreshed per scene transition.
 var _currentScene: Node = null
 var _uiManager: Node = null
 var _interface: Node = null
-## Hoisted script refs cached from CoopManager after init_manager. Every RPC
-## handler that packs/unpacks a slot used to chain [code]_slotSerializer[/code]
-## (two property reads) on every call — 9 call sites across the file. Same
-## for [code]_cm.PickupPatchScript[/code] in apply_pickup_patch.
+## Hoisted from CoopManager in init_manager.
 var _slotSerializer: Script = null
 var _pickupPatch: Script = null
-## Lazy cache of Database.gd's script constants — item-file-key → PackedScene
-## lookup. The game's Database autoload exposes all pickup scenes as [code]const[/code]
-## members; the constant map is immutable, so resolve it once and reuse for
-## every [method find_pickup_scene] call instead of re-reading via
-## get_script().get_script_constant_map() on each drop.
+## Database script-constant map — resolved lazily on first pickup lookup.
 var _dbConstants: Dictionary = {}
 var _dbConstantsReady: bool = false
 
@@ -35,9 +21,7 @@ func init_manager(manager: Node) -> void:
     _pickupPatch = _cm.PickupPatchScript
 
 
-## Called from [method CoopManager.on_scene_changed] after every scene
-## transition. current_scene is stable until the next transition, so we only
-## need to resolve these once per map.
+## Called from [method CoopManager.on_scene_changed].
 func refresh_scene_cache() -> void:
     _currentScene = get_tree().current_scene
     if !is_instance_valid(_currentScene):
@@ -48,11 +32,7 @@ func refresh_scene_cache() -> void:
     _interface = _currentScene.get_node_or_null("Core/UI/Interface")
 
 
-## Null-safe lookup against [member _currentScene]. Used by every RPC that
-## would otherwise do [code]_scene_node(path)[/code] —
-## if the scene cache hasn't been populated yet (RPC races a scene
-## transition), this returns null and the caller's existing null check
-## handles it.
+## Null-safe lookup against [member _currentScene].
 func _scene_node(path: String) -> Node:
     if !is_instance_valid(_currentScene):
         return null
@@ -411,10 +391,7 @@ func grant_pickup_to_client(packedSlot: Dictionary) -> void:
 # ---------- Pickup Sync ----------
 
 
-## Looks up a Pickup PackedScene from the Database constants by item file key.
-## Database is an autoload and its script constant map is immutable, so we
-## resolve it lazily on first call and reuse the cached Dictionary for every
-## subsequent lookup instead of walking the script reflection each time.
+## Looks up a Pickup PackedScene from Database constants by file key.
 func find_pickup_scene(fileKey: String) -> PackedScene:
     if !_dbConstantsReady:
         var db: Node = get_node_or_null("/root/Database")
@@ -564,8 +541,6 @@ func send_full_state(peerId: int) -> void:
             continue
         if !obj.has_method(&"Interact"):
             continue
-        # obj is already narrowed to Door above; isOpen / locked / key are
-        # declared members — direct access avoids reflective .get() calls.
         var doorPath: String = scene.get_path_to(obj)
         sync_door_state.rpc_id(peerId, doorPath, obj.isOpen)
         if !obj.locked && obj.key:

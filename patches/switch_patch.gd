@@ -3,9 +3,7 @@
 extends "res://Scripts/Switch.gd"
 
 var _cm: Node
-## Cached scene-relative path to this switch. Stable for the node's lifetime;
-## computed once at _ready so Interact() doesn't recompute on every use
-## (get_path_to walks all ancestors).
+## Scene-relative path, cached at _ready.
 var _cachedPath: String = ""
 
 
@@ -13,8 +11,7 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
-## Switch.gd does not define _ready(), so per project rules we do NOT call
-## super._ready() — just populate our own cache.
+## Switch.gd has no _ready; do NOT call super._ready() per project rules.
 func _ready() -> void:
     _cachedPath = get_tree().current_scene.get_path_to(self)
 

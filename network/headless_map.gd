@@ -3,8 +3,7 @@
 ## isolates AI detection from the host's real GameData.
 extends Node
 
-## Emitted once the threaded scene load + finalize completes. Callers register
-## with CONNECT_ONE_SHOT and apply snapshot restore / start() only after success.
+## Emitted once the threaded scene load + finalize completes.
 signal setup_finished(success: bool)
 
 var _cm: Node
@@ -15,46 +14,28 @@ var proxyGameData: Resource = null
 var clientPeers: Array[int] = []
 var aiSyncIdCounter: int = 0
 var syncedAI: Dictionary[int, Node] = {}
-## Cached AISpawner references. Every map has its AISpawner at
-## [code]<map>/AI[/code], which owns exactly three Node3D children
-## ([code]A_Pool[/code], [code]B_Pool[/code], [code]Agents[/code]). Those
-## containers are stable for the whole headless-map lifetime — AI reparent
-## between them, but the containers themselves don't move. Resolved once in
-## [method _finalize_setup] and cleared in [method teardown], so every
-## subsequent lookup is a typed-var read instead of a get_node_or_null walk.
+## Cached AISpawner + pool refs. Resolved in _finalize_setup, cleared in teardown.
 var _aiSpawner: Node = null
 var _aiAPool: Node = null
 var _aiBPool: Node = null
 var _aiAgents: Node = null
-## Threaded-load state. While true, _process polls load_threaded_get_status each
-## frame until LOADED/FAILED, then toggles itself off. Scene parse (20-40MB of
-## meshes/deps) runs on a Godot worker thread; the blocking instantiate() call
-## happens on the main thread but can't be avoided in Godot 4.x.
+## Threaded-load state.
 var _loadInProgress: bool = false
 var _setupComplete: bool = false
 var _setupCancelled: bool = false
-## Per-peer position cache. Each value is a reused typed Array [pos, camPos, rot, flags]
-## so we don't allocate a fresh Dictionary on every 20Hz position update.
+## Per-peer slot array [pos, camPos, rot, flags] — reused to avoid per-tick alloc.
 var clientPositions: Dictionary[int, Array] = {}
 var savedSnapshot: Dictionary = {}
-## Cached AI centroid — invalidated once per physics frame. Avoids walking
-## all syncedAI N times per frame when N clients all call update_client_position
-## on the same tick (N*M → M work).
+## AI centroid — invalidated once per physics frame.
 var _centroidCache: Vector3 = Vector3.ZERO
 var _centroidCacheFrame: int = -1
 
 enum AIType { BANDIT, GUARD, MILITARY, PUNISHER }
 
-## Packed door state — [code]isOpen[/code] and [code]locked[/code] are the
-## only two fields [method extract_door_states] captures, so a bitmask is
-## strictly cheaper than the prior [code]{isOpen: bool, locked: bool}[/code]
-## nested dict: one int vs. a Dictionary allocation + two key/value slots
-## per door. Snapshot restore reads via bitwise AND.
+## Packed door state bitmask for extract_door_states / restore.
 enum DoorFlag { OPEN = 1, LOCKED = 2 }
 
-## Preloaded patched scripts keyed by original resource path. static so a single
-## load happens per mod session instead of per-SubViewport setup. Populated
-## lazily on first setup() after take_over_path has registered redirects.
+## Patched scripts keyed by original resource path. Populated once per mod session.
 static var _patchMap: Dictionary = {}
 static var _patchMapReady: bool = false
 
@@ -65,18 +46,13 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
-## Kicks off the threaded scene load. Returns true if the request was queued
-## successfully — the actual scene is not ready until [signal setup_finished]
-## fires. Callers must wait for that signal before calling [method start] or
-## [method restore].
+## Kicks off threaded scene load. Caller must await [signal setup_finished].
 func setup(path: String) -> bool:
     mapPath = path
     viewport = _make_headless_viewport(path)
     add_child(viewport)
 
-    # CACHE_MODE_REPLACE_DEEP forces dependency tree re-parse so ext_resources
-    # (like AI.gd) resolve through take_over_path redirects. Without this, AI
-    # prefabs cached before register_patches() keep their original script refs.
+    # CACHE_MODE_REPLACE_DEEP forces deps to resolve through take_over_path.
     var err: int = ResourceLoader.load_threaded_request(
         path, "PackedScene", true, ResourceLoader.CACHE_MODE_REPLACE_DEEP
     )
@@ -89,9 +65,7 @@ func setup(path: String) -> bool:
     return true
 
 
-## Polls threaded-load status on the main thread. Self-disables once the load
-## resolves. Cheap while active (one C++ atomic check + branch per frame);
-## zero cost after completion.
+## Polls threaded-load status; self-disables on completion.
 func _process(_delta: float) -> void:
     if !_loadInProgress:
         set_process(false)
@@ -108,9 +82,7 @@ func _process(_delta: float) -> void:
     _finalize_setup()
 
 
-## Runs after the threaded load completes. instantiate() still happens on the
-## main thread (Godot 4.x constraint) but parse/deps/texture decode were done
-## on a worker during the load phase.
+## Finalizes setup after the threaded load lands. instantiate() stays main-thread.
 func _finalize_setup() -> void:
     if _setupCancelled || !is_instance_valid(viewport):
         return
@@ -122,17 +94,13 @@ func _finalize_setup() -> void:
     mapScene = scene.instantiate()
     viewport.add_child(mapScene)
 
-    # Kill anything that doesn't belong in a headless simulation: the Core node
-    # (player/UI) and any WorldEnvironment (sky/glow/SSAO/SSR buffers even with
-    # UPDATE_DISABLED can hold GPU memory after environment assignment).
+    # Headless doesn't need player/UI (Core) or sky/glow buffers (WorldEnvironment).
     var core: Node = mapScene.get_node_or_null("Core")
     if core != null:
         core.queue_free()
     _strip_world_environments(mapScene)
 
-    # Belt-and-suspenders: reassign the patched script on every patched node class.
-    # This handles cases where the PackedScene already baked in the original script
-    # despite CACHE_MODE_REPLACE_DEEP (e.g., deeply nested instance references).
+    # Belt-and-suspenders — CACHE_MODE_REPLACE_DEEP misses deeply nested refs.
     _reassign_patched_scripts(mapScene)
 
     _inject_proxy_gamedata()
@@ -142,10 +110,7 @@ func _finalize_setup() -> void:
     setup_finished.emit(true)
 
 
-## Resolves the AISpawner and its three pool children once, right after the
-## scene finishes loading. Cleared in [method teardown]. Subsequent calls to
-## [method _get_all_ai_nodes] / [method _get_active_ai_nodes] read these
-## cached refs directly instead of walking the scene tree every time.
+## Resolves AISpawner and its three pool children. Cleared in teardown.
 func _cache_ai_spawner_refs() -> void:
     if mapScene == null:
         return
@@ -157,11 +122,9 @@ func _cache_ai_spawner_refs() -> void:
     _aiAgents = _aiSpawner.get_node_or_null("Agents")
 
 
-## Builds a SubViewport configured for maximum "do as little as possible"
-## mode — rendering is disabled, audio listeners off, all render buffers
-## zeroed so nothing is allocated for MSAA/glow/TAA/shadow atlas/etc.
-## Settings applied BEFORE add_child() to avoid Godot #102016 (own_world_3d
-## toggle after tree entry can crash).
+## Builds a SubViewport with rendering/audio/buffers fully disabled.
+## Settings applied BEFORE add_child() — Godot #102016 (own_world_3d after
+## tree entry can crash).
 func _make_headless_viewport(path: String) -> SubViewport:
     var vp: SubViewport = SubViewport.new()
     vp.name = "Headless_%s" % path.get_file().get_basename()
@@ -170,9 +133,7 @@ func _make_headless_viewport(path: String) -> SubViewport:
     vp.physics_object_picking = false
     vp.gui_disable_input = true
     vp.process_mode = Node.PROCESS_MODE_DISABLED
-    # Defensive render-buffer zeros — these don't allocate when
-    # UPDATE_DISABLED is set, but prevent regressions if a future code path
-    # flips update_mode. All free, no downside.
+    # Defensive buffer zeros — guard against future flips of update_mode.
     vp.audio_listener_enable_2d = false
     vp.audio_listener_enable_3d = false
     vp.msaa_2d = Viewport.MSAA_DISABLED
@@ -187,9 +148,7 @@ func _make_headless_viewport(path: String) -> SubViewport:
     return vp
 
 
-## Removes any WorldEnvironment nodes from the scene. These allocate sky/glow/
-## SSAO buffers on environment-assignment in some code paths, even though we
-## never render — useless GPU memory in a headless simulation.
+## Removes WorldEnvironment nodes — they allocate GPU buffers we never render.
 func _strip_world_environments(root: Node) -> void:
     for child: Node in root.get_children():
         if child is WorldEnvironment:
@@ -206,21 +165,15 @@ func start() -> void:
     _log("SubViewport started for %s" % mapPath)
 
 
-## Walks the newly-instantiated scene and force-reassigns patched scripts onto
-## each matching node. Required because PackedScenes bake in Script references
-## at load time — scenes cached before CoopManager.register_patches() still
-## reference the original scripts even though take_over_path has redirected
-## the paths. Resolving via load() picks up the redirect, then set_script
-## replaces the baked-in reference.
+## Reassigns patched scripts onto baked-in PackedScene references that
+## take_over_path redirected after the scene was cached.
 func _reassign_patched_scripts(root: Node) -> void:
     if !_patchMapReady:
         _init_patch_map()
     _walk_and_reassign(root)
 
 
-## Populates the shared static _patchMap. Called once per mod session.
-## Must run AFTER CoopManager.register_patches() so load() resolves through
-## take_over_path redirects to the patched scripts.
+## Populates _patchMap. Must run after CoopManager.register_patches().
 static func _init_patch_map() -> void:
     if _patchMapReady:
         return
@@ -244,8 +197,7 @@ func _walk_and_reassign(node: Node) -> void:
         var origPath: String = script.resource_path
         if origPath in _patchMap:
             var patched: Script = _patchMap[origPath]
-            # Only reassign if the currently-assigned script is not already the
-            # patched version (avoids redundant work and potential state loss).
+            # Skip if already patched — avoids redundant work and state loss.
             if patched != null && script != patched:
                 node.set_script(patched)
     for child: Node in node.get_children():
@@ -277,10 +229,7 @@ func _register_ai_sync_ids() -> void:
         aiSyncIdCounter += 1
         node.set_meta(_M_AI_SYNC_ID, aiSyncIdCounter)
         node.set_meta(_M_AI_TYPE, _get_ai_type(node))
-        # Self-cleaning registry: when the AI node leaves the tree (queue_free
-        # from AISpawner, scene unload, etc.), the bound sync id gets erased
-        # from syncedAI immediately. Avoids building a toErase list during
-        # every extract_ai_state call to collect dead refs lazily.
+        # Self-cleaning via tree_exiting — no per-tick dead-ref scan.
         node.tree_exiting.connect(_on_ai_tree_exiting.bind(aiSyncIdCounter))
         syncedAI[aiSyncIdCounter] = node
 
@@ -289,11 +238,7 @@ func _on_ai_tree_exiting(syncId: int) -> void:
     syncedAI.erase(syncId)
 
 
-## Returns every AI node in the map — pools + active. Used for sync-id
-## registration (needs to see pool AI so later spawns already have their id
-## and type meta) and for restore's pool-by-type bucketing (fresh scene has
-## most AI back in the pools). Reads the cached container refs populated by
-## [method _cache_ai_spawner_refs]; no scene walk.
+## Every AI in the map — pools + active.
 func _get_all_ai_nodes() -> Array[Node]:
     var result: Array[Node] = []
     for holder: Node in [_aiAPool, _aiBPool, _aiAgents]:
@@ -305,20 +250,15 @@ func _get_all_ai_nodes() -> Array[Node]:
 
 
 ## Active (currently-spawned) AI only — the Agents child of the spawner.
-## Used by extract_ai_state's live RPC path where paused pool AI would be
-## filtered out anyway.
+## Active AI only (Agents child) — paused pool AI excluded.
 func _get_active_ai_nodes() -> Array[Node]:
     if !is_instance_valid(_aiAgents):
         return []
     return _aiAgents.get_children()
 
 
-## AI scene paths follow a fixed shape: [code]res://AI/<Type>/AI_<Type>.tscn[/code]
-## where [code]<Type>[/code] is Bandit / Guard / Military / Punisher. The first
-## character after the [code]res://AI/[/code] prefix (index 9) is therefore
-## unique per type — B / G / M / P — so a single indexed char compare gives
-## the enum value with no hashing or substring scan.
-const _AI_PATH_TYPE_IDX: int = 9  # length of "res://AI/"
+## Index of the type char in [code]res://AI/<Type>/...[/code]. B/G/M/P → AIType.
+const _AI_PATH_TYPE_IDX: int = 9
 
 
 func _get_ai_type(node: Node) -> AIType:
@@ -351,9 +291,7 @@ func remove_client(peerId: int) -> void:
 # ---------- Position Injection ----------
 
 
-## Index slots inside the reused Array[Variant] held in clientPositions.
-## Accessing by fixed int index avoids Dictionary string-key hashing that
-## the old { "pos": ..., "camPos": ... } version paid on every 20Hz update.
+## Fixed slot indices for the reused clientPositions Array.
 const _CP_POS: int = 0
 const _CP_CAM: int = 1
 const _CP_ROT: int = 2
@@ -363,7 +301,6 @@ const _CP_FLAGS: int = 3
 func update_client_position(peerId: int, pos: Vector3, camPos: Vector3, rot: Vector3, flags: int) -> void:
     if proxyGameData == null:
         return
-    # Reuse the slot array for this peer — no per-call Dictionary allocation.
     var slot: Array = clientPositions.get(peerId)
     if slot == null:
         slot = [pos, camPos, rot, flags]
@@ -377,8 +314,7 @@ func update_client_position(peerId: int, pos: Vector3, camPos: Vector3, rot: Vec
     if clientPositions.size() == 1:
         _apply_client_to_proxy(pos, camPos, rot, flags)
         return
-    # Multiple clients: pick the one nearest the AI centroid. Centroid is the
-    # running sum maintained elsewhere — no per-call tree walk.
+    # Multiple clients: pick the one nearest the AI centroid.
     var centroid: Vector3 = _get_ai_centroid()
     var nearestDist: float = INF
     var nearest: Array
@@ -435,11 +371,7 @@ func _get_ai_centroid() -> Vector3:
 # ---------- AI State Extraction ----------
 
 
-## Builds the canonical per-AI state dict. Shared by [method extract_ai_state]
-## (live sync to clients) and [method snapshot] (map teardown). Uses [code]&"key"[/code]
-## StringName literals — interned at compile time. Consumers reading with plain
-## [code]"key"[/code] Strings still match, because Godot 4 treats String and
-## StringName as equivalent Dictionary keys.
+## Canonical per-AI state dict, shared by extract_ai_state + snapshot.
 func _build_ai_state_dict(syncId: int, ai: Node) -> Dictionary:
     var curState: Variant = ai.get(_P_CURRENT_STATE)
     var speed: Variant = ai.get(_P_MOVEMENT_SPEED)
@@ -462,14 +394,9 @@ func extract_ai_state() -> Array[Dictionary]:
     var states: Array[Dictionary] = []
     for syncId: int in syncedAI:
         var ai: Node = syncedAI[syncId]
-        # is_instance_valid remains as a belt-and-suspenders guard — the
-        # tree_exiting hook in _register_ai_sync_ids should have already
-        # removed any freed AI, but nodes can be marked invalid between
-        # queue_free() and the signal firing.
+        # Guard against the gap between queue_free and tree_exiting firing.
         if !is_instance_valid(ai):
             continue
-        # Live sync: skip dead and paused — paused AI have no meaningful state
-        # for clients to replicate, and dead AI are already removed via RPC.
         if ai.get(_P_DEAD) == true || ai.get(_P_PAUSE) == true:
             continue
         states.append(_build_ai_state_dict(syncId, ai))
@@ -505,7 +432,6 @@ func extract_door_states() -> Dictionary[NodePath, int]:
             continue
         if !mapScene.is_ancestor_of(obj):
             continue
-        # obj is narrowed to Door; isOpen / locked are declared members.
         var door: Door = obj
         var flags: int = 0
         if door.isOpen:
@@ -549,8 +475,7 @@ func snapshot() -> Dictionary:
     }
 
 
-## Captures all items in the headless scene for transfer to the real scene.
-## Each entry stores the item file path, position/rotation, and SlotData resource.
+## Captures items in the headless scene for transfer on handoff.
 func extract_item_states() -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     if mapScene == null:
@@ -572,22 +497,12 @@ func extract_item_states() -> Array[Dictionary]:
     return result
 
 
-## How many items each restore pass processes before yielding back to the
-## main loop. Keeps worst-case per-frame cost bounded on very large maps
-## (thousands of doors/switches/AI) — every CHUNK iterations, relinquish the
-## frame so rendering and input stay responsive. 64 is a common sweet spot:
-## large enough that tiny maps finish in one chunk, small enough that huge
-## maps split cleanly.
+## Yield cadence for restore passes — caps per-frame cost on large maps.
 const _RESTORE_CHUNK: int = 64
 
 
-## Async restore — scene-tree mutations can't go to a worker thread (every
-## operation touches Node state), but the three passes (doors, switches, AI)
-## are independent and operate on disjoint data, so each runs on its own
-## frame via [code]await[/code]. Each pass additionally yields every
-## _RESTORE_CHUNK iterations so its per-frame cost is bounded regardless of
-## map size. Callers don't await — the headless map isn't visible to the
-## host, so spreading the work across several frames is imperceptible.
+## Async restore — doors/switches/AI each on their own frame, yielding every
+## _RESTORE_CHUNK iterations within. Callers don't await (headless, invisible).
 func restore(snap: Dictionary) -> void:
     if mapScene == null:
         return
@@ -659,11 +574,7 @@ func _restore_switches(switches: Dictionary) -> void:
                 return
 
 
-## Bucket the pool by AI type once so each snapshot consumes a node in O(1)
-## via pop_back. Old version nested (aiSnaps × poolAI) with an `ai in
-## usedNodes` linear scan on top — effectively O(S² · P). New version is
-## O(S + P) and calls _get_ai_type once per pool entry instead of once per
-## (snapshot × candidate) pair. Returns the restored count for logging.
+## Bucket pool by AI type once — O(S+P) match via pop_back.
 func _restore_ai(aiSnaps: Array) -> int:
     var poolByType: Dictionary = {}
     for ai: Node in _get_all_ai_nodes():

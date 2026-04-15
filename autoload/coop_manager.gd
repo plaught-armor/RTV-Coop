@@ -305,7 +305,7 @@ func disconnect_session() -> void:
     peerNames.clear()
     peerSteamIDs.clear()
     peerMaps.clear()
-    for mapPath: String in headlessMaps.keys():
+    for mapPath: String in headlessMaps:
         var hmap: Node = headlessMaps[mapPath]
         hmap.teardown()
         hmap.queue_free()
@@ -570,13 +570,16 @@ func on_scene_changed() -> void:
     if isHost && wasOnMenu && !_wasOnMenu:
         var mapName: String = _get_current_map_name()
         sync_game_start.rpc(mapName)
-    # Despawn remote players from the old map
-    for peerId: int in remoteNodes.keys():
+    # Despawn peers on other maps. Two-phase to avoid mutating during iteration.
+    var toErase: Array[int] = []
+    for peerId: int in remoteNodes:
         if !is_peer_on_same_map(peerId):
-            var node: Node3D = remoteNodes[peerId]
-            if is_instance_valid(node):
-                node.queue_free()
-            remoteNodes.erase(peerId)
+            toErase.append(peerId)
+    for peerId: int in toErase:
+        var node: Node3D = remoteNodes[peerId]
+        if is_instance_valid(node):
+            node.queue_free()
+        remoteNodes.erase(peerId)
     ensure_all_spawned()
     # Reset tracking state from the PREVIOUS scene before registering the new one
     aiState.clear()

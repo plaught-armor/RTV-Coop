@@ -16,8 +16,7 @@ func _ready() -> void:
     super._ready()
 
 
-## Lazy lookup of CoopManager — needed because inject_manager may not have
-## reached this Transition node yet when the player interacts.
+## Lazy CoopManager lookup — inject_manager may not have reached this node yet.
 func _ensure_cm() -> void:
     if is_instance_valid(_cm):
         return

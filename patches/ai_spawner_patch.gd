@@ -209,8 +209,7 @@ func _min_player_distance(pos: Vector3) -> float:
     return minDist
 
 
-## Lazy lookup for CoopManager if inject_manager hasn't run yet.
-## Walks root children to find it — Metro Mod Loader autoloads aren't in ProjectSettings.
+## Lazy CoopManager lookup — Metro autoloads aren't in ProjectSettings.
 func _ensure_cm() -> void:
     if is_instance_valid(_cm):
         return

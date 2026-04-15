@@ -4,9 +4,7 @@
 extends "res://Scripts/LootContainer.gd"
 
 var _cm: Node
-## Cached scene-relative path to this container. Stable for the node's lifetime;
-## computed once at _ready so Interact() doesn't recompute on every open
-## (get_path_to walks all ancestors).
+## Scene-relative path, cached at _ready.
 var _cachedPath: String = ""
 
 

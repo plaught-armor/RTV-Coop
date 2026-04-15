@@ -104,16 +104,14 @@ func update_pings() -> void:
         return
     var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
 
+    # Rebuild each tick — no stale entries possible, no scan needed.
+    peerPings.clear()
     for peerId: int in _cm.connectedPeers:
         var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
         if enetPeer != null:
             peerPings[peerId] = roundi(
                 enetPeer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME),
             )
-
-    for peerId: int in peerPings.keys():
-        if peerId not in _cm.connectedPeers:
-            peerPings.erase(peerId)
 
 
 func update_player_labels() -> void:

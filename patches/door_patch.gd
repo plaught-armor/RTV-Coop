@@ -3,9 +3,7 @@
 extends "res://Scripts/Door.gd"
 
 var _cm: Node
-## Cached scene-relative path to this door. Stable for the node's lifetime
-## in the scene; computed once at _ready so Interact() / CheckKey() don't
-## recompute it on every interaction (get_path_to walks all ancestors).
+## Scene-relative path, cached at _ready.
 var _cachedPath: String = ""
 
 
@@ -18,9 +16,7 @@ func _ready():
     _cachedPath = get_tree().current_scene.get_path_to(self)
 
 
-## Lazy lookup of CoopManager by walking root children. Needed because
-## inject_manager() may not have reached this door yet when AI calls Interact()
-## immediately after Initialize (e.g., combat state opens a door on first frame).
+## Lazy CoopManager lookup — inject_manager may not have reached this node yet.
 func _ensure_cm() -> void:
     if is_instance_valid(_cm):
         return

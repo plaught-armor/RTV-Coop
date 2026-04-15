@@ -8,10 +8,7 @@
 extends Node
 
 var _cm: Node
-## Cached local player refs refreshed per scene transition. Every damage RPC
-## previously did get_tree().current_scene.get_node_or_null("Core/Controller")
-## + get_child(0); damage fires under combat bursts, so resolving those once
-## per scene change is cheaper than per-hit. Mirrors world_state's pattern.
+## Cached local player refs, refreshed per scene transition.
 var _controller: Node = null
 var _character: Node = null
 
@@ -20,8 +17,7 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
-## Called from [method CoopManager.on_scene_changed] after every scene
-## transition. Scene refs are stable until the next transition.
+## Called from [method CoopManager.on_scene_changed].
 func refresh_scene_cache() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
