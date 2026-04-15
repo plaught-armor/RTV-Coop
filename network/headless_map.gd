@@ -277,7 +277,8 @@ func _get_ai_type(node: Node) -> int:
             return AIType.MILITARY
         "P":
             return AIType.PUNISHER
-    return AIType.BANDIT
+        _:
+            return AIType.BANDIT
 
 # ---------- Client Management ----------
 
@@ -382,6 +383,29 @@ func _get_ai_centroid() -> Vector3:
 # ---------- AI State Extraction ----------
 
 
+## Builds the canonical per-AI state dict. Shared by [method extract_ai_state]
+## (live sync to clients) and [method snapshot] (map teardown). Uses [code]&"key"[/code]
+## StringName literals — interned at compile time. Consumers reading with plain
+## [code]"key"[/code] Strings still match, because Godot 4 treats String and
+## StringName as equivalent Dictionary keys.
+func _build_ai_state_dict(syncId: int, ai: Node) -> Dictionary:
+    var curState: Variant = ai.get(_P_CURRENT_STATE)
+    var speed: Variant = ai.get(_P_MOVEMENT_SPEED)
+    var moveRot: Variant = ai.get(_P_MOVEMENT_ROTATION)
+    var health: Variant = ai.get(_P_HEALTH)
+    return {
+        &"id": syncId,
+        &"type": ai.get_meta(_M_AI_TYPE, 0),
+        &"pos": ai.global_position,
+        &"rot_y": ai.global_rotation.y,
+        &"state": curState if curState != null else 0,
+        &"speed": speed if speed != null else 0.0,
+        &"move_rot": moveRot if moveRot != null else 0.0,
+        &"health": health if health != null else 100,
+        &"dead": ai.get(_P_DEAD) == true,
+    }
+
+
 func extract_ai_state() -> Array[Dictionary]:
     var states: Array[Dictionary] = []
     var toErase: Array[int] = []
@@ -390,24 +414,11 @@ func extract_ai_state() -> Array[Dictionary]:
         if !is_instance_valid(ai):
             toErase.append(syncId)
             continue
-        var isDead: Variant = ai.get(_P_DEAD)
-        if isDead == true || ai.get(_P_PAUSE) == true:
+        # Live sync: skip dead and paused — paused AI have no meaningful state
+        # for clients to replicate, and dead AI are already removed via RPC.
+        if ai.get(_P_DEAD) == true || ai.get(_P_PAUSE) == true:
             continue
-        var curState: Variant = ai.get(_P_CURRENT_STATE)
-        var speed: Variant = ai.get(_P_MOVEMENT_SPEED)
-        var moveRot: Variant = ai.get(_P_MOVEMENT_ROTATION)
-        var health: Variant = ai.get(_P_HEALTH)
-        states.append({
-            "id": syncId,
-            "type": ai.get_meta(_M_AI_TYPE, 0),
-            "pos": ai.global_position,
-            "rot_y": ai.global_rotation.y,
-            "state": curState if curState != null else 0,
-            "speed": speed if speed != null else 0.0,
-            "move_rot": moveRot if moveRot != null else 0.0,
-            "health": health if health != null else 100,
-            "dead": isDead == true,
-        })
+        states.append(_build_ai_state_dict(syncId, ai))
     for id: int in toErase:
         syncedAI.erase(id)
     return states
@@ -423,9 +434,9 @@ func get_new_spawns() -> Array[Dictionary]:
             continue
         ai.set_meta(_M_SPAWN_NOTIFIED, true)
         spawns.append({
-            "id": syncId,
-            "type": ai.get_meta(_M_AI_TYPE, 0),
-            "pos": ai.global_position,
+            &"id": syncId,
+            &"type": ai.get_meta(_M_AI_TYPE, 0),
+            &"pos": ai.global_position,
         })
     return spawns
 
@@ -444,8 +455,8 @@ func extract_door_states() -> Dictionary:
             continue
         var doorPath: String = mapScene.get_path_to(obj)
         doors[doorPath] = {
-            "isOpen": obj.get("isOpen") if obj.get("isOpen") != null else false,
-            "locked": obj.get("locked") if obj.get("locked") != null else false,
+            &"isOpen": obj.get(&"isOpen") if obj.get(&"isOpen") != null else false,
+            &"locked": obj.get(&"locked") if obj.get(&"locked") != null else false,
         }
     return doors
 
@@ -461,33 +472,27 @@ func extract_switch_states() -> Dictionary:
         if !mapScene.is_ancestor_of(obj):
             continue
         var switchPath: String = mapScene.get_path_to(obj)
-        switches[switchPath] = obj.get("active") if obj.get("active") != null else false
+        switches[switchPath] = obj.get(&"active") if obj.get(&"active") != null else false
     return switches
 
 # ---------- Snapshot / Restore ----------
 
 
 func snapshot() -> Dictionary:
-    var snap: Dictionary = {
-        "ai": [],
-        "doors": extract_door_states(),
-        "switches": extract_switch_states(),
-        "items": extract_item_states(),
-    }
+    var aiStates: Array[Dictionary] = []
     for syncId: int in syncedAI:
         var ai: Node = syncedAI[syncId]
+        # Snapshot keeps paused AI (they'll resume paused on restore); only
+        # skip invalid or dead.
         if !is_instance_valid(ai) || ai.get(_P_DEAD) == true:
             continue
-        var curState: Variant = ai.get(_P_CURRENT_STATE)
-        var health: Variant = ai.get(_P_HEALTH)
-        snap["ai"].append({
-            "type": ai.get_meta(_M_AI_TYPE, 0),
-            "pos": ai.global_position,
-            "rot_y": ai.global_rotation.y,
-            "state": curState if curState != null else 0,
-            "health": health if health != null else 100,
-        })
-    return snap
+        aiStates.append(_build_ai_state_dict(syncId, ai))
+    return {
+        &"ai": aiStates,
+        &"doors": extract_door_states(),
+        &"switches": extract_switch_states(),
+        &"items": extract_item_states(),
+    }
 
 
 ## Captures all items in the headless scene for transfer to the real scene.
@@ -505,10 +510,10 @@ func extract_item_states() -> Array[Dictionary]:
         if slotData == null || slotData.itemData == null:
             continue
         result.append({
-            "file": slotData.itemData.file,
-            "pos": node.global_position,
-            "rot": node.global_rotation,
-            "slotData": slotData,
+            &"file": slotData.itemData.file,
+            &"pos": node.global_position,
+            &"rot": node.global_rotation,
+            &"slotData": slotData,
         })
     return result
 
