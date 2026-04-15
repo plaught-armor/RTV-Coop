@@ -570,12 +570,22 @@ func extract_item_states() -> Array[Dictionary]:
     return result
 
 
+## How many items each restore pass processes before yielding back to the
+## main loop. Keeps worst-case per-frame cost bounded on very large maps
+## (thousands of doors/switches/AI) — every CHUNK iterations, relinquish the
+## frame so rendering and input stay responsive. 64 is a common sweet spot:
+## large enough that tiny maps finish in one chunk, small enough that huge
+## maps split cleanly.
+const _RESTORE_CHUNK: int = 64
+
+
 ## Async restore — scene-tree mutations can't go to a worker thread (every
 ## operation touches Node state), but the three passes (doors, switches, AI)
 ## are independent and operate on disjoint data, so each runs on its own
-## frame via [code]await[/code]. Callers don't await — the headless map
-## isn't visible to the host, so spreading the work across 3 frames is
-## imperceptible and keeps each frame's budget light.
+## frame via [code]await[/code]. Each pass additionally yields every
+## _RESTORE_CHUNK iterations so its per-frame cost is bounded regardless of
+## map size. Callers don't await — the headless map isn't visible to the
+## host, so spreading the work across several frames is imperceptible.
 func restore(snap: Dictionary) -> void:
     if mapScene == null:
         return
@@ -583,25 +593,27 @@ func restore(snap: Dictionary) -> void:
     var switches: Dictionary = snap.get("switches", {})
     var aiSnaps: Array = snap.get("ai", [])
 
-    _restore_doors(doors)
+    await _restore_doors(doors)
     if !is_instance_valid(mapScene):
         return
 
-    # Frame 2: switches. Independent of doors (different node group, different
+    # Frame 2+: switches. Independent of doors (different node group, different
     # state), so no ordering dependency forces co-location.
     await get_tree().process_frame
     if !is_instance_valid(mapScene):
         return
-    _restore_switches(switches)
+    await _restore_switches(switches)
+    if !is_instance_valid(mapScene):
+        return
 
-    # Frame 3: AI. Heaviest pass — walks the whole scene tree to bucket the
-    # pool. Last because it's the most expensive and also the least visually
-    # important (AI in headless maps aren't being watched).
+    # Frame 3+: AI. Heaviest pass — iterates the cached pool containers to
+    # bucket by type. Last because it's the most expensive and also the least
+    # visually important (AI in headless maps aren't being watched).
     if !aiSnaps.is_empty():
         await get_tree().process_frame
         if !is_instance_valid(mapScene):
             return
-        var restored: int = _restore_ai(aiSnaps)
+        var restored: int = await _restore_ai(aiSnaps)
         _log("Restored %d AI, %d doors, %d switches from snapshot" % [
             restored, doors.size(), switches.size()
         ])
@@ -612,27 +624,37 @@ func restore(snap: Dictionary) -> void:
 
 
 func _restore_doors(doors: Dictionary) -> void:
+    var i: int = 0
     for doorPath: NodePath in doors:
         var door: Node = mapScene.get_node_or_null(doorPath)
-        if !is_instance_valid(door) || !(door is Door):
-            continue
-        var flags: int = doors[doorPath]
-        door.isOpen = (flags & DoorFlag.OPEN) != 0
-        door.locked = (flags & DoorFlag.LOCKED) != 0
-        if door.isOpen:
-            door.animationTime = 4.0
+        if is_instance_valid(door) && door is Door:
+            var flags: int = doors[doorPath]
+            door.isOpen = (flags & DoorFlag.OPEN) != 0
+            door.locked = (flags & DoorFlag.LOCKED) != 0
+            if door.isOpen:
+                door.animationTime = 4.0
+        i += 1
+        if i % _RESTORE_CHUNK == 0:
+            await get_tree().process_frame
+            if !is_instance_valid(mapScene):
+                return
 
 
 func _restore_switches(switches: Dictionary) -> void:
+    var i: int = 0
     for switchPath: NodePath in switches:
         var sw: Node = mapScene.get_node_or_null(switchPath)
-        if !is_instance_valid(sw) || !sw.has_method("Activate"):
-            continue
-        var active: bool = switches[switchPath]
-        if active && !sw.active:
-            sw.Activate()
-        elif !active && sw.active:
-            sw.Deactivate()
+        if is_instance_valid(sw) && sw.has_method("Activate"):
+            var active: bool = switches[switchPath]
+            if active && !sw.active:
+                sw.Activate()
+            elif !active && sw.active:
+                sw.Deactivate()
+        i += 1
+        if i % _RESTORE_CHUNK == 0:
+            await get_tree().process_frame
+            if !is_instance_valid(mapScene):
+                return
 
 
 ## Bucket the pool by AI type once so each snapshot consumes a node in O(1)
@@ -648,16 +670,21 @@ func _restore_ai(aiSnaps: Array) -> int:
             poolByType[t] = []
         poolByType[t].append(ai)
     var restored: int = 0
+    var i: int = 0
     for aiSnap: Dictionary in aiSnaps:
         var bucket: Array = poolByType.get(aiSnap.get("type", 0), [])
-        if bucket.is_empty():
-            continue
-        var matched: Node = bucket.pop_back()
-        matched.global_position = aiSnap.get("pos", Vector3.ZERO)
-        matched.global_rotation.y = aiSnap.get("rot_y", 0.0)
-        if "health" in matched:
-            matched.health = aiSnap.get("health", 100)
-        restored += 1
+        if !bucket.is_empty():
+            var matched: Node = bucket.pop_back()
+            matched.global_position = aiSnap.get("pos", Vector3.ZERO)
+            matched.global_rotation.y = aiSnap.get("rot_y", 0.0)
+            if "health" in matched:
+                matched.health = aiSnap.get("health", 100)
+            restored += 1
+        i += 1
+        if i % _RESTORE_CHUNK == 0:
+            await get_tree().process_frame
+            if !is_instance_valid(mapScene):
+                return restored
     return restored
 
 
