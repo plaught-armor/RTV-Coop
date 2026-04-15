@@ -4,6 +4,10 @@
 extends "res://Scripts/LootContainer.gd"
 
 var _cm: Node
+## Cached scene-relative path to this container. Stable for the node's lifetime;
+## computed once at _ready so Interact() doesn't recompute on every open
+## (get_path_to walks all ancestors).
+var _cachedPath: String = ""
 
 
 func init_manager(manager: Node) -> void:
@@ -12,6 +16,7 @@ func init_manager(manager: Node) -> void:
 
 func _ready():
     super._ready()
+    _cachedPath = get_tree().current_scene.get_path_to(self)
 
 
 func Interact():
@@ -19,7 +24,7 @@ func Interact():
         super.Interact()
         return
 
-    var containerPath: String = get_tree().current_scene.get_path_to(self)
+    var containerPath: String = _cachedPath
     if _cm.isHost:
         super.Interact()
         var packedLoot: Array[Dictionary] = _cm.SlotSerializerScript.pack_array(loot)

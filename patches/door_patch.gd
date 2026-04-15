@@ -3,6 +3,10 @@
 extends "res://Scripts/Door.gd"
 
 var _cm: Node
+## Cached scene-relative path to this door. Stable for the node's lifetime
+## in the scene; computed once at _ready so Interact() / CheckKey() don't
+## recompute it on every interaction (get_path_to walks all ancestors).
+var _cachedPath: String = ""
 
 
 func init_manager(manager: Node) -> void:
@@ -11,6 +15,7 @@ func init_manager(manager: Node) -> void:
 
 func _ready():
     super._ready()
+    _cachedPath = get_tree().current_scene.get_path_to(self)
 
 
 ## Lazy lookup of CoopManager by walking root children. Needed because
@@ -34,7 +39,7 @@ func Interact():
         super.Interact()
         return
 
-    var doorPath: String = get_tree().current_scene.get_path_to(self)
+    var doorPath: String = _cachedPath
     if _cm.isHost:
         super.Interact()
         _cm.worldState.sync_door_state.rpc(doorPath, isOpen)
@@ -51,12 +56,12 @@ func CheckKey():
     if _cm.isHost:
         super.CheckKey()
         if !locked:
-            var doorPath: String = get_tree().current_scene.get_path_to(self)
+            var doorPath: String = _cachedPath
             _cm.worldState.sync_door_unlock.rpc(doorPath)
             if is_instance_valid(linked):
                 var linkedPath: String = get_tree().current_scene.get_path_to(linked)
                 _cm.worldState.sync_door_unlock.rpc(linkedPath)
     else:
         # Clients request host to check key — don't consume locally
-        var doorPath: String = get_tree().current_scene.get_path_to(self)
+        var doorPath: String = _cachedPath
         _cm.worldState.request_door_interact.rpc_id(1, doorPath)
