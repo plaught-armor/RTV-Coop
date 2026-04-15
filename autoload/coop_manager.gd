@@ -409,26 +409,26 @@ func on_server_disconnected() -> void:
 
 
 func on_lobby_created(response: Dictionary) -> void:
-    if !response.get("ok", false):
-        _log("Lobby creation failed: %s" % response.get("error", "unknown"))
+    if !response.get(&"ok", false):
+        _log("Lobby creation failed: %s" % response.get(&"error", "unknown"))
         return
-    var lobbyID: String = response.get("data", { }).get("lobby_id", "")
+    var lobbyID: String = response.get(&"data", { }).get(&"lobby_id", "")
     _log("Steam lobby created: %s" % lobbyID)
     _update_lobby_data()
 
 
 func on_p2p_host_ready(response: Dictionary) -> void:
-    if !response.get("ok", false):
-        _log("P2P host failed: %s" % response.get("error", "unknown"))
+    if !response.get(&"ok", false):
+        _log("P2P host failed: %s" % response.get(&"error", "unknown"))
         return
     _log("P2P host listening for Steam peers")
 
 
 func on_p2p_tunnel_ready(response: Dictionary) -> void:
-    if !response.get("ok", false):
-        _log("P2P tunnel failed: %s" % response.get("error", "unknown"))
+    if !response.get(&"ok", false):
+        _log("P2P tunnel failed: %s" % response.get(&"error", "unknown"))
         return
-    var tunnelPort: int = response.get("data", { }).get("tunnel_port", 0)
+    var tunnelPort: int = response.get(&"data", { }).get(&"tunnel_port", 0)
     if tunnelPort == 0:
         _log("P2P tunnel returned invalid port")
         return
@@ -522,7 +522,7 @@ func spawn_remote_player(peerId: int) -> void:
 
     var remote: Node3D = remotePlayerScene.instantiate()
     remote.name = "RemotePlayer_%d" % peerId
-    remote.set_meta("peer_id", peerId)
+    remote.set_meta(&"peer_id", peerId)
     remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
     remote.init_manager(self)
@@ -554,6 +554,11 @@ func on_scene_changed() -> void:
     _wasOnMenu = _is_on_menu()
     _autoLoadInProgress = false
     inject_manager()
+    # Refresh world_state's scene-ref cache — its RPC handlers consult
+    # _currentScene / _uiManager / _interface instead of walking
+    # get_tree().current_scene on every call.
+    if worldState != null:
+        worldState.refresh_scene_cache()
     if !is_session_active():
         return
     var currentMap: String = get_current_map()
@@ -620,55 +625,55 @@ func inject_manager() -> void:
 
     # Controller — known path
     var controller: Node = scene.get_node_or_null("Core/Controller")
-    if controller != null && controller.has_method("init_manager"):
+    if controller != null && controller.has_method(&"init_manager"):
         controller.init_manager(self)
 
     # Character — vitals/death handler
     var character: Node = scene.get_node_or_null("Core/Controller/Character")
-    if character != null && character.has_method("init_manager"):
+    if character != null && character.has_method(&"init_manager"):
         character.init_manager(self)
 
     # Interface — inventory UI
     var iface: Node = scene.get_node_or_null("Core/UI/Interface")
-    if iface != null && iface.has_method("init_manager"):
+    if iface != null && iface.has_method(&"init_manager"):
         iface.init_manager(self)
 
     # Settings — pause menu (settings_patch adds Multiplayer tab)
     var settings: Node = scene.get_node_or_null("Core/UI/Settings")
-    if settings != null && settings.has_method("init_manager"):
+    if settings != null && settings.has_method(&"init_manager"):
         settings.init_manager(self)
 
     # Interactables: Doors, LootContainers
-    for node: Node in get_tree().get_nodes_in_group("Interactable"):
+    for node: Node in get_tree().get_nodes_in_group(&"Interactable"):
         var obj: Node = node.owner if node.owner != null else node
-        if obj.has_method("init_manager"):
+        if obj.has_method(&"init_manager"):
             obj.init_manager(self)
 
     # Items: Pickups
-    for node: Node in get_tree().get_nodes_in_group("Item"):
-        if node.has_method("init_manager"):
+    for node: Node in get_tree().get_nodes_in_group(&"Item"):
+        if node.has_method(&"init_manager"):
             node.init_manager(self)
 
     # Switches
-    for node: Node in get_tree().get_nodes_in_group("Switch"):
+    for node: Node in get_tree().get_nodes_in_group(&"Switch"):
         var obj: Node = node.owner if node.owner != null else node
-        if obj.has_method("init_manager"):
+        if obj.has_method(&"init_manager"):
             obj.init_manager(self)
 
     # Transitions
-    for node: Node in get_tree().get_nodes_in_group("Transition"):
+    for node: Node in get_tree().get_nodes_in_group(&"Transition"):
         var obj: Node = node.owner if node.owner != null else node
-        if obj.has_method("init_manager"):
+        if obj.has_method(&"init_manager"):
             obj.init_manager(self)
 
     # AISpawner — at /root/Map/AI in game scenes
     var spawner: Node = scene.get_node_or_null("AI")
-    if spawner != null && spawner.has_method("init_manager"):
+    if spawner != null && spawner.has_method(&"init_manager"):
         spawner.init_manager(self)
 
     # AI agents — inject into any already-active agents
-    for node: Node in get_tree().get_nodes_in_group("AI"):
-        if node.has_method("init_manager"):
+    for node: Node in get_tree().get_nodes_in_group(&"AI"):
+        if node.has_method(&"init_manager"):
             node.init_manager(self)
 
     # Main menu — apply co-op customization directly to the running instance
@@ -721,7 +726,7 @@ func _customize_menu(menu: Node) -> void:
 
 
 func _on_singleplayer_pressed(menu: Node) -> void:
-    if menu.has_method("PlayClick"):
+    if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     # Should be impossible (button only exists on the main menu and a live
     # session means you're in-game), but guard anyway — wipe_user_saves()
@@ -743,7 +748,7 @@ func _on_singleplayer_pressed(menu: Node) -> void:
 
 
 func _on_multiplayer_pressed(menu: Node) -> void:
-    if menu.has_method("PlayClick"):
+    if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     var main: Node = menu.get_node_or_null("Main")
     var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
@@ -844,7 +849,7 @@ func _mp_submenu_button(btnText: String) -> Button:
 
 
 func _on_mp_host_pressed(menu: Node) -> void:
-    if menu.has_method("PlayClick"):
+    if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
     if submenu != null:
@@ -854,7 +859,7 @@ func _on_mp_host_pressed(menu: Node) -> void:
 
 
 func _on_mp_browse_pressed(menu: Node) -> void:
-    if menu.has_method("PlayClick"):
+    if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
     if submenu != null:
@@ -868,7 +873,7 @@ func _on_mp_logs_pressed() -> void:
 
 
 func _on_mp_back_pressed(menu: Node) -> void:
-    if menu.has_method("PlayClick"):
+    if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
     var main: Node = menu.get_node_or_null("Main")
@@ -1203,9 +1208,9 @@ func _run_log_snapshot(snapDir: String, sources: PackedStringArray, info: Dictio
     var infoFile: FileAccess = FileAccess.open(snapDir + "info.txt", FileAccess.WRITE)
     if infoFile != null:
         infoFile.store_line("RTV Co-op Mod log snapshot")
-        infoFile.store_line("Timestamp: %s" % info.get("stamp", ""))
-        infoFile.store_line("OS: %s" % info.get("os", ""))
-        infoFile.store_line("Godot: %s" % info.get("godot", ""))
+        infoFile.store_line("Timestamp: %s" % info.get(&"stamp", ""))
+        infoFile.store_line("OS: %s" % info.get(&"os", ""))
+        infoFile.store_line("Godot: %s" % info.get(&"godot", ""))
         infoFile.store_line("Files: %d" % copied)
         infoFile.close()
     _on_log_snapshot_done.call_deferred(snapDir, copied)
@@ -1281,10 +1286,10 @@ func _recheck_host_state() -> void:
 
 func _on_recheck_state(response: Dictionary) -> void:
     _recheckPending = false
-    if !response.get("ok", false):
+    if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get("data", {})
-    var hostState: String = data.get("value", "")
+    var data: Dictionary = response.get(&"data", {})
+    var hostState: String = data.get(&"value", "")
     if hostState == "in_game" && _is_on_menu():
         _log("Recheck: host is in-game — auto-loading")
         _auto_load_game()
@@ -1313,7 +1318,7 @@ func _setup_save_paths() -> void:
     if worldId.is_empty():
         worldId = "world_%d" % Time.get_unix_time_from_system()
     var loader: Node = get_node_or_null("/root/Loader")
-    if loader == null || !loader.has_method("_ensure_save_dir"):
+    if loader == null || !loader.has_method(&"_ensure_save_dir"):
         return
     loader.savePath = "user://coop/%s/" % worldId
     var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
@@ -1335,7 +1340,7 @@ func _sanitize_path_component(component: String) -> bool:
 func _reset_save_paths() -> void:
     worldId = ""
     var loader: Node = get_node_or_null("/root/Loader")
-    if loader != null && loader.has_method("reset_save_paths"):
+    if loader != null && loader.has_method(&"reset_save_paths"):
         loader.reset_save_paths()
 
 
@@ -1354,8 +1359,8 @@ func _request_world_id() -> void:
         if FileAccess.file_exists(worldPath):
             var world: Resource = load(worldPath)
             if world != null:
-                diff = world.get("difficulty") if world.get("difficulty") != null else 1
-                season = world.get("season") if world.get("season") != null else 1
+                diff = world.get(&"difficulty") if world.get(&"difficulty") != null else 1
+                season = world.get(&"season") if world.get(&"season") != null else 1
     _receive_world_id.rpc_id(peerId, worldId, diff, season)
 
 
@@ -1367,7 +1372,7 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
         return
     worldId = hostWorldId
     var loader: Node = get_node_or_null("/root/Loader")
-    if loader == null || !loader.has_method("_ensure_save_dir"):
+    if loader == null || !loader.has_method(&"_ensure_save_dir"):
         return
     loader.savePath = "user://coop/%s/" % worldId
     var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else str(localPeerId)
@@ -1590,20 +1595,20 @@ func _apply_handoff_state(snap: Dictionary) -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
         return
-    var doors: Dictionary = snap.get("doors", {})
+    var doors: Dictionary = snap.get(&"doors", {})
     for doorPath: String in doors:
         var door: Node = scene.get_node_or_null(doorPath)
         if !is_instance_valid(door) || !(door is Door):
             continue
         var state: Dictionary = doors[doorPath]
-        door.isOpen = state.get("isOpen", false)
-        door.locked = state.get("locked", false)
+        door.isOpen = state.get(&"isOpen", false)
+        door.locked = state.get(&"locked", false)
         if door.isOpen:
             door.animationTime = 4.0
-    var switches: Dictionary = snap.get("switches", {})
+    var switches: Dictionary = snap.get(&"switches", {})
     for switchPath: String in switches:
         var sw: Node = scene.get_node_or_null(switchPath)
-        if !is_instance_valid(sw) || !sw.has_method("Activate"):
+        if !is_instance_valid(sw) || !sw.has_method(&"Activate"):
             continue
         var active: bool = switches[switchPath]
         if active && !sw.active:
@@ -1612,10 +1617,10 @@ func _apply_handoff_state(snap: Dictionary) -> void:
             sw.Deactivate()
     # Spawn items from headless snapshot (LootSimulation was skipped, so the
     # scene has no items yet — we transfer the ones generated in the SubViewport).
-    var items: Array = snap.get("items", [])
+    var items: Array = snap.get(&"items", [])
     var spawnedCount: int = 0
     for entry: Dictionary in items:
-        var itemFile: String = entry.get("file", "")
+        var itemFile: String = entry.get(&"file", "")
         if itemFile.is_empty():
             continue
         var packed: PackedScene = Database.get(itemFile)
@@ -1623,16 +1628,16 @@ func _apply_handoff_state(snap: Dictionary) -> void:
             continue
         var pickup: Node3D = packed.instantiate()
         scene.add_child(pickup)
-        pickup.global_position = entry.get("pos", Vector3.ZERO)
-        pickup.global_rotation = entry.get("rot", Vector3.ZERO)
-        var slotData: Resource = entry.get("slotData")
-        if slotData != null && pickup.get("slotData") != null:
+        pickup.global_position = entry.get(&"pos", Vector3.ZERO)
+        pickup.global_rotation = entry.get(&"rot", Vector3.ZERO)
+        var slotData: Resource = entry.get(&"slotData")
+        if slotData != null && pickup.get(&"slotData") != null:
             pickup.slotData.Update(slotData)
         # Freeze at snapshot position so physics doesn't pull items off the
         # ground or jitter them (matches shelter-load pattern in Loader.gd).
-        if pickup.has_method("Freeze"):
+        if pickup.has_method(&"Freeze"):
             pickup.Freeze()
-        if pickup.has_method("UpdateAttachments"):
+        if pickup.has_method(&"UpdateAttachments"):
             pickup.UpdateAttachments()
         spawnedCount += 1
     _log("Handoff applied: %d doors, %d switches, %d items" % [doors.size(), switches.size(), spawnedCount])
