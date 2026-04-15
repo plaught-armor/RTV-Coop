@@ -261,16 +261,27 @@ func _collect_ai_recursive(node: Node, result: Array[Node]) -> void:
         _collect_ai_recursive(child, result)
 
 
+## AI scene paths follow a fixed shape: [code]res://AI/<Type>/AI_<Type>.tscn[/code]
+## where [code]<Type>[/code] is Bandit / Guard / Military / Punisher. The first
+## character after the [code]res://AI/[/code] prefix (index 9) is therefore
+## unique per type — B / G / M / P — so a single indexed char compare gives
+## the enum value with no hashing or substring scan.
+const _AI_PATH_TYPE_IDX: int = 9  # length of "res://AI/"
+
+
 func _get_ai_type(node: Node) -> int:
-    var scenePath: String = node.scene_file_path
-    if "Bandit" in scenePath:
+    var path: String = node.scene_file_path
+    if path.length() <= _AI_PATH_TYPE_IDX:
         return AIType.BANDIT
-    elif "Guard" in scenePath:
-        return AIType.GUARD
-    elif "Military" in scenePath:
-        return AIType.MILITARY
-    elif "Punisher" in scenePath:
-        return AIType.PUNISHER
+    match path[_AI_PATH_TYPE_IDX]:
+        "B":
+            return AIType.BANDIT
+        "G":
+            return AIType.GUARD
+        "M":
+            return AIType.MILITARY
+        "P":
+            return AIType.PUNISHER
     return AIType.BANDIT
 
 # ---------- Client Management ----------
