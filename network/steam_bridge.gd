@@ -69,12 +69,9 @@ func launch() -> void:
     _log("SteamAppId env: %s" % OS.get_environment("SteamAppId"))
 
     var globalPath: String = ProjectSettings.globalize_path(helperDst)
-    # Pass the log path explicitly so the helper writes to user://logs/
-    # alongside godot.log. os.Executable() under Wine resolves to the Linux
-    # install dir, not the user prefix, so self-locating doesn't work.
-    var logPath: String = ProjectSettings.globalize_path("user://logs/steam_helper.log")
-    DirAccess.make_dir_recursive_absolute(logPath.get_base_dir())
-    var args: PackedStringArray = ["--port", str(HELPER_PORT), "--log-file", logPath]
+    # Helper self-locates its log. Passing --log-file with a space-containing
+    # Wine path seemed to break launch on Proton — revert to self-locate.
+    var args: PackedStringArray = ["--port", str(HELPER_PORT)]
     print("[SteamBridge] launching: %s args=%s" % [globalPath, args])
     helperPID = OS.create_process(globalPath, args)
 
@@ -412,6 +409,15 @@ func extract_file(resPath: String, userPath: String) -> void:
     if data.is_empty():
         _log("Cannot read: %s" % resPath)
         return
+    # Skip the write if destination already matches — saves several hundred ms
+    # on cold launch (helper binary is ~5MB, steam dll ~300KB).
+    if FileAccess.file_exists(userPath):
+        var existing: FileAccess = FileAccess.open(userPath, FileAccess.READ)
+        if existing != null:
+            var existingSize: int = existing.get_length()
+            existing.close()
+            if existingSize == data.size():
+                return
     var dst: FileAccess = FileAccess.open(userPath, FileAccess.WRITE)
     if dst == null:
         _log("Cannot write: %s" % userPath)

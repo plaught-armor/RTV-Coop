@@ -82,9 +82,11 @@ func _process(delta: float) -> void:
 
 
 ## Updates the keybind hints based on connection and Steam state.
+## Multiplayer controls live in the Esc menu now — only show Steam status when
+## something is wrong, otherwise the label stays empty.
 func update_hints() -> void:
     if _cm.isActive:
-        hintsLabel.text = "[Ins] Multiplayer"
+        hintsLabel.text = ""
     elif !_cm.DEBUG && !_cm.steamBridge.is_ready():
         if _cm.steamBridge.connected:
             hintsLabel.text = "Steam: verifying..."
@@ -93,7 +95,7 @@ func update_hints() -> void:
         else:
             hintsLabel.text = "Steam: offline"
     else:
-        hintsLabel.text = "[Ins] Multiplayer"
+        hintsLabel.text = ""
 
 
 func update_pings() -> void:

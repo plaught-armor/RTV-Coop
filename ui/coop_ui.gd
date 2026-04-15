@@ -64,26 +64,16 @@ func init_manager(manager: Node) -> void:
     panel.hide()
 
 
+## INS panel is deprecated — all session controls now live in the in-game
+## Esc menu's Multiplayer tab (settings_patch.gd). Only F11 (direct-connect)
+## remains in DEBUG builds for testing without Steam.
 func _input(event: InputEvent) -> void:
     if !(event is InputEventKey) || !event.pressed || event.echo:
         return
     if !is_in_gameplay():
         return
-
-    match event.keycode:
-        KEY_INSERT:
-            panelVisible = !panelVisible
-            panel.visible = panelVisible
-            _cm.panelOpen = panelVisible
-            if panelVisible:
-                Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-            else:
-                Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-        KEY_F10:
-            on_host_pressed()
-        KEY_F11:
-            if _cm.DEBUG:
-                on_direct_join_pressed()
+    if event.keycode == KEY_F11 && is_instance_valid(_cm) && _cm.DEBUG:
+        on_direct_join_pressed()
 
 
 func build_ui() -> void:
@@ -1055,6 +1045,12 @@ func _update_selection_colors() -> void:
 
 func on_create_world_confirmed() -> void:
     print("[coop_ui] on_create_world_confirmed called")
+    # Don't proceed if Steam isn't ready yet — host_game would bail and we'd
+    # leave an empty world dir behind. User can retry once Steam finishes.
+    if !_cm.steamBridge.is_ready() || !_cm.steamBridge.ownsGame:
+        _cm._log("[coop_ui] Create aborted — Steam not ready, try again in a moment")
+        return
+
     var worldName: String = newWorldNameInput.text.strip_edges()
     if worldName.is_empty():
         worldName = "World"
@@ -1071,6 +1067,14 @@ func on_create_world_confirmed() -> void:
     _cm.set_active_world(worldId)
     _cm.host_game()
 
+    # Verify host_game actually started a session. If not, clean up the empty
+    # world dir and the active-world marker so the next attempt is clean.
+    if !_cm.is_session_active() || !_cm.isHost:
+        _cm._log("[coop_ui] host_game failed — cleaning up world dir %s" % worldDir)
+        _remove_dir_recursive(worldDir)
+        _cm.clear_active_world()
+        return
+
     # Vanilla NewGame writes user://World.tres + Character.tres. We then mirror
     # those (plus shelter/trader saves once they exist) into user://coop/<id>/
     # so the world persists separately.
@@ -1081,6 +1085,27 @@ func on_create_world_confirmed() -> void:
     loader.NewGame(newWorldDifficulty, newWorldSeason)
     _cm.mirror_user_to_world()
     loader.LoadScene("Cabin")
+
+
+## Recursively removes a directory and its contents. Used to clean up an empty
+## world dir when world creation fails.
+func _remove_dir_recursive(path: String) -> void:
+    if !DirAccess.dir_exists_absolute(path):
+        return
+    var dir: DirAccess = DirAccess.open(path)
+    if dir == null:
+        return
+    dir.list_dir_begin()
+    var entry: String = dir.get_next()
+    while entry != "":
+        var full: String = path + entry
+        if dir.current_is_dir():
+            _remove_dir_recursive(full + "/")
+        else:
+            DirAccess.remove_absolute(ProjectSettings.globalize_path(full))
+        entry = dir.get_next()
+    dir.list_dir_end()
+    DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 func on_new_world_back() -> void:

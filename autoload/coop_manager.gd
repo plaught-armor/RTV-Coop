@@ -107,6 +107,10 @@ func _ready() -> void:
     steamBridge.name = "SteamBridge"
     add_child(steamBridge)
     steamBridge.init_manager(self)
+    # Kick off the helper launch immediately so it boots in parallel with UI
+    # setup. Previously this was deferred to the next frame, which added an
+    # unnecessary ~16ms and blocked the helper's TCP handshake behind UI work.
+    steamBridge.launch()
 
     var uiLayer: CanvasLayer = CanvasLayer.new()
     uiLayer.name = "CoopUILayer"
@@ -134,12 +138,15 @@ func _ready() -> void:
 
     inject_manager.call_deferred()
     _register_ai_pools.call_deferred()
-    # Defer Steam helper launch until after ModLoader finishes
-    steamBridge.launch.call_deferred()
     _log("Initialized (debug: %s)" % str(DEBUG))
 
 
 func _physics_process(_delta: float) -> void:
+    # Poll Steam readiness every 30 frames (~0.25s) so the MP submenu's status
+    # label and button-disabled state reflect current helper state.
+    if Engine.get_physics_frames() % 30 == 0:
+        _update_mp_status()
+
     if Engine.get_physics_frames() % SCENE_CHECK_FRAMES != 0:
         return
 
@@ -151,6 +158,32 @@ func _physics_process(_delta: float) -> void:
         call_deferred("on_scene_changed")
     elif isActive:
         ensure_all_spawned()
+
+
+## Updates the MP submenu's Steam status label and button enable state.
+## No-op if the submenu hasn't been built yet or we're not on the main menu.
+func _update_mp_status() -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return
+    var submenu: Node = scene.get_node_or_null("CoopMPSubmenu")
+    if submenu == null:
+        return
+    var statusLabel: Label = submenu.find_child("SteamStatus", true, false) as Label
+    var hostBtn: Button = submenu.find_child("HostBtn", true, false) as Button
+    var browseBtn: Button = submenu.find_child("BrowseBtn", true, false) as Button
+    var ready: bool = is_instance_valid(steamBridge) && steamBridge.is_ready() && steamBridge.ownsGame
+    if statusLabel != null:
+        if ready:
+            statusLabel.text = "Steam: %s" % steamBridge.localSteamName
+            statusLabel.modulate = Color(0.5, 0.9, 0.5, 0.9)
+        else:
+            statusLabel.text = "Connecting to Steam..."
+            statusLabel.modulate = Color(1, 0.85, 0.4, 0.9)
+    if hostBtn != null:
+        hostBtn.disabled = !ready
+    if browseBtn != null:
+        browseBtn.disabled = !ready
 
 
 ## Applies [code]take_over_path[/code] patches to game scripts.
@@ -173,6 +206,7 @@ func register_patches() -> void:
         ["res://mod/patches/mine_patch.gd", "res://Scripts/Mine.gd"],
         ["res://mod/patches/fire_patch.gd", "res://Scripts/Fire.gd"],
         ["res://mod/patches/loader_patch.gd", "res://Scripts/Loader.gd"],
+        ["res://mod/patches/settings_patch.gd", "res://Scripts/Settings.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -580,6 +614,11 @@ func inject_manager() -> void:
     if iface != null && iface.has_method("init_manager"):
         iface.init_manager(self)
 
+    # Settings — pause menu (settings_patch adds Multiplayer tab)
+    var settings: Node = scene.get_node_or_null("Core/UI/Settings")
+    if settings != null && settings.has_method("init_manager"):
+        settings.init_manager(self)
+
     # Interactables: Doors, LootContainers
     for node: Node in get_tree().get_nodes_in_group("Interactable"):
         var obj: Node = node.owner if node.owner != null else node
@@ -725,15 +764,28 @@ func _build_mp_submenu(menu: Node) -> void:
     subheader.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     outer.add_child(subheader)
 
+    # Steam readiness status — polled in _physics_process via _update_mp_status.
+    var statusLabel: Label = Label.new()
+    statusLabel.name = "SteamStatus"
+    statusLabel.text = "Connecting to Steam..."
+    statusLabel.modulate = Color(1, 0.85, 0.4, 0.9)
+    statusLabel.add_theme_font_size_override("font_size", 12)
+    statusLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    outer.add_child(statusLabel)
+
     var topSpacer: Control = Control.new()
     topSpacer.custom_minimum_size = Vector2(0, 16)
     outer.add_child(topSpacer)
 
     var hostBtn: Button = _mp_submenu_button("Host World")
+    hostBtn.name = "HostBtn"
+    hostBtn.disabled = true
     hostBtn.pressed.connect(_on_mp_host_pressed.bind(menu))
     outer.add_child(hostBtn)
 
     var browseBtn: Button = _mp_submenu_button("Browse Lobbies")
+    browseBtn.name = "BrowseBtn"
+    browseBtn.disabled = true
     browseBtn.pressed.connect(_on_mp_browse_pressed.bind(menu))
     outer.add_child(browseBtn)
 
