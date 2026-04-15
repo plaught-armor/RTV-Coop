@@ -554,11 +554,14 @@ func on_scene_changed() -> void:
     _wasOnMenu = _is_on_menu()
     _autoLoadInProgress = false
     inject_manager()
-    # Refresh world_state's scene-ref cache — its RPC handlers consult
-    # _currentScene / _uiManager / _interface instead of walking
-    # get_tree().current_scene on every call.
+    # Refresh network-layer scene caches — both world_state and ai_state
+    # hold refs to current_scene / Core/Controller / UI Interface / etc.
+    # Repopulate once per transition; RPC handlers read typed vars
+    # instead of walking get_tree().current_scene on every call.
     if worldState != null:
         worldState.refresh_scene_cache()
+    if aiState != null:
+        aiState.refresh_scene_cache()
     if !is_session_active():
         return
     var currentMap: String = get_current_map()

@@ -64,11 +64,16 @@ func CheckLOS(target) -> void:
 
 	var collider: Node = LOS.get_collider()
 
+	# Host-only for both branches — host's AI state sync propagates to clients,
+	# and Player damage is already host-authoritative. Without the AI guard,
+	# clients would apply local AI damage that the next AIState snapshot then
+	# overwrites, producing a visible desync on each grenade.
+	if !_cm.isHost:
+		return
+
 	if collider.is_in_group(&"AI"):
 		target.ExplosionDamage(LOS.global_basis.z)
-
-	# Host-only: prevents double damage on clients (local explosion + host RPC)
-	if collider.is_in_group(&"Player") && _cm.isHost:
+	elif collider.is_in_group(&"Player"):
 		target.get_child(0).ExplosionDamage()
 
 

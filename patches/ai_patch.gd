@@ -175,7 +175,9 @@ func Parameters(delta: float) -> void:
             bestPos = pos
             targetPeerId = peerId
             # Approximate remote player's facing direction from their rotation
-            var rotY: float = remote.get(&"targetRotationY") if remote.get(&"targetRotationY") != null else remote.rotation.y
+            # targetRotationY is declared on remote_player.gd — direct member
+            # access avoids two reflective .get() calls per AI sensor tick.
+            var rotY: float = remote.targetRotationY
             bestVector = Vector3(-sin(rotY), 0, -cos(rotY))
 
     playerPosition = bestPos
@@ -294,7 +296,8 @@ func Hearing() -> void:
         if !is_instance_valid(remote):
             continue
         var dist: float = global_position.distance_to(remote.global_position)
-        var flags: int = remote.get(&"moveFlags") if remote.get(&"moveFlags") != null else 0
+        # moveFlags is declared on remote_player.gd — direct member access.
+        var flags: int = remote.moveFlags
         var isRunning: bool = (flags & _cm.PlayerStateScript.MoveFlag.RUNNING) != 0
         var isWalking: bool = (flags & _cm.PlayerStateScript.MoveFlag.WALKING) != 0
         if (dist < 20 && isRunning) || (dist < 5 && isWalking):

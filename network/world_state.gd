@@ -31,7 +31,7 @@ var _dbConstantsReady: bool = false
 
 func init_manager(manager: Node) -> void:
     _cm = manager
-    _slotSerializer = _slotSerializer
+    _slotSerializer = _cm.SlotSerializerScript
     _pickupPatch = _cm.PickupPatchScript
 
 
@@ -502,7 +502,9 @@ func broadcast_fire_state(firePath: String, isActive: bool) -> void:
 func request_fire_interact(firePath: String) -> void:
     if !_cm.isHost:
         return
-    var fire: Node = get_node_or_null(firePath)
+    if !is_valid_path(firePath):
+        return
+    var fire: Node = _scene_node(firePath)
     if !is_instance_valid(fire) || !fire.has_method(&"Interact"):
         return
     # Run the original interact on host (match check, activate/deactivate)
@@ -512,7 +514,7 @@ func request_fire_interact(firePath: String) -> void:
 ## Client receives fire state from host.
 @rpc("authority", "call_remote", "reliable")
 func sync_fire_state(firePath: String, isActive: bool) -> void:
-    var fire: Node = get_node_or_null(firePath)
+    var fire: Node = _scene_node(firePath)
     if !is_instance_valid(fire):
         return
     if isActive && !fire.active:
@@ -533,7 +535,7 @@ func broadcast_mine_detonate(minePath: String, instant: bool) -> void:
 ## Client receives mine detonation event from host.
 @rpc("authority", "call_remote", "reliable")
 func receive_mine_detonate(minePath: String, instant: bool) -> void:
-    var mine: Node = get_node_or_null(minePath)
+    var mine: Node = _scene_node(minePath)
     if !is_instance_valid(mine):
         return
     if instant:
@@ -562,10 +564,11 @@ func send_full_state(peerId: int) -> void:
             continue
         if !obj.has_method(&"Interact"):
             continue
+        # obj is already narrowed to Door above; isOpen / locked / key are
+        # declared members — direct access avoids reflective .get() calls.
         var doorPath: String = scene.get_path_to(obj)
-        var doorOpen: bool = obj.get(&"isOpen") if obj.get(&"isOpen") != null else false
-        sync_door_state.rpc_id(peerId, doorPath, doorOpen)
-        if !obj.locked && obj.get(&"key"):
+        sync_door_state.rpc_id(peerId, doorPath, obj.isOpen)
+        if !obj.locked && obj.key:
             sync_door_unlock.rpc_id(peerId, doorPath)
 
     # Sync all switches

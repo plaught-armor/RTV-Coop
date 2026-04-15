@@ -9,6 +9,16 @@
 extends "res://Scripts/Fire.gd"
 
 var _cm: Node
+## Cached scene-relative path to this campfire. Stable for the node's lifetime
+## in the scene; mirrors the pattern used in door/switch/loot_container patches.
+## Scene-relative keeps validation consistent with is_valid_path (which rejects
+## absolute paths) and lets the receiver resolve via _scene_node().
+var _cachedPath: String = ""
+
+
+func _ready() -> void:
+	super._ready()
+	_cachedPath = get_tree().current_scene.get_path_to(self)
 
 
 func _ensure_cm() -> void:
@@ -31,8 +41,6 @@ func Interact() -> void:
 
 	if _cm.isHost:
 		super.Interact()
-		var firePath: String = str(get_path())
-		_cm.worldState.broadcast_fire_state(firePath, active)
+		_cm.worldState.broadcast_fire_state(_cachedPath, active)
 	else:
-		var firePath: String = str(get_path())
-		_cm.worldState.request_fire_interact.rpc_id(1, firePath)
+		_cm.worldState.request_fire_interact.rpc_id(1, _cachedPath)

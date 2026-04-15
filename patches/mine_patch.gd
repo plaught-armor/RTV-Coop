@@ -10,6 +10,16 @@
 extends "res://Scripts/Mine.gd"
 
 var _cm: Node
+## Cached scene-relative path to this mine. Mirrors the door/switch/fire
+## pattern — scene-relative paths pass is_valid_path and resolve via
+## _scene_node() on the receiver. Mine.gd has _ready, so super._ready()
+## must be called first per project rules.
+var _cachedPath: String = ""
+
+
+func _ready() -> void:
+	super._ready()
+	_cachedPath = get_tree().current_scene.get_path_to(self)
 
 
 func _ensure_cm() -> void:
@@ -27,14 +37,12 @@ func _ensure_cm() -> void:
 func Detonate() -> void:
 	_ensure_cm()
 	if is_instance_valid(_cm) && _cm.is_session_active() && _cm.isHost:
-		var minePath: String = str(get_path())
-		_cm.worldState.broadcast_mine_detonate(minePath, false)
+		_cm.worldState.broadcast_mine_detonate(_cachedPath, false)
 	super.Detonate()
 
 
 func InstantDetonate() -> void:
 	_ensure_cm()
 	if is_instance_valid(_cm) && _cm.is_session_active() && _cm.isHost:
-		var minePath: String = str(get_path())
-		_cm.worldState.broadcast_mine_detonate(minePath, true)
+		_cm.worldState.broadcast_mine_detonate(_cachedPath, true)
 	super.InstantDetonate()

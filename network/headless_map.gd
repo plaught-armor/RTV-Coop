@@ -505,12 +505,14 @@ func extract_door_states() -> Dictionary[NodePath, int]:
             continue
         if !mapScene.is_ancestor_of(obj):
             continue
+        # obj is narrowed to Door; isOpen / locked are declared members.
+        var door: Door = obj
         var flags: int = 0
-        if obj.get(&"isOpen") == true:
+        if door.isOpen:
             flags |= DoorFlag.OPEN
-        if obj.get(&"locked") == true:
+        if door.locked:
             flags |= DoorFlag.LOCKED
-        doors[mapScene.get_path_to(obj)] = flags
+        doors[mapScene.get_path_to(door)] = flags
     return doors
 
 

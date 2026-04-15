@@ -8,10 +8,28 @@
 extends Node
 
 var _cm: Node
+## Cached local player refs refreshed per scene transition. Every damage RPC
+## previously did get_tree().current_scene.get_node_or_null("Core/Controller")
+## + get_child(0); damage fires under combat bursts, so resolving those once
+## per scene change is cheaper than per-hit. Mirrors world_state's pattern.
+var _controller: Node = null
+var _character: Node = null
 
 
 func init_manager(manager: Node) -> void:
     _cm = manager
+
+
+## Called from [method CoopManager.on_scene_changed] after every scene
+## transition. Scene refs are stable until the next transition.
+func refresh_scene_cache() -> void:
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        _controller = null
+        _character = null
+        return
+    _controller = scene.get_node_or_null(^"Core/Controller")
+    _character = _controller.get_child(0) if is_instance_valid(_controller) && _controller.get_child_count() > 0 else null
 
 
 
@@ -553,13 +571,8 @@ func send_ai_damage_to_peer(peerId: int, damage: float, penetration: int) -> voi
 ## Character.WeaponDamage(damage, penetration) randomizes hitbox internally.
 @rpc("authority", "call_remote", "reliable")
 func receive_ai_damage(damage: float, penetration: int) -> void:
-    var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
-    if !is_instance_valid(controller):
-        return
-    # Character is the first child of Controller, same as original AI.gd:1389
-    var character: Node = controller.get_child(0) if controller.get_child_count() > 0 else null
-    if is_instance_valid(character) && character.has_method(&"WeaponDamage"):
-        character.WeaponDamage(damage, penetration)
+    if is_instance_valid(_character) && _character.has_method(&"WeaponDamage"):
+        _character.WeaponDamage(damage, penetration)
 
 
 ## Sends explosion damage to a specific remote peer. Host only.
@@ -570,12 +583,8 @@ func send_explosion_damage_to_peer(peerId: int) -> void:
 ## Client receives explosion damage — applies to local player's Character node.
 @rpc("authority", "call_remote", "reliable")
 func receive_explosion_damage() -> void:
-    var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
-    if !is_instance_valid(controller):
-        return
-    var character: Node = controller.get_child(0) if controller.get_child_count() > 0 else null
-    if is_instance_valid(character) && character.has_method(&"ExplosionDamage"):
-        character.ExplosionDamage()
+    if is_instance_valid(_character) && _character.has_method(&"ExplosionDamage"):
+        _character.ExplosionDamage()
 
 # ---------- Full State (Late Join) ----------
 
