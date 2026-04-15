@@ -15,6 +15,17 @@ var proxyGameData: Resource = null
 var clientPeers: Array[int] = []
 var aiSyncIdCounter: int = 0
 var syncedAI: Dictionary[int, Node] = {}
+## Cached AISpawner references. Every map has its AISpawner at
+## [code]<map>/AI[/code], which owns exactly three Node3D children
+## ([code]A_Pool[/code], [code]B_Pool[/code], [code]Agents[/code]). Those
+## containers are stable for the whole headless-map lifetime — AI reparent
+## between them, but the containers themselves don't move. Resolved once in
+## [method _finalize_setup] and cleared in [method teardown], so every
+## subsequent lookup is a typed-var read instead of a get_node_or_null walk.
+var _aiSpawner: Node = null
+var _aiAPool: Node = null
+var _aiBPool: Node = null
+var _aiAgents: Node = null
 ## Threaded-load state. While true, _process polls load_threaded_get_status each
 ## frame until LOADED/FAILED, then toggles itself off. Scene parse (20-40MB of
 ## meshes/deps) runs on a Godot worker thread; the blocking instantiate() call
@@ -125,9 +136,25 @@ func _finalize_setup() -> void:
     _reassign_patched_scripts(mapScene)
 
     _inject_proxy_gamedata()
+    _cache_ai_spawner_refs()
     _setupComplete = true
     _log("SubViewport ready for %s" % mapPath)
     setup_finished.emit(true)
+
+
+## Resolves the AISpawner and its three pool children once, right after the
+## scene finishes loading. Cleared in [method teardown]. Subsequent calls to
+## [method _get_all_ai_nodes] / [method _get_active_ai_nodes] read these
+## cached refs directly instead of walking the scene tree every time.
+func _cache_ai_spawner_refs() -> void:
+    if mapScene == null:
+        return
+    _aiSpawner = mapScene.get_node_or_null("AI")
+    if _aiSpawner == null:
+        return
+    _aiAPool = _aiSpawner.get_node_or_null("A_Pool")
+    _aiBPool = _aiSpawner.get_node_or_null("B_Pool")
+    _aiAgents = _aiSpawner.get_node_or_null("Agents")
 
 
 ## Builds a SubViewport configured for maximum "do as little as possible"
@@ -262,19 +289,28 @@ func _on_ai_tree_exiting(syncId: int) -> void:
     syncedAI.erase(syncId)
 
 
+## Returns every AI node in the map — pools + active. Used for sync-id
+## registration (needs to see pool AI so later spawns already have their id
+## and type meta) and for restore's pool-by-type bucketing (fresh scene has
+## most AI back in the pools). Reads the cached container refs populated by
+## [method _cache_ai_spawner_refs]; no scene walk.
 func _get_all_ai_nodes() -> Array[Node]:
     var result: Array[Node] = []
-    if mapScene == null:
-        return result
-    _collect_ai_recursive(mapScene, result)
+    for holder: Node in [_aiAPool, _aiBPool, _aiAgents]:
+        if !is_instance_valid(holder):
+            continue
+        for ai: Node in holder.get_children():
+            result.append(ai)
     return result
 
 
-func _collect_ai_recursive(node: Node, result: Array[Node]) -> void:
-    if node is CharacterBody3D && node.has_method("Sensor"):
-        result.append(node)
-    for child: Node in node.get_children():
-        _collect_ai_recursive(child, result)
+## Active (currently-spawned) AI only — the Agents child of the spawner.
+## Used by extract_ai_state's live RPC path where paused pool AI would be
+## filtered out anyway.
+func _get_active_ai_nodes() -> Array[Node]:
+    if !is_instance_valid(_aiAgents):
+        return []
+    return _aiAgents.get_children()
 
 
 ## AI scene paths follow a fixed shape: [code]res://AI/<Type>/AI_<Type>.tscn[/code]
@@ -534,10 +570,48 @@ func extract_item_states() -> Array[Dictionary]:
     return result
 
 
+## Async restore — scene-tree mutations can't go to a worker thread (every
+## operation touches Node state), but the three passes (doors, switches, AI)
+## are independent and operate on disjoint data, so each runs on its own
+## frame via [code]await[/code]. Callers don't await — the headless map
+## isn't visible to the host, so spreading the work across 3 frames is
+## imperceptible and keeps each frame's budget light.
 func restore(snap: Dictionary) -> void:
     if mapScene == null:
         return
     var doors: Dictionary = snap.get("doors", {})
+    var switches: Dictionary = snap.get("switches", {})
+    var aiSnaps: Array = snap.get("ai", [])
+
+    _restore_doors(doors)
+    if !is_instance_valid(mapScene):
+        return
+
+    # Frame 2: switches. Independent of doors (different node group, different
+    # state), so no ordering dependency forces co-location.
+    await get_tree().process_frame
+    if !is_instance_valid(mapScene):
+        return
+    _restore_switches(switches)
+
+    # Frame 3: AI. Heaviest pass — walks the whole scene tree to bucket the
+    # pool. Last because it's the most expensive and also the least visually
+    # important (AI in headless maps aren't being watched).
+    if !aiSnaps.is_empty():
+        await get_tree().process_frame
+        if !is_instance_valid(mapScene):
+            return
+        var restored: int = _restore_ai(aiSnaps)
+        _log("Restored %d AI, %d doors, %d switches from snapshot" % [
+            restored, doors.size(), switches.size()
+        ])
+    else:
+        _log("Restored 0 AI, %d doors, %d switches from snapshot" % [
+            doors.size(), switches.size()
+        ])
+
+
+func _restore_doors(doors: Dictionary) -> void:
     for doorPath: NodePath in doors:
         var door: Node = mapScene.get_node_or_null(doorPath)
         if !is_instance_valid(door) || !(door is Door):
@@ -547,7 +621,9 @@ func restore(snap: Dictionary) -> void:
         door.locked = (flags & DoorFlag.LOCKED) != 0
         if door.isOpen:
             door.animationTime = 4.0
-    var switches: Dictionary = snap.get("switches", {})
+
+
+func _restore_switches(switches: Dictionary) -> void:
     for switchPath: NodePath in switches:
         var sw: Node = mapScene.get_node_or_null(switchPath)
         if !is_instance_valid(sw) || !sw.has_method("Activate"):
@@ -557,14 +633,14 @@ func restore(snap: Dictionary) -> void:
             sw.Activate()
         elif !active && sw.active:
             sw.Deactivate()
-    var aiSnaps: Array = snap.get("ai", [])
-    if aiSnaps.is_empty():
-        return
-    # Bucket the pool by AI type once so each snapshot consumes a node in O(1)
-    # via pop_back. Old version nested (aiSnaps × poolAI) with an `ai in
-    # usedNodes` linear scan on top — effectively O(S² · P). New version is
-    # O(S + P) and calls _get_ai_type once per pool entry instead of once per
-    # (snapshot × candidate) pair.
+
+
+## Bucket the pool by AI type once so each snapshot consumes a node in O(1)
+## via pop_back. Old version nested (aiSnaps × poolAI) with an `ai in
+## usedNodes` linear scan on top — effectively O(S² · P). New version is
+## O(S + P) and calls _get_ai_type once per pool entry instead of once per
+## (snapshot × candidate) pair. Returns the restored count for logging.
+func _restore_ai(aiSnaps: Array) -> int:
     var poolByType: Dictionary = {}
     for ai: Node in _get_all_ai_nodes():
         var t: AIType = _get_ai_type(ai)
@@ -582,9 +658,7 @@ func restore(snap: Dictionary) -> void:
         if "health" in matched:
             matched.health = aiSnap.get("health", 100)
         restored += 1
-    _log("Restored %d AI, %d doors, %d switches from snapshot" % [
-        restored, doors.size(), switches.size()
-    ])
+    return restored
 
 
 func teardown() -> void:
@@ -599,6 +673,10 @@ func teardown() -> void:
         viewport.queue_free()
         viewport = null
     mapScene = null
+    _aiSpawner = null
+    _aiAPool = null
+    _aiBPool = null
+    _aiAgents = null
     syncedAI.clear()
     clientPositions.clear()
     _log("SubViewport torn down for %s" % mapPath)
