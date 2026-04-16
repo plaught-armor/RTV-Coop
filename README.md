@@ -6,11 +6,18 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 - **2-4 player co-op** with 20Hz position sync and interpolation
 - **Steam integration** -- lobby browser, friend invites with avatars, P2P NAT traversal
+- **Direct connect** -- host via IP for non-Steam or LAN play
 - **World state sync** -- doors, switches, containers, time/weather synced between all players
 - **AI multi-player awareness** -- enemies detect, target, and fight all players (host-authoritative, 10Hz replication)
 - **Combat sync** -- weapon fire audio, muzzle flash, bullet impact decals, AI damage routing, grenade throws, explosion damage, mine detonation
 - **Death sync** -- remote players removed on death, AI stops targeting dead players
+- **Trader sync** -- host-authoritative trading with ACK flow (client items restored on reject)
+- **World events** -- helicopters, BTRs, airdrops, crash sites, police patrols synced from host
+- **Furniture sync** -- placement and pickup replicated between all players
 - **Campfire sync** -- fire ignite/extinguish replicated between all players
+- **Deterministic layouts** -- room layouts seeded from node path, consistent across all peers
+- **Deterministic fishing** -- fish pools seeded for identical spawns, activate near any player
+- **Sleep blocked in co-op** -- prevents time desync from bed usage
 - **Per-world saves** -- each hosted world has its own save directory; player characters persist per-world
 - **World picker** -- choose to create a new world or continue an existing one when hosting
 - **Independent map transitions** -- players can explore different maps simultaneously
@@ -24,11 +31,11 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 ## Installation
 
-> See [INSTALLATION.md](INSTALLATION.md) for detailed step-by-step instructions including Metro Mod Loader setup and Linux/Proton paths.
+> See [INSTALLATION.md](INSTALLATION.md) for detailed step-by-step instructions including RTV Mod Loader setup and Linux/Proton paths.
 
 ### Quick Start
 
-1. Install the [Metro Mod Loader](https://modworkshop.net/mod/55623)
+1. Install the [RTV Mod Loader](https://github.com/plaught-armor/RTV-Mod-Loader)
 2. Download `rtv-coop.vmz` from [Releases](https://github.com/plaught-armor/mod/releases)
 3. Place it in the `mods/` folder (see [INSTALLATION.md](INSTALLATION.md) for your platform's path)
 4. Launch the game through Steam
@@ -108,7 +115,8 @@ There are two log files. **Both are needed when reporting bugs.**
 - **Ghost capsule model** -- remote players shown as translucent capsules (full model planned)
 - **No voice chat** -- use Steam/Discord voice as a workaround
 - **Inventory is independent** -- each player manages their own loot; no shared inventory view
-- **Knife attacks not visible** -- melee damage works but other players don't see knife swing animations
+- **Knife swing animations not visible** -- melee audio and hit decals sync, but other players don't see the swing animation
+- **Random events (helicopters, etc.)** -- visual events are not replayed for players who join mid-session (crash sites with loot are replayed)
 
 ---
 
@@ -119,7 +127,7 @@ There are two log files. **Both are needed when reporting bugs.**
 - [x] World state sync (doors, switches, time/weather)
 - [x] Loot container sync
 - [x] Transitions, pickups, footstep audio
-- [x] Metro Mod Loader packaging, Proton support
+- [x] RTV Mod Loader packaging, Proton support
 - [x] AI multi-player awareness (detection, targeting, host-authoritative replication)
 - [x] Combat sync (weapon fire, bullet impacts, AI damage routing)
 - [x] Client equipment save across transitions
@@ -129,8 +137,15 @@ There are two log files. **Both are needed when reporting bugs.**
 - [x] Death state sync and player cleanup
 - [x] Campfire state sync
 - [x] Per-world persistent saves with world picker
+- [x] Trader sync (host-authoritative ACK flow)
+- [x] World event sync (helicopters, BTR, airdrops, crash sites, police, cat)
+- [x] Furniture placement/catalog sync
+- [x] Deterministic room layouts and fish pools
+- [x] Sleep blocked in co-op
+- [x] Direct connect (IP-based, non-Steam)
+- [x] Settings panel with multiplayer tab
 - [ ] Third-person player model
-- [ ] Knife attack visuals for remote players
+- [x] Knife attack sync (audio + hit decals; swing animation not yet visible)
 - [ ] Voice chat
 
 ---
@@ -145,18 +160,26 @@ This mod patches game scripts via `take_over_path()`. Other mods patching the sa
 | `AI.gd` | **High** |
 | `AISpawner.gd` | Medium |
 | `Interface.gd` | Medium |
+| `Loader.gd` | Medium |
+| `Settings.gd` | Medium |
+| `Bed.gd` | Low |
+| `Character.gd` | Low |
 | `Door.gd` | Low |
-| `Switch.gd` | Low |
-| `Transition.gd` | Low |
-| `Pickup.gd` | Low |
+| `EventSystem.gd` | Low |
+| `Explosion.gd` | Low |
+| `Fire.gd` | Low |
+| `FishPool.gd` | Low |
+| `Furniture.gd` | Low |
+| `GrenadeRig.gd` | Low |
+| `KnifeRig.gd` | Low |
+| `Layouts.gd` | Low |
 | `LootContainer.gd` | Low |
 | `LootSimulation.gd` | Low |
-| `GrenadeRig.gd` | Low |
-| `Explosion.gd` | Low |
-| `Character.gd` | Low |
 | `Mine.gd` | Low |
-| `Fire.gd` | Low |
-| `Loader.gd` | Medium |
+| `Pickup.gd` | Low |
+| `Switch.gd` | Low |
+| `Trader.gd` | Low |
+| `Transition.gd` | Low |
 
 ---
 
@@ -167,21 +190,22 @@ This mod patches game scripts via `take_over_path()`. Other mods patching the sa
 Requires [Go 1.21+](https://go.dev/) and [Godot 4.6+](https://godotengine.org/).
 
 ```bash
-# Build Steam helper
-cd mod/steam_helper
+# Build Steam helper (both platforms)
+cd steam_helper
 GOOS=linux GOARCH=amd64 go build -o bin/steam_helper_linux .
 GOOS=windows GOARCH=amd64 go build -o bin/steam_helper.exe .
 
-# Package .vmz
-cd mod
-./build.sh
+# Package .vmz and auto-deploy to game mods folder
+cd ..
+go run build.go                   # dev build, auto-deploy
+go run build.go rtv-coop release  # release build (app ID 1963610)
 ```
 
 Steamworks SDK 1.64 redistributable binaries (`libsteam_api.so`, `steam_api64.dll`) must be in `steam_helper/bin/`.
 
 ### Architecture
 
-- **Mod loading**: `.vmz` archive loaded via Metro Mod Loader's `load_resource_pack()`
+- **Mod loading**: `.vmz` archive loaded via RTV Mod Loader's `load_resource_pack()`
 - **Script patching**: `take_over_path()` with `super.Method()` to preserve original behavior
 - **Networking**: ENet via `ENetMultiplayerPeer`, host-authoritative with request/validate/broadcast RPCs
 - **Steam helper**: Go binary on a single OS-locked thread, communicating via localhost TCP JSON. Required by Steamworks SDK threading model and critical for Proton compatibility
@@ -192,7 +216,7 @@ Steamworks SDK 1.64 redistributable binaries (`libsteam_api.so`, `steam_api64.dl
 ## Credits
 
 - **Game**: [Road to Vostok](https://roadtovostok.com/) by Antti Vare
-- **Mod Loader**: [Metro Mod Loader](https://modworkshop.net/mod/55623)
+- **Mod Loader**: [RTV Mod Loader](https://github.com/plaught-armor/RTV-Mod-Loader)
 - **Steam Bindings**: [go-steamworks](https://github.com/badhex/go-steamworks) by badhex
 - **VostokMods**: [Ryhon0](https://github.com/Ryhon0/VostokMods)
 
