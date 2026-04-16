@@ -13,6 +13,8 @@ var _pickupPatch: Script = null
 ## Database script-constant map — resolved lazily on first pickup lookup.
 var _dbConstants: Dictionary = {}
 var _dbConstantsReady: bool = false
+## Event history for late-joiner replay. Each entry: [eventName, params].
+var _firedEvents: Array = []
 
 
 func init_manager(manager: Node) -> void:
@@ -24,6 +26,7 @@ func init_manager(manager: Node) -> void:
 ## Called from [method CoopManager.on_scene_changed].
 func refresh_scene_cache() -> void:
     _currentScene = get_tree().current_scene
+    _firedEvents.clear()
     if !is_instance_valid(_currentScene):
         _uiManager = null
         _interface = null
@@ -647,6 +650,24 @@ func broadcast_mine_detonate(minePath: String, instant: bool) -> void:
     receive_mine_detonate.rpc(minePath, instant)
 
 
+## Client requests host to detonate a mine (triggered by Detector overlap on client).
+@rpc("any_peer", "call_remote", "reliable")
+func request_mine_detonate(minePath: String, instant: bool) -> void:
+    if !_cm.isHost:
+        return
+    if !is_valid_path(minePath):
+        return
+    var mine: Node = _scene_node(minePath)
+    if !is_instance_valid(mine) || !mine.has_method(&"Detonate"):
+        return
+    if mine.isDetonated:
+        return
+    if instant:
+        mine.InstantDetonate()
+    else:
+        mine.Detonate()
+
+
 ## Client receives mine detonation event from host.
 @rpc("authority", "call_remote", "reliable")
 func receive_mine_detonate(minePath: String, instant: bool) -> void:
@@ -657,6 +678,26 @@ func receive_mine_detonate(minePath: String, instant: bool) -> void:
         mine.InstantDetonate()
     else:
         mine.Detonate()
+
+# ---------- Event System Sync ----------
+
+
+## Host broadcasts a world event (helicopter, BTR, airdrop, etc.) to all clients.
+## Params carry event-specific random values so clients reproduce the exact spawn.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_event(eventName: String, params: PackedInt32Array) -> void:
+    # Host side: record for late-joiner replay before forwarding.
+    if _cm != null && _cm.isHost:
+        _firedEvents.append([eventName, params])
+    var scene: Node = _currentScene
+    if !is_instance_valid(scene):
+        return
+    var eventSystem: Node = scene.get_node_or_null(^"EventSystem")
+    if eventSystem == null:
+        return
+    if eventSystem.has_method(&"receive_event"):
+        eventSystem.receive_event(eventName, params)
+
 
 # ---------- Full State Sync (on peer join) ----------
 
@@ -700,6 +741,10 @@ func send_full_state(peerId: int) -> void:
 
     # Sync simulation (reliable for initial join)
     sync_simulation_reliable.rpc_id(peerId, Simulation.time, Simulation.day, Simulation.weather)
+
+    # Replay world events (crash sites, vehicles, etc.) for late joiners
+    for entry: Array in _firedEvents:
+        broadcast_event.rpc_id(peerId, entry[0], entry[1])
 
 # ---------- Validation ----------
 

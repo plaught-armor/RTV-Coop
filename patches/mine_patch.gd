@@ -33,13 +33,24 @@ func _ensure_cm() -> void:
 
 func Detonate() -> void:
 	_ensure_cm()
-	if is_instance_valid(_cm) && _cm.is_session_active() && _cm.isHost:
-		_cm.worldState.broadcast_mine_detonate(_cachedPath, false)
+	if is_instance_valid(_cm) && _cm.is_session_active():
+		if _cm.isHost:
+			_cm.worldState.broadcast_mine_detonate(_cachedPath, false)
+			super.Detonate()
+		else:
+			# Client requests host to detonate — don't trigger locally.
+			_cm.worldState.request_mine_detonate.rpc_id(1, _cachedPath, false)
+		return
 	super.Detonate()
 
 
 func InstantDetonate() -> void:
 	_ensure_cm()
-	if is_instance_valid(_cm) && _cm.is_session_active() && _cm.isHost:
-		_cm.worldState.broadcast_mine_detonate(_cachedPath, true)
+	if is_instance_valid(_cm) && _cm.is_session_active():
+		if _cm.isHost:
+			_cm.worldState.broadcast_mine_detonate(_cachedPath, true)
+			super.InstantDetonate()
+		else:
+			_cm.worldState.request_mine_detonate.rpc_id(1, _cachedPath, true)
+		return
 	super.InstantDetonate()
