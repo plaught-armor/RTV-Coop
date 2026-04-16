@@ -679,6 +679,59 @@ func receive_mine_detonate(minePath: String, instant: bool) -> void:
     else:
         mine.Detonate()
 
+# ---------- Furniture Sync ----------
+
+
+## Client requests host to update a furniture piece's position after placement.
+@rpc("any_peer", "call_remote", "reliable")
+func request_furniture_place(furniturePath: String, pos: Vector3, rotY: float) -> void:
+    if !_cm.isHost:
+        return
+    if !is_valid_path(furniturePath):
+        return
+    var node: Node = _scene_node(furniturePath)
+    if !is_instance_valid(node):
+        return
+    node.global_position = pos
+    node.global_rotation_degrees.y = rotY
+    sync_furniture_place.rpc(furniturePath, pos, rotY)
+
+
+## Host broadcasts furniture placement to all peers.
+@rpc("authority", "call_remote", "reliable")
+func sync_furniture_place(furniturePath: String, pos: Vector3, rotY: float) -> void:
+    var node: Node = _scene_node(furniturePath)
+    if !is_instance_valid(node):
+        return
+    node.global_position = pos
+    node.global_rotation_degrees.y = rotY
+
+
+## Client requests host to remove a cataloged furniture piece.
+## Host frees locally and broadcasts via call_remote — acting client
+## already ran super.Catalog() which queue_freed its own copy.
+@rpc("any_peer", "call_remote", "reliable")
+func request_furniture_catalog(furniturePath: String) -> void:
+    if !_cm.isHost:
+        return
+    if !is_valid_path(furniturePath):
+        return
+    var node: Node = _scene_node(furniturePath)
+    if !is_instance_valid(node):
+        return
+    node.queue_free()
+    sync_furniture_catalog.rpc(furniturePath)
+
+
+## Host broadcasts furniture removal to all peers.
+@rpc("authority", "call_remote", "reliable")
+func sync_furniture_catalog(furniturePath: String) -> void:
+    var node: Node = _scene_node(furniturePath)
+    if !is_instance_valid(node):
+        return
+    node.queue_free()
+
+
 # ---------- Event System Sync ----------
 
 
