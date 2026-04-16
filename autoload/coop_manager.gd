@@ -209,6 +209,7 @@ func register_patches() -> void:
         ["res://mod/patches/bed_patch.gd", "res://Scripts/Bed.gd"],
         ["res://mod/patches/layouts_patch.gd", "res://Scripts/Layouts.gd"],
         ["res://mod/patches/furniture_patch.gd", "res://Scripts/Furniture.gd"],
+        ["res://mod/patches/fish_pool_patch.gd", "res://Scripts/FishPool.gd"],
         ["res://mod/patches/event_system_patch.gd", "res://Scripts/EventSystem.gd"],
     ]
     for pair: PackedStringArray in patches:
