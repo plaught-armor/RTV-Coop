@@ -325,25 +325,78 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     statusLabel.text = "Disconnected"
     leftCol.add_child(statusLabel)
 
+    # Host row
+    var hostRow: HBoxContainer = HBoxContainer.new()
+    hostRow.add_theme_constant_override("separation", 8)
+    leftCol.add_child(hostRow)
+
     var hostBtn: Button = Button.new()
     hostBtn.name = "MPHostBtn"
-    hostBtn.text = "Host"
-    hostBtn.custom_minimum_size = Vector2(256, 40)
+    hostBtn.text = "Host (Steam)"
+    hostBtn.custom_minimum_size = Vector2(0, 40)
+    hostBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     hostBtn.pressed.connect(_on_mp_host)
-    leftCol.add_child(hostBtn)
+    hostRow.add_child(hostBtn)
+
+    var hostIpBtn: Button = Button.new()
+    hostIpBtn.name = "MPHostIpBtn"
+    hostIpBtn.text = "Host (IP)"
+    hostIpBtn.custom_minimum_size = Vector2(0, 40)
+    hostIpBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    hostIpBtn.pressed.connect(_on_mp_host_ip)
+    hostRow.add_child(hostIpBtn)
+
+    # Direct join row
+    var joinRow: HBoxContainer = HBoxContainer.new()
+    joinRow.add_theme_constant_override("separation", 4)
+    leftCol.add_child(joinRow)
+
+    var addrInput: LineEdit = LineEdit.new()
+    addrInput.name = "MPAddrInput"
+    addrInput.placeholder_text = "127.0.0.1"
+    addrInput.custom_minimum_size = Vector2(0, 36)
+    addrInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    addrInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    joinRow.add_child(addrInput)
+
+    var portInput: LineEdit = LineEdit.new()
+    portInput.name = "MPPortInput"
+    portInput.placeholder_text = str(_cm.DEFAULT_PORT)
+    portInput.custom_minimum_size = Vector2(60, 36)
+    portInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    joinRow.add_child(portInput)
+
+    var joinBtn: Button = Button.new()
+    joinBtn.text = "Join"
+    joinBtn.custom_minimum_size = Vector2(60, 36)
+    joinBtn.pressed.connect(_on_mp_direct_join)
+    joinRow.add_child(joinBtn)
+
+    # IP info (shown when hosting via IP)
+    var ipInfo: VBoxContainer = VBoxContainer.new()
+    ipInfo.name = "MPIpInfo"
+    ipInfo.hide()
+    leftCol.add_child(ipInfo)
+
+    # Action row
+    var actionRow: HBoxContainer = HBoxContainer.new()
+    actionRow.add_theme_constant_override("separation", 8)
+    leftCol.add_child(actionRow)
 
     var disconnectBtn: Button = Button.new()
     disconnectBtn.name = "MPDisconnectBtn"
     disconnectBtn.text = "Disconnect"
-    disconnectBtn.custom_minimum_size = Vector2(256, 40)
+    disconnectBtn.custom_minimum_size = Vector2(0, 40)
+    disconnectBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     disconnectBtn.pressed.connect(_on_mp_disconnect)
-    leftCol.add_child(disconnectBtn)
+    actionRow.add_child(disconnectBtn)
 
     var logsBtn: Button = Button.new()
-    logsBtn.text = "Open Logs Folder"
-    logsBtn.custom_minimum_size = Vector2(256, 40)
+    logsBtn.text = "Logs"
+    logsBtn.custom_minimum_size = Vector2(0, 40)
+    logsBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     logsBtn.pressed.connect(_on_mp_logs)
-    leftCol.add_child(logsBtn)
+    actionRow.add_child(logsBtn)
 
     var playersHeader: Label = Label.new()
     playersHeader.text = "Connected Players"
@@ -416,7 +469,9 @@ func _refresh_mp_status() -> void:
         return
     var statusLabel: Label = find_child("MPStatus", true, false) as Label
     var hostBtn: Button = find_child("MPHostBtn", true, false) as Button
+    var hostIpBtn: Button = find_child("MPHostIpBtn", true, false) as Button
     var disconnectBtn: Button = find_child("MPDisconnectBtn", true, false) as Button
+    var ipInfo: VBoxContainer = find_child("MPIpInfo", true, false) as VBoxContainer
     var active: bool = _cm.is_session_active()
     if statusLabel != null:
         if active:
@@ -428,9 +483,42 @@ func _refresh_mp_status() -> void:
             statusLabel.modulate = Color(1, 1, 1, 0.6)
     if hostBtn != null:
         hostBtn.disabled = active
+    if hostIpBtn != null:
+        hostIpBtn.disabled = active
     if disconnectBtn != null:
         disconnectBtn.disabled = !active
+    _refresh_ip_info(ipInfo, active)
     _refresh_players_list(active)
+
+
+func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
+    if ipInfo == null:
+        return
+    if !active || !_cm.isHost || _cm._pendingHostUseSteam:
+        ipInfo.hide()
+        return
+    # Only rebuild when first shown or peer count changes.
+    if ipInfo.visible && ipInfo.get_child_count() > 0:
+        return
+    ipInfo.show()
+    for child: Node in ipInfo.get_children():
+        child.queue_free()
+    var port: int = _cm.DEFAULT_PORT
+    for addr: String in _get_sharable_addresses():
+        var row: HBoxContainer = HBoxContainer.new()
+        ipInfo.add_child(row)
+        var text: String = "%s:%d" % [addr, port]
+        var label: Label = Label.new()
+        label.text = text
+        label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        label.add_theme_font_size_override("font_size", 12)
+        row.add_child(label)
+        var copyBtn: Button = Button.new()
+        copyBtn.text = "Copy"
+        copyBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+        copyBtn.set_meta(&"copyText", text)
+        copyBtn.pressed.connect(_on_copy_ip.bind(copyBtn))
+        row.add_child(copyBtn)
 
 
 func _refresh_players_list(active: bool) -> void:
@@ -674,22 +762,60 @@ func _show_coop_tabs() -> void:
 
 
 func _on_mp_host() -> void:
-    if !is_instance_valid(_cm):
-        return
-    if _cm.is_session_active():
+    if !is_instance_valid(_cm) || _cm.is_session_active():
         return
     _cm.host_game()
 
 
-func _on_mp_disconnect() -> void:
-    if !is_instance_valid(_cm):
+func _on_mp_host_ip() -> void:
+    if !is_instance_valid(_cm) || _cm.is_session_active():
         return
-    if !_cm.is_session_active():
+    _cm.host_game(_cm.DEFAULT_PORT, false)
+
+
+func _on_mp_direct_join() -> void:
+    if !is_instance_valid(_cm) || _cm.is_session_active():
+        return
+    var addrInput: LineEdit = find_child("MPAddrInput", true, false) as LineEdit
+    var portInput: LineEdit = find_child("MPPortInput", true, false) as LineEdit
+    var addr: String = addrInput.text.strip_edges() if addrInput != null else ""
+    if addr.is_empty():
+        addr = "127.0.0.1"
+    var port: int = _cm.DEFAULT_PORT
+    if portInput != null && !portInput.text.strip_edges().is_empty():
+        port = int(portInput.text.strip_edges())
+    _cm.join_game(addr, port, true)
+
+
+func _on_mp_disconnect() -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
     _cm.disconnect_session()
+    var ipInfo: VBoxContainer = find_child("MPIpInfo", true, false) as VBoxContainer
+    if ipInfo != null:
+        ipInfo.hide()
+        for child: Node in ipInfo.get_children():
+            child.queue_free()
 
 
 func _on_mp_logs() -> void:
     if !is_instance_valid(_cm):
         return
     _cm.collect_logs()
+
+
+func _on_copy_ip(btn: Button) -> void:
+    DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
+
+
+func _get_sharable_addresses() -> Array[String]:
+    var out: Array[String] = []
+    for addr: String in IP.get_local_addresses():
+        if addr.begins_with("127.") || addr.begins_with("169.254."):
+            continue
+        if ":" in addr:
+            continue
+        out.append(addr)
+    if out.is_empty():
+        out.append("127.0.0.1")
+    return out

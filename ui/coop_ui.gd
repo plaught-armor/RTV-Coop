@@ -48,13 +48,17 @@ const META_FILE: String = "meta.cfg"
 const SELECTED_COLOR: Color = Color(0.4, 0.8, 0.4)
 const UNSELECTED_COLOR: Color = Color(0.7, 0.7, 0.7)
 
-# Direct-connect widgets (always created)
-var addressInput: LineEdit = null
-var portInput: LineEdit = null
-var hostInfoBox: VBoxContainer = null
-## Whether the pending host session (selected via world picker) should use the
-## Steam lobby/P2P path. Set by on_host_pressed / on_host_direct_pressed before
-## the picker calls _cm.host_game().
+# Direct-connect dialog
+var directJoinPanel: Control = null
+var djAddressInput: LineEdit = null
+var djPortInput: LineEdit = null
+
+# Lobby dialog (shared by Steam + IP host flows)
+var lobbyPanel: Control = null
+var _lobbyPlayerList: VBoxContainer = null
+var _lobbyFriendList: VBoxContainer = null
+var _lobbyUseSteam: bool = true
+## Steam vs IP hosting mode — set before world picker opens.
 var pendingHostUseSteam: bool = true
 
 # Shared
@@ -78,7 +82,7 @@ func _input(event: InputEvent) -> void:
     if !is_in_gameplay():
         return
     if event.keycode == KEY_F11 && is_instance_valid(_cm) && _cm.DEBUG:
-        on_direct_join_pressed()
+        show_direct_join_dialog()
 
 
 func build_ui() -> void:
@@ -142,52 +146,6 @@ func build_ui() -> void:
 
     vbox.add_child(HSeparator.new())
 
-    var directLabel: Label = Label.new()
-    directLabel.text = "Direct Connect"
-    vbox.add_child(directLabel)
-
-    var hostDirectBtn: Button = Button.new()
-    hostDirectBtn.text = "Host (IP)"
-    hostDirectBtn.pressed.connect(on_host_direct_pressed)
-    vbox.add_child(hostDirectBtn)
-
-    hostInfoBox = VBoxContainer.new()
-    hostInfoBox.hide()
-    vbox.add_child(hostInfoBox)
-
-    var addrRow: HBoxContainer = HBoxContainer.new()
-    vbox.add_child(addrRow)
-
-    var addrLabel: Label = Label.new()
-    addrLabel.text = "IP:"
-    addrRow.add_child(addrLabel)
-
-    addressInput = LineEdit.new()
-    addressInput.placeholder_text = "127.0.0.1"
-    addressInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    addressInput.mouse_filter = Control.MOUSE_FILTER_STOP
-    addrRow.add_child(addressInput)
-
-    var portRow: HBoxContainer = HBoxContainer.new()
-    vbox.add_child(portRow)
-
-    var portLabel: Label = Label.new()
-    portLabel.text = "Port:"
-    portRow.add_child(portLabel)
-
-    portInput = LineEdit.new()
-    portInput.placeholder_text = str(_cm.DEFAULT_PORT)
-    portInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    portInput.mouse_filter = Control.MOUSE_FILTER_STOP
-    portRow.add_child(portInput)
-
-    var joinBtn: Button = Button.new()
-    joinBtn.text = "Direct Join"
-    joinBtn.pressed.connect(on_direct_join_pressed)
-    vbox.add_child(joinBtn)
-
-    vbox.add_child(HSeparator.new())
-
     var disconnectBtn: Button = Button.new()
     disconnectBtn.text = "Disconnect"
     disconnectBtn.pressed.connect(on_disconnect_pressed)
@@ -232,61 +190,8 @@ func _process(_delta: float) -> void:
             var worldLabel: String = _get_active_world_name()
             statusLabel.text = "Connected — %s" % worldLabel if !worldLabel.is_empty() else "Connected"
 
-    update_host_info(currentState == 1)
     update_player_list()
-
-
-## Populates the host-info section with one row per sharable local address.
-## Each row shows "ip:port" plus a Copy button that writes it to the clipboard.
-func update_host_info(isHosting: bool) -> void:
-    if hostInfoBox == null:
-        return
-    for child: Node in hostInfoBox.get_children():
-        child.queue_free()
-    if !isHosting:
-        hostInfoBox.hide()
-        return
-    hostInfoBox.show()
-
-    var header: Label = Label.new()
-    header.text = "Share your IP (others join by pasting above):"
-    hostInfoBox.add_child(header)
-
-    var port: int = _cm.DEFAULT_PORT
-    for addr: String in _get_sharable_addresses():
-        var row: HBoxContainer = HBoxContainer.new()
-        hostInfoBox.add_child(row)
-
-        var text: String = "%s:%d" % [addr, port]
-        var label: Label = Label.new()
-        label.text = text
-        label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        row.add_child(label)
-
-        var copyBtn: Button = Button.new()
-        copyBtn.text = "Copy"
-        copyBtn.set_meta(&"copyText", text)
-        copyBtn.pressed.connect(_on_copy_host_ip_pressed.bind(copyBtn))
-        row.add_child(copyBtn)
-
-
-func _on_copy_host_ip_pressed(btn: Button) -> void:
-    DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
-
-
-## Returns non-loopback IPv4 addresses. Includes LAN (192.168/10/172.16) and
-## Tailscale (100.64/10) ranges — user picks whichever applies.
-func _get_sharable_addresses() -> Array[String]:
-    var out: Array[String] = []
-    for addr: String in IP.get_local_addresses():
-        if addr.begins_with("127.") || addr.begins_with("169.254."):
-            continue
-        if ":" in addr:
-            continue
-        out.append(addr)
-    if out.is_empty():
-        out.append("127.0.0.1")
-    return out
+    _update_lobby_players()
 
 
 func update_player_list() -> void:
@@ -369,20 +274,6 @@ func on_host_pressed() -> void:
     pendingHostUseSteam = true
     show_world_picker()
 
-
-func on_host_direct_pressed() -> void:
-    if _cm.is_session_active():
-        return
-    pendingHostUseSteam = false
-    show_world_picker()
-
-
-func on_direct_join_pressed() -> void:
-    var address: String = addressInput.text if addressInput != null && !addressInput.text.is_empty() else "127.0.0.1"
-    var port: int = _cm.DEFAULT_PORT
-    if portInput != null && portInput.text.is_valid_int():
-        port = clampi(portInput.text.to_int(), 1024, 65535)
-    _cm.join_game(address, port)
 
 
 func on_disconnect_pressed() -> void:
@@ -1119,9 +1010,8 @@ func _update_selection_colors() -> void:
 
 func on_create_world_confirmed() -> void:
     print("[coop_ui] on_create_world_confirmed called")
-    # Don't proceed if Steam isn't ready yet — host_game would bail and we'd
-    # leave an empty world dir behind. User can retry once Steam finishes.
-    if !_cm.steamBridge.is_ready() || !_cm.steamBridge.ownsGame:
+    # Steam gate only when hosting via Steam — IP mode doesn't need it.
+    if pendingHostUseSteam && (!_cm.steamBridge.is_ready() || !_cm.steamBridge.ownsGame):
         _cm._log("[coop_ui] Create aborted — Steam not ready, try again in a moment")
         return
 
@@ -1139,15 +1029,17 @@ func on_create_world_confirmed() -> void:
     newWorldPanel = null
 
     _cm.set_active_world(worldId)
-    _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
-
-    # Verify host_game actually started a session. If not, clean up the empty
-    # world dir and the active-world marker so the next attempt is clean.
-    if !_cm.is_session_active() || !_cm.isHost:
-        _cm._log("[coop_ui] host_game failed — cleaning up world dir %s" % worldDir)
-        _remove_dir_recursive(worldDir)
-        _cm.clear_active_world()
-        return
+    # IP path: server already running from show_host_ip_dialog, just finalize.
+    # Steam path: start server + finalize in one call.
+    if _cm.is_session_active():
+        _cm.finalize_host()
+    else:
+        _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
+        if !_cm.is_session_active() || !_cm.isHost:
+            _cm._log("[coop_ui] host_game failed — cleaning up world dir %s" % worldDir)
+            _remove_dir_recursive(worldDir)
+            _cm.clear_active_world()
+            return
 
     # Vanilla NewGame writes user://World.tres + Character.tres. We then mirror
     # those (plus shelter/trader saves once they exist) into user://coop/<id>/
@@ -1188,6 +1080,253 @@ func on_new_world_back() -> void:
     show_world_picker()
 
 
+# ---------- Direct Join Dialog ----------
+
+
+func show_direct_join_dialog() -> void:
+    directJoinPanel = _make_menu_dialog_panel("Direct Join", "Connect to a host by IP")
+    add_child(directJoinPanel)
+    _wire_return_button(directJoinPanel, _on_direct_join_back)
+
+    var vbox: VBoxContainer = _dialog_vbox(directJoinPanel)
+
+    var addrLabel: Label = Label.new()
+    addrLabel.text = "IP Address"
+    addrLabel.add_theme_font_size_override("font_size", 14)
+    vbox.add_child(addrLabel)
+
+    djAddressInput = LineEdit.new()
+    djAddressInput.placeholder_text = "127.0.0.1"
+    djAddressInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    djAddressInput.custom_minimum_size = Vector2(0, 32)
+    vbox.add_child(djAddressInput)
+
+    var portLabel: Label = Label.new()
+    portLabel.text = "Port"
+    portLabel.add_theme_font_size_override("font_size", 14)
+    vbox.add_child(portLabel)
+
+    djPortInput = LineEdit.new()
+    djPortInput.placeholder_text = str(_cm.DEFAULT_PORT)
+    djPortInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    djPortInput.custom_minimum_size = Vector2(0, 32)
+    vbox.add_child(djPortInput)
+
+    var spacer: Control = Control.new()
+    spacer.custom_minimum_size = Vector2(0, 8)
+    vbox.add_child(spacer)
+
+    var connectBtn: Button = Button.new()
+    connectBtn.text = "Connect"
+    connectBtn.custom_minimum_size = Vector2(256, 40)
+    connectBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    connectBtn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+    connectBtn.pressed.connect(_on_direct_join_connect)
+    vbox.add_child(connectBtn)
+
+
+func _on_direct_join_connect() -> void:
+    var addr: String = djAddressInput.text.strip_edges() if djAddressInput != null else ""
+    if addr.is_empty():
+        addr = "127.0.0.1"
+    var port: int = _cm.DEFAULT_PORT
+    if djPortInput != null && !djPortInput.text.strip_edges().is_empty():
+        port = int(djPortInput.text.strip_edges())
+    _free_dialog(directJoinPanel)
+    directJoinPanel = null
+    _cm.join_game(addr, port, true)
+
+
+func _on_direct_join_back() -> void:
+    _free_dialog(directJoinPanel)
+    directJoinPanel = null
+    _show_mp_submenu_if_on_menu()
+
+
+# ---------- Lobby Dialog ----------
+
+
+## Unified lobby for both Steam and IP hosting. Starts the ENet server
+## immediately so peers can connect while the host is on this screen.
+func show_lobby(useSteam: bool) -> void:
+    _lobbyUseSteam = useSteam
+    pendingHostUseSteam = useSteam
+    var port: int = _cm.DEFAULT_PORT
+
+    if !_cm.is_session_active():
+        if !_cm.start_hosting(port, useSteam):
+            return
+
+    var steamName: String = _cm.steamBridge.localSteamName if _cm.steamBridge.is_ready() else ""
+    var subtitle: String = ("Steam: %s" % steamName if !steamName.is_empty() else "Steam lobby") if useSteam else "Direct connect"
+    lobbyPanel = _make_menu_dialog_panel("Lobby", subtitle)
+    add_child(lobbyPanel)
+    _wire_return_button(lobbyPanel, _on_lobby_back)
+
+    var vbox: VBoxContainer = _dialog_vbox(lobbyPanel)
+
+    # IP addresses (IP mode only)
+    if !useSteam:
+        var addrBox: HBoxContainer = HBoxContainer.new()
+        addrBox.add_theme_constant_override("separation", 8)
+        addrBox.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+        vbox.add_child(addrBox)
+
+        for addr: String in _get_sharable_addresses():
+            var text: String = "%s:%d" % [addr, port]
+            var label: Label = Label.new()
+            label.text = text
+            addrBox.add_child(label)
+
+            var copyBtn: Button = Button.new()
+            copyBtn.text = "Copy"
+            copyBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+            copyBtn.set_meta(&"copyText", text)
+            copyBtn.pressed.connect(_on_lobby_copy.bind(copyBtn))
+            addrBox.add_child(copyBtn)
+
+    # Connected players
+    var playersHeader: Label = Label.new()
+    playersHeader.text = "Players"
+    playersHeader.add_theme_font_size_override("font_size", 14)
+    vbox.add_child(playersHeader)
+
+    _lobbyPlayerList = VBoxContainer.new()
+    vbox.add_child(_lobbyPlayerList)
+
+    # Friends list (Steam mode only)
+    if useSteam:
+        var friendsHeader: Label = Label.new()
+        friendsHeader.text = "Invite Friends"
+        friendsHeader.add_theme_font_size_override("font_size", 14)
+        vbox.add_child(friendsHeader)
+
+        var friendScroll: ScrollContainer = ScrollContainer.new()
+        friendScroll.custom_minimum_size = Vector2(0, 150)
+        friendScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+        vbox.add_child(friendScroll)
+
+        _lobbyFriendList = VBoxContainer.new()
+        _lobbyFriendList.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        friendScroll.add_child(_lobbyFriendList)
+
+        _refresh_lobby_friends()
+
+    # Select World above Return
+    var returnBtn: Button = lobbyPanel.find_child("ReturnBtn", true, false)
+    var outerVBox: VBoxContainer = returnBtn.get_parent()
+    var selectBtn: Button = Button.new()
+    selectBtn.text = "Select World"
+    selectBtn.custom_minimum_size = Vector2(256, 40)
+    selectBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+    selectBtn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+    selectBtn.pressed.connect(_on_lobby_select_world)
+    outerVBox.add_child(selectBtn)
+    outerVBox.move_child(selectBtn, returnBtn.get_index())
+
+
+func _on_lobby_copy(btn: Button) -> void:
+    DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
+
+
+func _update_lobby_players() -> void:
+    if _lobbyPlayerList == null || !is_instance_valid(_lobbyPlayerList):
+        return
+    for child: Node in _lobbyPlayerList.get_children():
+        child.queue_free()
+    if !_cm.isActive:
+        return
+    var hostLabel: Label = Label.new()
+    hostLabel.text = "%s (Host)" % _cm.peerNames.get(_cm.localPeerId, "Host")
+    hostLabel.add_theme_font_size_override("font_size", 13)
+    _lobbyPlayerList.add_child(hostLabel)
+    for peerId: int in _cm.connectedPeers:
+        var peerLabel: Label = Label.new()
+        peerLabel.text = _cm.peerNames.get(peerId, "Peer %d" % peerId)
+        peerLabel.add_theme_font_size_override("font_size", 13)
+        _lobbyPlayerList.add_child(peerLabel)
+
+
+func _refresh_lobby_friends() -> void:
+    if !_lobbyUseSteam || !_cm.steamBridge.is_ready():
+        return
+    _cm.steamBridge.get_friends(on_lobby_friends_received)
+
+
+func on_lobby_friends_received(response: Dictionary) -> void:
+    if _lobbyFriendList == null || !is_instance_valid(_lobbyFriendList):
+        return
+    if !response.get(&"ok", false):
+        return
+    for child: Node in _lobbyFriendList.get_children():
+        child.queue_free()
+    var friends: Array = response.get(&"data", [])
+    for friend: Dictionary in friends:
+        var friendName: String = friend.get(&"name", "Unknown")
+        var state: int = friend.get(&"state", 0)
+        if state == 0:
+            continue
+        var row: HBoxContainer = HBoxContainer.new()
+        _lobbyFriendList.add_child(row)
+
+        var label: Label = Label.new()
+        label.text = friendName
+        label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        label.add_theme_font_size_override("font_size", 13)
+        row.add_child(label)
+
+        var steamID: String = friend.get(&"steam_id", "")
+        if !steamID.is_empty():
+            var invBtn: Button = Button.new()
+            invBtn.text = "Invite"
+            invBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+            invBtn.pressed.connect(_on_lobby_invite.bind(steamID))
+            row.add_child(invBtn)
+
+
+func _on_lobby_invite(steamID: String) -> void:
+    _cm.steamBridge.invite_to_lobby(steamID, _on_lobby_invite_result)
+
+
+func _on_lobby_invite_result(response: Dictionary) -> void:
+    if response.get(&"ok", false):
+        _cm._log("Invite sent")
+    else:
+        _cm._log("Invite failed: %s" % response.get(&"error", "unknown"))
+
+
+func _on_lobby_select_world() -> void:
+    _free_dialog(lobbyPanel)
+    lobbyPanel = null
+    _lobbyPlayerList = null
+    _lobbyFriendList = null
+    show_world_picker()
+
+
+func _on_lobby_back() -> void:
+    if _cm.is_session_active():
+        _cm.disconnect_session()
+    _free_dialog(lobbyPanel)
+    lobbyPanel = null
+    _lobbyPlayerList = null
+    _lobbyFriendList = null
+    _show_mp_submenu_if_on_menu()
+
+
+## Non-loopback IPv4 addresses (LAN + Tailscale).
+func _get_sharable_addresses() -> Array[String]:
+    var out: Array[String] = []
+    for addr: String in IP.get_local_addresses():
+        if addr.begins_with("127.") || addr.begins_with("169.254."):
+            continue
+        if ":" in addr:
+            continue
+        out.append(addr)
+    if out.is_empty():
+        out.append("127.0.0.1")
+    return out
+
+
 func on_world_selected(worldId: String) -> void:
     hide_world_picker()
     _update_world_last_played(worldId)
@@ -1197,7 +1336,10 @@ func on_world_selected(worldId: String) -> void:
     _cm.wipe_user_saves()
     _cm.mirror_world_to_user(worldId)
 
-    _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
+    if _cm.is_session_active():
+        _cm.finalize_host()
+    else:
+        _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
 
     # Resume from the most recently visited shelter (or Cabin if none).
     var loader: Node = get_node_or_null("/root/Loader")

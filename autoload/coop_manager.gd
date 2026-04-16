@@ -45,6 +45,7 @@ var aiState: Node = null
 var steamBridge: Node = null
 ## Reference to the co-op UI panel.
 var coopUI: Control = null
+var _pendingHostUseSteam: bool = true
 
 ## Consolidated preloads — children access these via [code]_cm.PropertyName[/code].
 var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
@@ -174,17 +175,9 @@ func _update_mp_status() -> void:
     var submenu: Node = scene.get_node_or_null("CoopMPSubmenu")
     if submenu == null:
         return
-    var statusLabel: Label = submenu.find_child("SteamStatus", true, false) as Label
     var hostBtn: Button = submenu.find_child("HostBtn", true, false) as Button
     var browseBtn: Button = submenu.find_child("BrowseBtn", true, false) as Button
     var ready: bool = is_instance_valid(steamBridge) && steamBridge.is_ready() && steamBridge.ownsGame
-    if statusLabel != null:
-        if ready:
-            statusLabel.text = "Steam: %s" % steamBridge.localSteamName
-            statusLabel.modulate = Color(0.5, 0.9, 0.5, 0.9)
-        else:
-            statusLabel.text = "Connecting to Steam..."
-            statusLabel.modulate = Color(1, 0.85, 0.4, 0.9)
     if hostBtn != null:
         hostBtn.disabled = !ready
     if browseBtn != null:
@@ -223,18 +216,20 @@ func register_patches() -> void:
 
 
 ## Creates an ENet server and a Steam P2P listen socket + lobby.
-func host_game(port: int = DEFAULT_PORT, useSteam: bool = true) -> void:
+## Starts the ENet server. Peers can connect immediately. World/save setup
+## is deferred until [method finalize_host] after the host picks a world.
+func start_hosting(port: int = DEFAULT_PORT, useSteam: bool = true) -> bool:
     if is_session_active():
         _log("Already connected, disconnect first")
-        return
-    if !DEBUG && !steamBridge.ownsGame:
+        return false
+    if useSteam && !DEBUG && !steamBridge.ownsGame:
         _log("Cannot host — game ownership not verified")
-        return
+        return false
     var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
     var error: Error = peer.create_server(port, MAX_CLIENTS)
     if error != OK:
         _log("Failed to create server: %s" % error)
-        return
+        return false
     multiplayer.multiplayer_peer = peer
     localPeerId = multiplayer.get_unique_id()
     isHost = true
@@ -246,21 +241,30 @@ func host_game(port: int = DEFAULT_PORT, useSteam: bool = true) -> void:
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
+    _wasInCoop = true
+    _log("Hosting on port %d (id: %d, steam: %s)" % [port, localPeerId, str(useSteam)])
+    return true
+
+
+## Sets up world save paths and item tracking after the host picks a world.
+func finalize_host() -> void:
     worldState.start_item_tracking()
     _setup_save_paths()
     _update_rich_presence()
-    _wasInCoop = true
-    _log("Hosting on port %d (id: %d, steam: %s)" % [port, localPeerId, str(useSteam)])
+
+
+## Legacy wrapper — starts hosting and finalizes in one call.
+func host_game(port: int = DEFAULT_PORT, useSteam: bool = true) -> void:
+    if start_hosting(port, useSteam):
+        finalize_host()
 
 
 ## Connects to a host at [param address]:[param port] as a client.
-## Called internally by [method on_p2p_tunnel_ready] with the tunnel's localhost port,
-## or directly in DEBUG mode for ENet direct-connect.
-func join_game(address: String, port: int = DEFAULT_PORT) -> void:
+func join_game(address: String, port: int = DEFAULT_PORT, directConnect: bool = false) -> void:
     if is_session_active():
         _log("Already connected, disconnect first")
         return
-    if !steamBridge.ownsGame && !DEBUG:
+    if !directConnect && !steamBridge.ownsGame && !DEBUG:
         _log("Cannot join — game ownership not verified")
         return
     var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
@@ -803,44 +807,56 @@ func _build_mp_submenu(menu: Node) -> void:
     subheader.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     outer.add_child(subheader)
 
-    # Steam readiness status — polled in _physics_process via _update_mp_status.
-    var statusLabel: Label = Label.new()
-    statusLabel.name = "SteamStatus"
-    statusLabel.text = "Connecting to Steam..."
-    statusLabel.modulate = Color(1, 0.85, 0.4, 0.9)
-    statusLabel.add_theme_font_size_override("font_size", 12)
-    statusLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    outer.add_child(statusLabel)
-
     var topSpacer: Control = Control.new()
     topSpacer.custom_minimum_size = Vector2(0, 16)
     outer.add_child(topSpacer)
 
-    var hostBtn: Button = _mp_submenu_button("Host World")
+    var btnGrid: HBoxContainer = HBoxContainer.new()
+    btnGrid.add_theme_constant_override("separation", 8)
+    outer.add_child(btnGrid)
+
+    # Left column: host buttons
+    var hostCol: VBoxContainer = VBoxContainer.new()
+    hostCol.add_theme_constant_override("separation", 4)
+    hostCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    btnGrid.add_child(hostCol)
+
+    var hostBtn: Button = _mp_row_button("Host (Steam)")
     hostBtn.name = "HostBtn"
     hostBtn.disabled = true
     hostBtn.pressed.connect(_on_mp_host_pressed.bind(menu))
-    outer.add_child(hostBtn)
+    hostCol.add_child(hostBtn)
 
-    var browseBtn: Button = _mp_submenu_button("Browse Lobbies")
+    var hostIpBtn: Button = _mp_row_button("Host (IP)")
+    hostIpBtn.pressed.connect(_on_mp_host_ip_pressed.bind(menu))
+    hostCol.add_child(hostIpBtn)
+
+    # Right column: join buttons
+    var joinCol: VBoxContainer = VBoxContainer.new()
+    joinCol.add_theme_constant_override("separation", 4)
+    joinCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    btnGrid.add_child(joinCol)
+
+    var browseBtn: Button = _mp_row_button("Browse Lobbies")
     browseBtn.name = "BrowseBtn"
     browseBtn.disabled = true
     browseBtn.pressed.connect(_on_mp_browse_pressed.bind(menu))
-    outer.add_child(browseBtn)
+    joinCol.add_child(browseBtn)
+
+    var joinBtn: Button = _mp_row_button("Direct Join")
+    joinBtn.pressed.connect(_on_mp_show_direct_join.bind(menu))
+    joinCol.add_child(joinBtn)
+
+    # Push footer to the bottom
+    var footerSpacer: Control = Control.new()
+    footerSpacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    outer.add_child(footerSpacer)
 
     var logsBtn: Button = _mp_submenu_button("Open Logs Folder")
     logsBtn.pressed.connect(_on_mp_logs_pressed)
     outer.add_child(logsBtn)
 
-    var bottomSpacer: Control = Control.new()
-    bottomSpacer.custom_minimum_size = Vector2(0, 16)
-    outer.add_child(bottomSpacer)
-
-    var returnBtn: Button = Button.new()
-    returnBtn.text = "← Return"
-    returnBtn.custom_minimum_size = Vector2(256, 40)
-    returnBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-    returnBtn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+    var returnBtn: Button = _mp_submenu_button("← Return")
     returnBtn.pressed.connect(_on_mp_back_pressed.bind(menu))
     outer.add_child(returnBtn)
 
@@ -854,14 +870,46 @@ func _mp_submenu_button(btnText: String) -> Button:
     return btn
 
 
+## Row button — expands to fill its share of the HBox equally.
+func _mp_row_button(btnText: String) -> Button:
+    var btn: Button = Button.new()
+    btn.text = btnText
+    btn.custom_minimum_size = Vector2(0, 40)
+    btn.mouse_filter = Control.MOUSE_FILTER_STOP
+    btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    return btn
+
+
 func _on_mp_host_pressed(menu: Node) -> void:
+    if menu.has_method(&"PlayClick"):
+        menu.PlayClick()
+    _pendingHostUseSteam = true
+    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    if submenu != null:
+        submenu.hide()
+    if is_instance_valid(coopUI):
+        coopUI.show_lobby(true)
+
+
+func _on_mp_host_ip_pressed(menu: Node) -> void:
+    if menu.has_method(&"PlayClick"):
+        menu.PlayClick()
+    _pendingHostUseSteam = false
+    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    if submenu != null:
+        submenu.hide()
+    if is_instance_valid(coopUI):
+        coopUI.show_lobby(false)
+
+
+func _on_mp_show_direct_join(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
     if submenu != null:
         submenu.hide()
     if is_instance_valid(coopUI):
-        coopUI.show_world_picker()
+        coopUI.show_direct_join_dialog()
 
 
 func _on_mp_browse_pressed(menu: Node) -> void:
