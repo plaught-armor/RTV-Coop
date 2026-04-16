@@ -124,30 +124,23 @@ Both log files live in the same `logs/` directory. **Include both when reporting
 
 ## Roadmap
 
-- [x] Position sync, ghost visuals, connection UI
-- [x] Steam lobbies, friend invites, avatars, P2P NAT traversal
-- [x] World state sync (doors, switches, time/weather)
-- [x] Loot container sync
-- [x] Transitions, pickups, footstep audio
-- [x] RTV Mod Loader packaging, Proton support
-- [x] AI multi-player awareness (detection, targeting, host-authoritative replication)
-- [x] Combat sync (weapon fire, bullet impacts, AI damage routing)
-- [x] Client equipment save across transitions
-- [x] Grenade sync (throw physics, detonation, explosion/smoke effects)
-- [x] Independent map transitions (headless SubViewport AI on host)
-- [x] Explosion/mine damage sync (host-authoritative)
-- [x] Death state sync and player cleanup
-- [x] Campfire state sync
-- [x] Per-world persistent saves with world picker
-- [x] Trader sync (host-authoritative ACK flow)
-- [x] World event sync (helicopters, BTR, airdrops, crash sites, police, cat)
-- [x] Furniture placement/catalog sync
-- [x] Deterministic room layouts and fish pools
-- [x] Sleep blocked in co-op
-- [x] Direct connect (IP-based, non-Steam)
-- [x] Settings panel with multiplayer tab
+- [x] Player sync and ghost visuals
+- [x] Steam lobbies, friend invites, P2P
+- [x] Direct connect (IP)
+- [x] World state (doors, switches, containers, time/weather)
+- [x] AI awareness and replication
+- [x] Combat (weapons, grenades, explosions, mines, knives)
+- [x] Death sync
+- [x] Traders
+- [x] World events (helicopters, BTR, airdrops, crash sites)
+- [x] Furniture placement
+- [x] Campfires
+- [x] Fishing pools
+- [x] Room layout determinism
+- [x] Per-world saves
+- [x] Map transitions
+- [x] Proton/Linux support
 - [ ] Third-person player model
-- [x] Knife attack sync (audio + hit decals; swing animation not yet visible)
 - [ ] Voice chat
 
 ---
