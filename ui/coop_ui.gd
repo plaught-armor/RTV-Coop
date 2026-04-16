@@ -48,9 +48,14 @@ const META_FILE: String = "meta.cfg"
 const SELECTED_COLOR: Color = Color(0.4, 0.8, 0.4)
 const UNSELECTED_COLOR: Color = Color(0.7, 0.7, 0.7)
 
-# ENet debug widgets (only created in DEBUG mode)
+# Direct-connect widgets (always created)
 var addressInput: LineEdit = null
 var portInput: LineEdit = null
+var hostInfoBox: VBoxContainer = null
+## Whether the pending host session (selected via world picker) should use the
+## Steam lobby/P2P path. Set by on_host_pressed / on_host_direct_pressed before
+## the picker calls _cm.host_game().
+var pendingHostUseSteam: bool = true
 
 # Shared
 var playerList: VBoxContainer = null
@@ -108,7 +113,7 @@ func build_ui() -> void:
     vbox.add_child(btnRow)
 
     var hostBtn: Button = Button.new()
-    hostBtn.text = "Host (F10)"
+    hostBtn.text = "Host (Steam)"
     hostBtn.pressed.connect(on_host_pressed)
     btnRow.add_child(hostBtn)
 
@@ -135,44 +140,51 @@ func build_ui() -> void:
     friendList.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     friendScroll.add_child(friendList)
 
-    # ENet debug section (DEBUG only)
-    if _cm.DEBUG:
-        vbox.add_child(HSeparator.new())
+    vbox.add_child(HSeparator.new())
 
-        var debugLabel: Label = Label.new()
-        debugLabel.text = "Direct Connect (DEBUG)"
-        vbox.add_child(debugLabel)
+    var directLabel: Label = Label.new()
+    directLabel.text = "Direct Connect"
+    vbox.add_child(directLabel)
 
-        var addrRow: HBoxContainer = HBoxContainer.new()
-        vbox.add_child(addrRow)
+    var hostDirectBtn: Button = Button.new()
+    hostDirectBtn.text = "Host (IP)"
+    hostDirectBtn.pressed.connect(on_host_direct_pressed)
+    vbox.add_child(hostDirectBtn)
 
-        var addrLabel: Label = Label.new()
-        addrLabel.text = "IP:"
-        addrRow.add_child(addrLabel)
+    hostInfoBox = VBoxContainer.new()
+    hostInfoBox.hide()
+    vbox.add_child(hostInfoBox)
 
-        addressInput = LineEdit.new()
-        addressInput.placeholder_text = "127.0.0.1"
-        addressInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        addressInput.mouse_filter = Control.MOUSE_FILTER_STOP
-        addrRow.add_child(addressInput)
+    var addrRow: HBoxContainer = HBoxContainer.new()
+    vbox.add_child(addrRow)
 
-        var portRow: HBoxContainer = HBoxContainer.new()
-        vbox.add_child(portRow)
+    var addrLabel: Label = Label.new()
+    addrLabel.text = "IP:"
+    addrRow.add_child(addrLabel)
 
-        var portLabel: Label = Label.new()
-        portLabel.text = "Port:"
-        portRow.add_child(portLabel)
+    addressInput = LineEdit.new()
+    addressInput.placeholder_text = "127.0.0.1"
+    addressInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    addressInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    addrRow.add_child(addressInput)
 
-        portInput = LineEdit.new()
-        portInput.placeholder_text = str(_cm.DEFAULT_PORT)
-        portInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        portInput.mouse_filter = Control.MOUSE_FILTER_STOP
-        portRow.add_child(portInput)
+    var portRow: HBoxContainer = HBoxContainer.new()
+    vbox.add_child(portRow)
 
-        var joinBtn: Button = Button.new()
-        joinBtn.text = "Direct Join"
-        joinBtn.pressed.connect(on_direct_join_pressed)
-        vbox.add_child(joinBtn)
+    var portLabel: Label = Label.new()
+    portLabel.text = "Port:"
+    portRow.add_child(portLabel)
+
+    portInput = LineEdit.new()
+    portInput.placeholder_text = str(_cm.DEFAULT_PORT)
+    portInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    portInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    portRow.add_child(portInput)
+
+    var joinBtn: Button = Button.new()
+    joinBtn.text = "Direct Join"
+    joinBtn.pressed.connect(on_direct_join_pressed)
+    vbox.add_child(joinBtn)
 
     vbox.add_child(HSeparator.new())
 
@@ -220,7 +232,61 @@ func _process(_delta: float) -> void:
             var worldLabel: String = _get_active_world_name()
             statusLabel.text = "Connected — %s" % worldLabel if !worldLabel.is_empty() else "Connected"
 
+    update_host_info(currentState == 1)
     update_player_list()
+
+
+## Populates the host-info section with one row per sharable local address.
+## Each row shows "ip:port" plus a Copy button that writes it to the clipboard.
+func update_host_info(isHosting: bool) -> void:
+    if hostInfoBox == null:
+        return
+    for child: Node in hostInfoBox.get_children():
+        child.queue_free()
+    if !isHosting:
+        hostInfoBox.hide()
+        return
+    hostInfoBox.show()
+
+    var header: Label = Label.new()
+    header.text = "Share your IP (others join by pasting above):"
+    hostInfoBox.add_child(header)
+
+    var port: int = _cm.DEFAULT_PORT
+    for addr: String in _get_sharable_addresses():
+        var row: HBoxContainer = HBoxContainer.new()
+        hostInfoBox.add_child(row)
+
+        var text: String = "%s:%d" % [addr, port]
+        var label: Label = Label.new()
+        label.text = text
+        label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        row.add_child(label)
+
+        var copyBtn: Button = Button.new()
+        copyBtn.text = "Copy"
+        copyBtn.set_meta(&"copyText", text)
+        copyBtn.pressed.connect(_on_copy_host_ip_pressed.bind(copyBtn))
+        row.add_child(copyBtn)
+
+
+func _on_copy_host_ip_pressed(btn: Button) -> void:
+    DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
+
+
+## Returns non-loopback IPv4 addresses. Includes LAN (192.168/10/172.16) and
+## Tailscale (100.64/10) ranges — user picks whichever applies.
+func _get_sharable_addresses() -> Array[String]:
+    var out: Array[String] = []
+    for addr: String in IP.get_local_addresses():
+        if addr.begins_with("127.") || addr.begins_with("169.254."):
+            continue
+        if ":" in addr:
+            continue
+        out.append(addr)
+    if out.is_empty():
+        out.append("127.0.0.1")
+    return out
 
 
 func update_player_list() -> void:
@@ -300,6 +366,14 @@ func is_in_gameplay() -> bool:
 func on_host_pressed() -> void:
     if _cm.is_session_active():
         return
+    pendingHostUseSteam = true
+    show_world_picker()
+
+
+func on_host_direct_pressed() -> void:
+    if _cm.is_session_active():
+        return
+    pendingHostUseSteam = false
     show_world_picker()
 
 
@@ -1065,7 +1139,7 @@ func on_create_world_confirmed() -> void:
     newWorldPanel = null
 
     _cm.set_active_world(worldId)
-    _cm.host_game()
+    _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
 
     # Verify host_game actually started a session. If not, clean up the empty
     # world dir and the active-world marker so the next attempt is clean.
@@ -1123,7 +1197,7 @@ func on_world_selected(worldId: String) -> void:
     _cm.wipe_user_saves()
     _cm.mirror_world_to_user(worldId)
 
-    _cm.host_game()
+    _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
 
     # Resume from the most recently visited shelter (or Cabin if none).
     var loader: Node = get_node_or_null("/root/Loader")

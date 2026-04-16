@@ -223,7 +223,7 @@ func register_patches() -> void:
 
 
 ## Creates an ENet server and a Steam P2P listen socket + lobby.
-func host_game(port: int = DEFAULT_PORT) -> void:
+func host_game(port: int = DEFAULT_PORT, useSteam: bool = true) -> void:
     if is_session_active():
         _log("Already connected, disconnect first")
         return
@@ -242,7 +242,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
     peerNames[localPeerId] = steamBridge.localSteamName if steamBridge.is_ready() else "Host"
     peerMaps[localPeerId] = get_current_map()
 
-    if steamBridge.is_ready():
+    if useSteam && steamBridge.is_ready():
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
 
@@ -250,7 +250,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
     _setup_save_paths()
     _update_rich_presence()
     _wasInCoop = true
-    _log("Hosting on port %d (id: %d)" % [port, localPeerId])
+    _log("Hosting on port %d (id: %d, steam: %s)" % [port, localPeerId, str(useSteam)])
 
 
 ## Connects to a host at [param address]:[param port] as a client.
