@@ -1,10 +1,10 @@
 # Road to Vostok Co-op
 
-A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/2141300/Road_to_Vostok/). Play the hardcore survival FPS with up to 4 friends.
+A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/1963610/Road_to_Vostok/). Play the hardcore survival FPS with friends.
 
 ## Features
 
-- **2-4 player co-op** with 20Hz position sync and interpolation
+- **Co-op multiplayer** with 20Hz position sync and interpolation
 - **Steam integration** -- lobby browser, friend invites with avatars, P2P NAT traversal
 - **Direct connect** -- host via IP for non-Steam or LAN play
 - **World state sync** -- doors, switches, containers, time/weather synced between all players
@@ -36,10 +36,10 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 ### Quick Start
 
 1. Install the [RTV Mod Loader](https://github.com/plaught-armor/RTV-Mod-Loader)
-2. Download `rtv-coop.vmz` from [Releases](https://github.com/plaught-armor/mod/releases)
+2. Download `rtv-coop.vmz` from [Releases](https://github.com/plaught-armor/RTV-Coop/releases)
 3. Place it in the `mods/` folder (see [INSTALLATION.md](INSTALLATION.md) for your platform's path)
 4. Launch the game through Steam
-5. You should see **[Ins] Multiplayer** in the top-right corner
+5. The main menu should show **Singleplayer** and **Multiplayer** buttons
 
 ---
 
@@ -49,29 +49,37 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 | Key | Action |
 |-----|--------|
-| **INS** (Insert) | Toggle multiplayer panel |
-| **F10** | Quick host |
 | **F12** | Toggle player/ping HUD |
+| **Esc** | In-game settings menu with Multiplayer tab |
 
-### Hosting
+### Hosting (Steam)
 
-1. Load into a map
-2. Press **INS** to open the multiplayer panel
-3. Click **Host** -- a world picker appears
-4. Choose **+ New World** or select an existing world
-5. (Or press **F10** to quick-host a new world)
+1. From main menu, click **Multiplayer**
+2. Click **Host (Steam)** -- a world picker appears
+3. Choose **+ New World** or select an existing world
+4. Share the lobby or invite friends
+
+### Hosting (Direct IP)
+
+1. From main menu, click **Multiplayer**
+2. Click **Host (IP)** and select a world
+3. Share your IP address with the other player
 
 ### Joining
 
-1. Load into any map
-2. Press **INS** > **Refresh** to see available lobbies
+1. From main menu, click **Multiplayer**
+2. **Browse** to see available Steam lobbies, or **Direct Join** to connect via IP
 3. Click a lobby to join
 
 ### Inviting Friends
 
 1. Host a game first
-2. Press **INS** > **Invite** to see your online Steam friends
+2. Open the **Esc** menu > **Multiplayer** tab
 3. Click **Invite** next to a friend's name
+
+### In-Game Session Controls
+
+Open the **Esc** menu > **Multiplayer** tab to see connected players, invite friends, copy your IP, or disconnect.
 
 ---
 
@@ -85,25 +93,19 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 ### Where are the logs?
 
-There are two log files. **Both are needed when reporting bugs.**
+Both log files live in the same `logs/` directory. **Include both when reporting bugs.**
 
-**Godot log** (game events, mod loading, connections):
+| Platform | Logs directory |
+|----------|---------------|
+| Windows | `%APPDATA%\Road to Vostok\logs\` |
+| Linux (Proton) | `~/.local/share/Steam/steamapps/compatdata/1963610/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok/logs/` |
 
-| Platform | Path |
-|----------|------|
-| Windows | `%APPDATA%\Road to Vostok Demo\logs\godot.log` |
-| Linux (Proton) | `~/.local/share/Steam/steamapps/compatdata/2141300/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok Demo/logs/godot.log` |
-
-**Steam helper log** (Steam API, lobbies, P2P tunnel):
-
-| Platform | Path |
-|----------|------|
-| Windows | Game install directory: `steam_helper.log` (next to `RTV.exe`) |
-| Linux (Proton) | `~/.local/share/Steam/steamapps/common/Road to Vostok Demo/steam_helper.log` |
+- `godot.log` -- game events, mod loading, connections
+- `steam_helper.log` -- Steam API, lobbies, P2P tunnel
 
 ### Other Issues
 
-- **Mouse stuck** -- Press **INS** to close the multiplayer panel
+- **Mouse stuck** -- Press **Esc** to close the settings menu
 - **Can't see other player** -- Both players must be on the same map
 - **Invite button doesn't show friends** -- You must host first. Only online friends are shown
 - **Game broken after update** -- Road to Vostok updated and patches may be incompatible. Check for a mod update

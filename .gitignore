@@ -6,6 +6,14 @@
 # Build output
 *.vmz
 bin/
+steam_helper/bin/steam_helper_linux
+steam_helper/bin/steam_helper.exe
+
+# Keep Steamworks SDK redistributables
+!steam_helper/bin/
+!steam_helper/bin/libsteam_api.so
+!steam_helper/bin/libsteam_api64.so
+!steam_helper/bin/steam_api64.dll
 
 # OS
 .DS_Store

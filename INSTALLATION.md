@@ -37,18 +37,14 @@ Delete `rtv-coop.vmz` from the `mods` folder.
 
 ## Logs
 
-**Game log:**
+Both log files live in the same `logs/` directory:
 
-| Platform | Path |
-|----------|------|
-| **Windows** | `%APPDATA%\Road to Vostok\logs\godot.log` |
-| **Linux (Proton)** | `~/.local/share/Steam/steamapps/compatdata/1963610/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok/logs/godot.log` |
+| Platform | Logs directory |
+|----------|---------------|
+| **Windows** | `%APPDATA%\Road to Vostok\logs\` |
+| **Linux (Proton)** | `~/.local/share/Steam/steamapps/compatdata/1963610/pfx/drive_c/users/steamuser/AppData/Roaming/Road to Vostok/logs/` |
 
-**Steam helper log:**
-
-| Platform | Path |
-|----------|------|
-| **Windows** | Game install directory: `steam_helper.log` |
-| **Linux (Proton)** | `~/.local/share/Steam/steamapps/common/Road to Vostok/steam_helper.log` |
+- `godot.log` -- game events, mod loading, connections
+- `steam_helper.log` -- Steam API, lobbies, P2P tunnel
 
 Lines prefixed `[CoopManager]` and `[SteamBridge]` are from the mod. Include both logs when reporting issues.
