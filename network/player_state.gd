@@ -255,9 +255,9 @@ func receive_death() -> void:
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
     if remoteNode == null:
         return
-    _cm.remoteNodes.erase(peerId)
     clear_peer(peerId)
-    remoteNode.queue_free()
+    if remoteNode.has_method(&"die"):
+        remoteNode.die()
 
 
 ## Broadcasts a knife attack audio event to all remote peers.

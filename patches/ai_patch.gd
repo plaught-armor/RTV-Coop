@@ -166,7 +166,7 @@ func Parameters(delta: float) -> void:
 
     for peerId: int in _cm.remoteNodes:
         var remote: Node3D = _cm.remoteNodes[peerId]
-        if !is_instance_valid(remote):
+        if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         var pos: Vector3 = remote.global_position
         var dist: float = global_position.distance_to(pos)
@@ -174,7 +174,6 @@ func Parameters(delta: float) -> void:
             bestDist = dist
             bestPos = pos
             targetPeerId = peerId
-            # Approximate remote player's facing direction from their rotation
             var rotY: float = remote.targetRotationY
             bestVector = Vector3(-sin(rotY), 0, -cos(rotY))
 
@@ -288,10 +287,9 @@ func Hearing() -> void:
             Decision()
         return
 
-    # Check remote players — approximate from movement flags
     for peerId: int in _cm.remoteNodes:
         var remote: Node3D = _cm.remoteNodes[peerId]
-        if !is_instance_valid(remote):
+        if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         var dist: float = global_position.distance_to(remote.global_position)
         var flags: int = remote.moveFlags
@@ -332,11 +330,9 @@ func FireDetection(delta: float) -> void:
             fireDetected = true
             extraVisibility = 50.0
 
-    # Remote players firing — check isFiring flag on remote nodes
-    # (set by future weapon fire sync; for now detect based on proximity)
     for peerId: int in _cm.remoteNodes:
         var remote: Node3D = _cm.remoteNodes[peerId]
-        if !is_instance_valid(remote):
+        if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         var isFiring: bool = remote.get(&"isFiring") == true if remote.get(&"isFiring") != null else false
         if !isFiring:

@@ -203,6 +203,7 @@ func register_patches() -> void:
         ["res://mod/patches/character_patch.gd", "res://Scripts/Character.gd"],
         ["res://mod/patches/mine_patch.gd", "res://Scripts/Mine.gd"],
         ["res://mod/patches/fire_patch.gd", "res://Scripts/Fire.gd"],
+        ["res://mod/patches/trader_patch.gd", "res://Scripts/Trader.gd"],
         ["res://mod/patches/loader_patch.gd", "res://Scripts/Loader.gd"],
         ["res://mod/patches/settings_patch.gd", "res://Scripts/Settings.gd"],
     ]
@@ -672,6 +673,12 @@ func inject_manager() -> void:
 
     # Transitions
     for node: Node in get_tree().get_nodes_in_group(&"Transition"):
+        var obj: Node = node.owner if node.owner != null else node
+        if obj.has_method(&"init_manager"):
+            obj.init_manager(self)
+
+    # Traders
+    for node: Node in get_tree().get_nodes_in_group(&"Trader"):
         var obj: Node = node.owner if node.owner != null else node
         if obj.has_method(&"init_manager"):
             obj.init_manager(self)

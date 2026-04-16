@@ -89,3 +89,45 @@ func Drop(target: Node) -> void:
     target.queue_free()
     PlayDrop()
     UpdateStats(true)
+
+
+func CompleteDeal() -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        super.CompleteDeal()
+        return
+    if !is_instance_valid(trader):
+        return
+
+    # Collect requested supply indices.
+    var requestedIndices: PackedInt32Array = []
+    var supplyChildren: Array[Node] = supplyGrid.get_children()
+    for i: int in supplyChildren.size():
+        if supplyChildren[i].selected:
+            requestedIndices.append(i)
+
+    # Pack offered inventory items.
+    var offeredSlots: Array[Dictionary] = []
+    for element: Node in inventoryGrid.get_children():
+        if element.selected:
+            offeredSlots.append(_cm.SlotSerializerScript.pack(element.slotData))
+
+    if requestedIndices.is_empty():
+        return
+
+    var traderPath: String = get_tree().current_scene.get_path_to(trader)
+
+    if _cm.isHost:
+        # Host executes via world_state directly.
+        _cm.worldState.request_trade(traderPath, requestedIndices, offeredSlots)
+        # Remove offered items locally (host is authoritative).
+        for element: Node in inventoryGrid.get_children():
+            if element.selected:
+                inventoryGrid.Pick(element)
+                element.queue_free()
+    else:
+        # Client sends request; removes offered items optimistically.
+        _cm.worldState.request_trade.rpc_id(1, traderPath, requestedIndices, offeredSlots)
+        for element: Node in inventoryGrid.get_children():
+            if element.selected:
+                inventoryGrid.Pick(element)
+                element.queue_free()

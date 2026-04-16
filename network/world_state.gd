@@ -448,6 +448,128 @@ func apply_pickup_patch(pickup: Node) -> void:
     pickup.collision = saved_collision
     pickup.interface = _interface
 
+# ---------- Trader Sync ----------
+
+
+## Client requests to open a trader. Host sends current supply back.
+@rpc("any_peer", "call_remote", "reliable")
+func request_trader_open(traderPath: String) -> void:
+    if !_cm.isHost:
+        return
+    if !is_valid_path(traderPath):
+        return
+    var trader: Node = _scene_node(traderPath)
+    if !is_instance_valid(trader) || !trader.has_method(&"Interact"):
+        return
+    var packedSupply: Array[Dictionary] = _slotSerializer.pack_array(trader.supply)
+    var tax: int = int(trader.tax)
+    var requesterId: int = multiplayer.get_remote_sender_id()
+    sync_trader_supply.rpc_id(requesterId, traderPath, packedSupply, tax)
+
+
+## Host sends trader supply to a specific client. Client opens the trader UI.
+@rpc("authority", "call_remote", "reliable")
+func sync_trader_supply(traderPath: String, packedSupply: Array[Dictionary], tax: int) -> void:
+    var trader: Node = _scene_node(traderPath)
+    if !is_instance_valid(trader):
+        return
+    # Replace local supply with host's authoritative copy.
+    trader.supply = _slotSerializer.unpack_array(packedSupply)
+    trader.tax = tax
+    var uiMgr: Node = _scene_node("Core/UI")
+    if is_instance_valid(uiMgr) && uiMgr.has_method(&"OpenTrader"):
+        uiMgr.OpenTrader(trader)
+
+
+## Client requests a trade. Sends indices of supply items wanted + packed offered items.
+@rpc("any_peer", "call_remote", "reliable")
+func request_trade(traderPath: String, requestedIndices: PackedInt32Array, offeredSlots: Array[Dictionary]) -> void:
+    if !_cm.isHost:
+        return
+    if !is_valid_path(traderPath):
+        return
+    var trader: Node = _scene_node(traderPath)
+    if !is_instance_valid(trader):
+        return
+    var requesterId: int = multiplayer.get_remote_sender_id()
+
+    # Validate requested indices still exist.
+    var requestedItems: Array[SlotData] = []
+    for idx: int in requestedIndices:
+        if idx < 0 || idx >= trader.supply.size():
+            reject_trade.rpc_id(requesterId)
+            return
+        var slot: SlotData = trader.supply[idx]
+        if slot == null || slot.itemData == null:
+            reject_trade.rpc_id(requesterId)
+            return
+        requestedItems.append(slot)
+
+    # Validate offered value covers request + tax.
+    var offeredItems: Array[SlotData] = _slotSerializer.unpack_array(offeredSlots)
+    var requestValue: float = 0.0
+    for slot: SlotData in requestedItems:
+        requestValue += slot.Value() * (trader.tax * 0.01 + 1.0)
+    var offerValue: float = 0.0
+    for slot: SlotData in offeredItems:
+        if slot != null:
+            offerValue += slot.Value()
+    if offerValue < requestValue:
+        reject_trade.rpc_id(requesterId)
+        return
+
+    # Execute: remove from supply (reverse order to keep indices valid).
+    var sortedIndices: PackedInt32Array = requestedIndices.duplicate()
+    sortedIndices.sort()
+    for i: int in range(sortedIndices.size() - 1, -1, -1):
+        trader.supply.remove_at(sortedIndices[i])
+
+    # Grant items to client.
+    var grantedSlots: Array[Dictionary] = _slotSerializer.pack_array(requestedItems)
+    sync_trade_granted.rpc_id(requesterId, grantedSlots)
+
+    # Broadcast updated supply to all peers.
+    var packedSupply: Array[Dictionary] = _slotSerializer.pack_array(trader.supply)
+    sync_trader_supply_update.rpc(traderPath, packedSupply)
+
+
+## Host tells client their trade was rejected.
+@rpc("authority", "call_remote", "reliable")
+func reject_trade() -> void:
+    _cm._log("[Trader] Trade rejected by host")
+
+
+## Host grants purchased items to the requesting client.
+@rpc("authority", "call_remote", "reliable")
+func sync_trade_granted(grantedSlots: Array[Dictionary]) -> void:
+    var iface: Node = _interface
+    if !is_instance_valid(iface):
+        return
+    for packed: Dictionary in grantedSlots:
+        var slot: SlotData = _slotSerializer.unpack(packed)
+        if slot == null:
+            continue
+        if slot.itemData.type == "Furniture":
+            iface.Create(slot, iface.catalogGrid, false)
+        else:
+            iface.Create(slot, iface.inventoryGrid, true)
+    iface.UpdateStats(false)
+
+
+## Host broadcasts updated supply after a trade. All clients refresh if viewing.
+@rpc("authority", "call_remote", "reliable")
+func sync_trader_supply_update(traderPath: String, packedSupply: Array[Dictionary]) -> void:
+    var trader: Node = _scene_node(traderPath)
+    if !is_instance_valid(trader):
+        return
+    trader.supply = _slotSerializer.unpack_array(packedSupply)
+    # Refresh the supply grid if this trader is currently open.
+    var iface: Node = _interface
+    if is_instance_valid(iface) && is_instance_valid(iface.trader) && iface.trader == trader:
+        if iface.has_method(&"Resupply"):
+            iface.Resupply()
+
+
 # ---------- Simulation Sync ----------
 
 

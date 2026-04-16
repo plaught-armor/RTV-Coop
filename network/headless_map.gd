@@ -183,6 +183,7 @@ static func _init_patch_map() -> void:
         "res://Scripts/LootSimulation.gd", "res://Scripts/AISpawner.gd",
         "res://Scripts/Transition.gd", "res://Scripts/Fire.gd",
         "res://Scripts/Mine.gd", "res://Scripts/Explosion.gd",
+        "res://Scripts/Trader.gd",
     ]
     for p: String in paths:
         var script: Script = load(p)

@@ -12,6 +12,7 @@ var targetRotationX: float = 0.0
 var moveFlags: int = 0
 var smoothSpeed: float = 15.0
 var displayName: String = ""
+var isDead: bool = false
 
 var audioPlayer: AudioStreamPlayer3D = null
 
@@ -139,8 +140,24 @@ func _update_occlusion() -> void:
         audioPlayer.bus = occludedBusName if isOccluded else &"Master"
 
 
+func die() -> void:
+    isDead = true
+    set_meta(&"is_dead", true)
+    set_meta(&"health", 0)
+    nameLabel.text = "%s [DEAD]" % displayName
+    # Collapse the body visually.
+    body.scale.y = 0.15
+    headPivot.position.y = 0.2
+    headPivot.rotation.x = -PI / 2.0
+    # Disable AI hit detection so AI stops targeting the corpse.
+    var hitBody: Node = get_node_or_null("HitBody")
+    if hitBody != null:
+        hitBody.collision_layer = 0
+        hitBody.remove_from_group(&"CoopRemote")
+
+
 func _physics_process(delta: float) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(_cm) || isDead:
         return
     global_position = targetPosition
     rotation.y = targetRotationY
@@ -157,7 +174,6 @@ func _physics_process(delta: float) -> void:
     if Engine.get_physics_frames() % OCCLUSION_CHECK_TICKS == 0:
         _update_occlusion()
 
-    # Update name label with health if available
     var health: int = get_meta(&"health", -1)
     if health >= 0:
         nameLabel.text = "%s [%d%%]" % [displayName, health]
