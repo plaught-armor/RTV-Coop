@@ -294,7 +294,7 @@ func _broadcast_fire_event() -> void:
             var collider: Object = result["collider"]
             if collider != null && collider.get(&"surface") != null:
                 hitSurface = collider.get(&"surface")
-            elif hitSurface.is_empty():
+            else:
                 hitSurface = "Generic"
 
     _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor, hitPoint, hitNormal, hitSurface)

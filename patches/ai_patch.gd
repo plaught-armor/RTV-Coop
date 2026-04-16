@@ -372,7 +372,7 @@ func Raycast() -> void:
 
         if hitCollider.is_in_group(&"CoopRemote"):
             # Hit a remote player — find their peer ID and send damage RPC
-            var remoteRoot: Node3D = _find_remote_root(hitCollider)
+            var remoteRoot: Node3D = _cm.find_remote_root(hitCollider)
             if remoteRoot != null:
                 var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
                 if peerId > 0:
@@ -477,12 +477,3 @@ func Death(direction: Vector3, force: float) -> void:
 # ---------- Helpers ----------
 
 
-## Walks up from a collider to find the remote player root node.
-func _find_remote_root(node: Node) -> Node3D:
-    var current: Node = node
-    while current != null && is_instance_valid(current):
-        if current.is_in_group(&"CoopRemote"):
-            if current.has_meta(&"peer_id"):
-                return current as Node3D
-        current = current.get_parent()
-    return null

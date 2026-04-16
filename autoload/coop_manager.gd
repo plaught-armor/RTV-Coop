@@ -1764,5 +1764,29 @@ func get_local_ip() -> String:
     return "127.0.0.1"
 
 
+func get_sharable_addresses() -> Array[String]:
+    var out: Array[String] = []
+    for addr: String in IP.get_local_addresses():
+        if addr.begins_with("127.") || addr.begins_with("169.254."):
+            continue
+        if ":" in addr:
+            continue
+        out.append(addr)
+    if out.is_empty():
+        out.append("127.0.0.1")
+    return out
+
+
+## Walks up from a collider to find the remote player root node (CoopRemote group + peer_id meta).
+func find_remote_root(node: Node) -> Node3D:
+    var current: Node = node
+    while current != null && is_instance_valid(current):
+        if current.is_in_group(&"CoopRemote"):
+            if current.has_meta(&"peer_id"):
+                return current as Node3D
+        current = current.get_parent()
+    return null
+
+
 func _log(msg: String) -> void:
     print("[CoopManager] %s" % msg)

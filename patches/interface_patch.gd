@@ -125,9 +125,13 @@ func CompleteDeal() -> void:
                 inventoryGrid.Pick(element)
                 element.queue_free()
     else:
-        # Client sends request; removes offered items optimistically.
-        _cm.worldState.request_trade.rpc_id(1, traderPath, requestedIndices, offeredSlots)
+        # Client: hide offered items visually but keep them until host ACKs.
+        # Store packed data so reject_trade can restore them.
+        var pendingElements: Array[Node] = []
         for element: Node in inventoryGrid.get_children():
             if element.selected:
-                inventoryGrid.Pick(element)
-                element.queue_free()
+                pendingElements.append(element)
+                element.visible = false
+                element.set_meta(&"trade_pending", true)
+        _cm.worldState.set_meta(&"_pending_trade_elements", pendingElements)
+        _cm.worldState.request_trade.rpc_id(1, traderPath, requestedIndices, offeredSlots)

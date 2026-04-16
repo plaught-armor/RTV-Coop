@@ -1172,7 +1172,7 @@ func show_lobby(useSteam: bool) -> void:
         addrBox.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
         vbox.add_child(addrBox)
 
-        for addr: String in _get_sharable_addresses():
+        for addr: String in _cm.get_sharable_addresses():
             var text: String = "%s:%d" % [addr, port]
             var label: Label = Label.new()
             label.text = text
@@ -1314,18 +1314,6 @@ func _on_lobby_back() -> void:
 
 
 ## Non-loopback IPv4 addresses (LAN + Tailscale).
-func _get_sharable_addresses() -> Array[String]:
-    var out: Array[String] = []
-    for addr: String in IP.get_local_addresses():
-        if addr.begins_with("127.") || addr.begins_with("169.254."):
-            continue
-        if ":" in addr:
-            continue
-        out.append(addr)
-    if out.is_empty():
-        out.append("127.0.0.1")
-    return out
-
 
 func on_world_selected(worldId: String) -> void:
     hide_world_picker()

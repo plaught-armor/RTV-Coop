@@ -504,7 +504,7 @@ func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
     for child: Node in ipInfo.get_children():
         child.queue_free()
     var port: int = _cm.DEFAULT_PORT
-    for addr: String in _get_sharable_addresses():
+    for addr: String in _cm.get_sharable_addresses():
         var row: HBoxContainer = HBoxContainer.new()
         ipInfo.add_child(row)
         var text: String = "%s:%d" % [addr, port]
@@ -808,14 +808,3 @@ func _on_copy_ip(btn: Button) -> void:
     DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
 
 
-func _get_sharable_addresses() -> Array[String]:
-    var out: Array[String] = []
-    for addr: String in IP.get_local_addresses():
-        if addr.begins_with("127.") || addr.begins_with("169.254."):
-            continue
-        if ":" in addr:
-            continue
-        out.append(addr)
-    if out.is_empty():
-        out.append("127.0.0.1")
-    return out

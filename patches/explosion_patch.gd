@@ -91,18 +91,10 @@ func _check_los_remote(target: Node3D) -> void:
 
 	var collider: Node = LOS.get_collider()
 	if collider.is_in_group(&"CoopRemote"):
-		var remoteRoot: Node3D = _find_remote_root(collider)
+		var remoteRoot: Node3D = _cm.find_remote_root(collider)
 		if remoteRoot != null:
 			var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
 			if peerId > 0:
 				_cm.aiState.send_explosion_damage_to_peer(peerId)
 
 
-func _find_remote_root(node: Node) -> Node3D:
-	var current: Node = node
-	while current != null && is_instance_valid(current):
-		if current.is_in_group(&"CoopRemote"):
-			if current.has_meta(&"peer_id"):
-				return current as Node3D
-		current = current.get_parent()
-	return null

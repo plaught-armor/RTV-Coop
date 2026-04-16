@@ -11,10 +11,10 @@ var _cm: Node
 
 
 func init_manager(manager: Node) -> void:
-	_cm = manager
+    _cm = manager
 
 
 func Death() -> void:
-	if is_instance_valid(_cm) && _cm.is_session_active():
-		_cm.playerState.broadcast_death()
-	super.Death()
+    if is_instance_valid(_cm) && _cm.is_session_active():
+        _cm.playerState.broadcast_death()
+    super.Death()

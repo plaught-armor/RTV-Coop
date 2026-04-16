@@ -533,16 +533,32 @@ func request_trade(traderPath: String, requestedIndices: PackedInt32Array, offer
     sync_trader_supply_update.rpc(traderPath, packedSupply)
 
 
-## Host tells client their trade was rejected.
+## Host tells client their trade was rejected. Restores hidden offered items.
 @rpc("authority", "call_remote", "reliable")
 func reject_trade() -> void:
     _cm._log("[Trader] Trade rejected by host")
+    var pending: Array = get_meta(&"_pending_trade_elements", [])
+    for element: Node in pending:
+        if is_instance_valid(element):
+            element.visible = true
+            element.remove_meta(&"trade_pending")
+    remove_meta(&"_pending_trade_elements")
 
 
 ## Host grants purchased items to the requesting client.
+## Finalizes the trade: removes pending offered items and spawns granted items.
 @rpc("authority", "call_remote", "reliable")
 func sync_trade_granted(grantedSlots: Array[Dictionary]) -> void:
+    # Remove offered items that were hidden pending ACK.
+    var pending: Array = get_meta(&"_pending_trade_elements", [])
     var iface: Node = _interface
+    if is_instance_valid(iface):
+        for element: Node in pending:
+            if is_instance_valid(element):
+                iface.inventoryGrid.Pick(element)
+                element.queue_free()
+    remove_meta(&"_pending_trade_elements")
+
     if !is_instance_valid(iface):
         return
     for packed: Dictionary in grantedSlots:
