@@ -73,9 +73,20 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 ### Inviting Friends
 
-1. Host a game first
+#### Via Steam
+
+1. Host a game using **Host (Steam)**
 2. Open the **Esc** menu > **Multiplayer** tab
-3. Click **Invite** next to a friend's name
+3. Your online Steam friends are listed -- click **Invite** next to a friend's name
+4. They receive a Steam notification and join automatically
+
+#### Via IP
+
+1. Host a game using **Host (IP)** (or **Host (Steam)** -- IP works either way)
+2. Share your IP address with your friend (shown in the **Esc** > **Multiplayer** tab)
+3. They click **Direct Join** from the Multiplayer menu and enter your IP
+
+> **Note:** Steam invites require both players to own the game on Steam. Direct IP works without Steam but requires port forwarding or LAN access.
 
 ### In-Game Session Controls
 
@@ -142,6 +153,7 @@ Both log files live in the same `logs/` directory. **Include both when reporting
 - [x] Proton/Linux support
 - [ ] Third-person player model
 - [ ] Voice chat
+- [ ] Mod compatibility improvements
 
 ---
 
