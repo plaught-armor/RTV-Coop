@@ -191,12 +191,10 @@ func _update_mp_status() -> void:
 func register_patches() -> void:
     var patches: Array[PackedStringArray] = [
         ["res://mod/patches/controller_patch.gd", "res://Scripts/Controller.gd"],
-        ["res://mod/patches/door_patch.gd", "res://Scripts/Door.gd"],
-        ["res://mod/patches/switch_patch.gd", "res://Scripts/Switch.gd"],
+        ["res://mod/patches/interactor_patch.gd", "res://Scripts/Interactor.gd"],
         ["res://mod/patches/transition_patch.gd", "res://Scripts/Transition.gd"],
         ["res://mod/patches/pickup_patch.gd", "res://Scripts/Pickup.gd"],
         ["res://mod/patches/interface_patch.gd", "res://Scripts/Interface.gd"],
-        ["res://mod/patches/loot_container_patch.gd", "res://Scripts/LootContainer.gd"],
         ["res://mod/patches/loot_simulation_patch.gd", "res://Scripts/LootSimulation.gd"],
         ["res://mod/patches/ai_spawner_patch.gd", "res://Scripts/AISpawner.gd"],
         ["res://mod/patches/ai_patch.gd", "res://Scripts/AI.gd"],
@@ -205,11 +203,8 @@ func register_patches() -> void:
         ["res://mod/patches/explosion_patch.gd", "res://Scripts/Explosion.gd"],
         ["res://mod/patches/character_patch.gd", "res://Scripts/Character.gd"],
         ["res://mod/patches/mine_patch.gd", "res://Scripts/Mine.gd"],
-        ["res://mod/patches/fire_patch.gd", "res://Scripts/Fire.gd"],
-        ["res://mod/patches/trader_patch.gd", "res://Scripts/Trader.gd"],
         ["res://mod/patches/loader_patch.gd", "res://Scripts/Loader.gd"],
         ["res://mod/patches/settings_patch.gd", "res://Scripts/Settings.gd"],
-        ["res://mod/patches/bed_patch.gd", "res://Scripts/Bed.gd"],
         ["res://mod/patches/layouts_patch.gd", "res://Scripts/Layouts.gd"],
         ["res://mod/patches/furniture_patch.gd", "res://Scripts/Furniture.gd"],
         ["res://mod/patches/fish_pool_patch.gd", "res://Scripts/FishPool.gd"],
@@ -651,6 +646,19 @@ func inject_manager() -> void:
     if controller != null && controller.has_method(&"init_manager"):
         controller.init_manager(self)
 
+    # Interactor — single choke point for Door/Switch/Bed/Fire/LootContainer/Trader dispatch
+    var interactor: Node = scene.get_node_or_null("Core/Controller/Camera/Interactor")
+    if interactor == null:
+        # Fallback — search by class
+        for node: Node in scene.find_children("*", "RayCast3D", true, false):
+            if node.get_script() != null && node.get_script().resource_path == "res://mod/patches/interactor_patch.gd":
+                interactor = node
+                break
+    if interactor != null && interactor.has_method(&"init_manager"):
+        interactor.init_manager(self)
+        if DEBUG:
+            print("[coop] inject_manager: Interactor patched at %s" % interactor.get_path())
+
     # Character — vitals/death handler
     var character: Node = scene.get_node_or_null("Core/Controller/Character")
     if character != null && character.has_method(&"init_manager"):
@@ -677,20 +685,8 @@ func inject_manager() -> void:
         if node.has_method(&"init_manager"):
             node.init_manager(self)
 
-    # Switches
-    for node: Node in get_tree().get_nodes_in_group(&"Switch"):
-        var obj: Node = node.owner if node.owner != null else node
-        if obj.has_method(&"init_manager"):
-            obj.init_manager(self)
-
     # Transitions
     for node: Node in get_tree().get_nodes_in_group(&"Transition"):
-        var obj: Node = node.owner if node.owner != null else node
-        if obj.has_method(&"init_manager"):
-            obj.init_manager(self)
-
-    # Traders
-    for node: Node in get_tree().get_nodes_in_group(&"Trader"):
         var obj: Node = node.owner if node.owner != null else node
         if obj.has_method(&"init_manager"):
             obj.init_manager(self)
@@ -1785,6 +1781,71 @@ func is_session_active() -> bool:
     if peer == null || peer is OfflineMultiplayerPeer:
         return false
     return peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED
+
+
+## Dispatched by interactor_patch for each Interactable target.
+## Returns true if the target was handled (caller skips local Interact).
+## Returns false if caller should fall through to target.Interact().
+func dispatch_interact(target: Node) -> bool:
+    if !is_instance_valid(target) || !is_session_active():
+        return false
+
+    var scriptPath: String = target.get_script().resource_path if target.get_script() != null else ""
+
+    # Bed — blocked in co-op. Sleeping advances sim time + freezes gameData globally.
+    if scriptPath == "res://Scripts/Bed.gd":
+        Loader.Message("Cannot sleep during co-op", Color.RED)
+        if DEBUG:
+            print("[coop] dispatch_interact: Bed blocked")
+        return true
+
+    # Remaining branches need scene-relative path — fetch once.
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return false
+
+    # Door — host runs locally + broadcasts state; client requests host.
+    if target is Door:
+        if isHost:
+            worldState.host_door_interact(target)
+        else:
+            worldState.request_door_interact.rpc_id(1, scene.get_path_to(target))
+        return true
+
+    # LootContainer — host opens UI locally + broadcasts loot; client requests host open.
+    if target is LootContainer:
+        if isHost:
+            worldState.host_container_interact(target)
+        else:
+            worldState.request_container_open.rpc_id(1, scene.get_path_to(target))
+        return true
+
+    # Trader — host opens locally; client requests supply from host.
+    if target is Trader:
+        if isHost:
+            worldState.host_trader_interact(target)
+        else:
+            worldState.request_trader_open.rpc_id(1, scene.get_path_to(target))
+        return true
+
+    # Switch — detected by script path (no class_name on Switch.gd).
+    if scriptPath == "res://Scripts/Switch.gd":
+        if isHost:
+            worldState.host_switch_interact(target)
+        else:
+            worldState.request_switch_interact.rpc_id(1, scene.get_path_to(target))
+        return true
+
+    # Fire — detected by script path (no class_name on Fire.gd).
+    if scriptPath == "res://Scripts/Fire.gd":
+        if isHost:
+            worldState.host_fire_interact(target)
+        else:
+            worldState.request_fire_interact.rpc_id(1, scene.get_path_to(target))
+        return true
+
+    # Unhandled type — caller should fall through to target.Interact().
+    return false
 
 
 func get_local_ip() -> String:

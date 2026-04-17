@@ -499,6 +499,31 @@ func Death(direction: Vector3, force: float) -> void:
             _cm.aiState.broadcast_ai_death(syncId, direction, force)
     super.Death(direction, force)
 
+
+## Override Interactor to broadcast AI-triggered door opens (AI only runs on host).
+## Base AI.Interactor opens doors via forward raycast. Since interactor_patch no longer
+## intercepts AI calls, the broadcast must happen here on the host.
+func Interactor(delta: float) -> void:
+    # Snapshot door state BEFORE super runs so we can detect a fresh open.
+    var doorBefore: Node = null
+    if is_instance_valid(forward) && forward.is_colliding():
+        var hit: Node = forward.get_collider()
+        if is_instance_valid(hit) && hit.is_in_group(&"Interactable") && hit.owner is Door:
+            if !hit.owner.isOpen && !hit.owner.locked && !hit.owner.jammed:
+                doorBefore = hit.owner
+
+    super.Interactor(delta)
+
+    if !is_instance_valid(doorBefore):
+        return
+    if !is_instance_valid(_cm) || !_cm.is_session_active() || !_cm.isHost:
+        return
+    if doorBefore.isOpen:
+        var doorPath: String = get_tree().current_scene.get_path_to(doorBefore)
+        _cm.worldState.sync_door_state.rpc(doorPath, true)
+        if _cm.DEBUG:
+            print("[ai_patch] AI opened door %s — broadcast" % doorPath)
+
 # ---------- Helpers ----------
 
 

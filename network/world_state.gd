@@ -244,6 +244,24 @@ func _physics_process(_delta: float) -> void:
 # ---------- Door Sync ----------
 
 
+## Host runs Interact on a door locally and broadcasts the resulting state.
+## Used by both host's local Interactor patch and by request_door_interact (client path).
+func host_door_interact(door: Node) -> void:
+    if !_cm.isHost || !is_instance_valid(door) || !(door is Door) || !is_instance_valid(_currentScene):
+        return
+    var doorPath: String = _currentScene.get_path_to(door)
+    var wasLocked: bool = door.locked
+    door.Interact()
+    sync_door_state.rpc(doorPath, door.isOpen)
+    if wasLocked && !door.locked:
+        sync_door_unlock.rpc(doorPath)
+        if is_instance_valid(door.linked):
+            var linkedPath: String = _currentScene.get_path_to(door.linked)
+            sync_door_unlock.rpc(linkedPath)
+    if _cm.DEBUG:
+        print("[world_state] host_door_interact %s isOpen=%s" % [doorPath, door.isOpen])
+
+
 ## Client requests the host to interact with a door.
 @rpc("any_peer", "call_remote", "reliable")
 func request_door_interact(doorPath: String) -> void:
@@ -254,7 +272,7 @@ func request_door_interact(doorPath: String) -> void:
     var door: Node = _scene_node(doorPath)
     if !(door is Door):
         return
-    door.Interact()
+    host_door_interact(door)
 
 
 ## Host broadcasts a door's state to peers. Clients animate accordingly.
@@ -282,6 +300,19 @@ func sync_door_unlock(doorPath: String) -> void:
 # ---------- Switch Sync ----------
 
 
+## Host runs Interact on a switch locally and broadcasts the resulting state.
+func host_switch_interact(sw: Node) -> void:
+    if !_cm.isHost || !is_instance_valid(sw) || !is_instance_valid(_currentScene):
+        return
+    if !sw.has_method(&"Activate") || !sw.has_method(&"PlaySwitch"):
+        return
+    var switchPath: String = _currentScene.get_path_to(sw)
+    sw.Interact()
+    sync_switch_state.rpc(switchPath, sw.active)
+    if _cm.DEBUG:
+        print("[world_state] host_switch_interact %s active=%s" % [switchPath, sw.active])
+
+
 ## Client requests the host to interact with a switch.
 @rpc("any_peer", "call_remote", "reliable")
 func request_switch_interact(switchPath: String) -> void:
@@ -292,11 +323,7 @@ func request_switch_interact(switchPath: String) -> void:
     var sw: Node = _scene_node(switchPath)
     if sw == null:
         return
-    # Type-check: only process actual Switch nodes, not other Interactables
-    if !sw.has_method(&"Activate") || !sw.has_method(&"PlaySwitch"):
-        return
-    # Use Interact() through the patch rather than manually toggling
-    sw.Interact()
+    host_switch_interact(sw)
 
 
 ## Host broadcasts a switch state to peers.
@@ -313,6 +340,27 @@ func sync_switch_state(switchPath: String, active: bool) -> void:
         sw.PlaySwitch()
 
 # ---------- Container Sync ----------
+
+
+## Host opens a container locally and broadcasts its current loot state.
+func host_container_interact(container: Node) -> void:
+    if !_cm.isHost || !is_instance_valid(container) || !(container is LootContainer) || !is_instance_valid(_currentScene):
+        return
+    var containerPath: String = _currentScene.get_path_to(container)
+    container.Interact()
+    var packedLoot: Array[Dictionary] = _slotSerializer.pack_array(container.loot)
+    sync_container_state.rpc(containerPath, packedLoot)
+    if _cm.DEBUG:
+        print("[world_state] host_container_interact %s loot=%d" % [containerPath, container.loot.size()])
+
+
+## Host opens a trader locally. No broadcast — trader UI is per-client.
+func host_trader_interact(trader: Node) -> void:
+    if !_cm.isHost || !is_instance_valid(trader) || !trader.has_method(&"Interact"):
+        return
+    trader.Interact()
+    if _cm.DEBUG:
+        print("[world_state] host_trader_interact %s" % trader.name)
 
 
 ## Client requests to open a loot container.
@@ -615,6 +663,19 @@ func broadcast_fire_state(firePath: String, isActive: bool) -> void:
     sync_fire_state.rpc(firePath, isActive)
 
 
+## Host runs Interact on a fire locally and broadcasts the resulting state.
+func host_fire_interact(fire: Node) -> void:
+    if !_cm.isHost || !is_instance_valid(fire) || !is_instance_valid(_currentScene):
+        return
+    if !fire.has_method(&"Interact"):
+        return
+    var firePath: String = _currentScene.get_path_to(fire)
+    fire.Interact()
+    sync_fire_state.rpc(firePath, fire.active)
+    if _cm.DEBUG:
+        print("[world_state] host_fire_interact %s active=%s" % [firePath, fire.active])
+
+
 ## Client requests fire interaction from host.
 @rpc("any_peer", "call_remote", "reliable")
 func request_fire_interact(firePath: String) -> void:
@@ -625,8 +686,7 @@ func request_fire_interact(firePath: String) -> void:
     var fire: Node = _scene_node(firePath)
     if !is_instance_valid(fire) || !fire.has_method(&"Interact"):
         return
-    # Run the original interact on host (match check, activate/deactivate)
-    fire.Interact()
+    host_fire_interact(fire)
 
 
 ## Client receives fire state from host.
