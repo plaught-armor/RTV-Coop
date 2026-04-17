@@ -86,6 +86,15 @@ enum AIFlag {
 }
 
 
+## Voice broadcast types. Kept as enum so [code]ai_patch._broadcast_voice[/code]
+## and [method receive_ai_voice] agree on the wire value.
+enum VoiceType {
+    IDLE = 0,
+    COMBAT = 1,
+    DAMAGE = 2,
+}
+
+
 ## A single network snapshot for one AI entity.
 class AISnapshot extends RefCounted:
     var timestamp: float
@@ -282,6 +291,25 @@ func _host_tick() -> void:
     if agentsNode == null || agentsNode.get_child_count() == 0:
         return
 
+    var batch: Array = pack_ai_batch(agentsNode)
+    if batch.is_empty():
+        return
+    if Engine.get_physics_frames() % (SEND_EVERY_N_TICKS * 100) == 0:
+        _log("_host_tick: broadcasting %d AI" % batch[0].size())
+    # Only broadcast to peers on the host's current map. Clients on other maps
+    # receive their AI via headless_map._physics_process; sending them host's
+    # map data would overlap and corrupt their aiNodes indexing.
+    for peerId: int in _cm.connectedPeers:
+        if !_cm.is_peer_on_same_map(peerId):
+            continue
+        receive_ai_batch.rpc_id(peerId, batch[0], batch[1], batch[2], batch[3], batch[4], batch[5], batch[6], batch[7])
+
+
+## Packs all sync-ID-tagged children of [param agentsNode] into 8 Packed arrays
+## [ids, positions, rotations, states, speeds, strafes, healths, flags].
+## Returns [] when no tagged agents exist. Shared by [method _host_tick] and
+## [code]headless_map._physics_process[/code] so both wire formats stay identical.
+func pack_ai_batch(agentsNode: Node) -> Array:
     var ids: PackedInt32Array = []
     var positions: PackedVector3Array = []
     var rotations: PackedFloat32Array = []
@@ -299,7 +327,6 @@ func _host_tick() -> void:
         rotations.append(child.global_rotation.y)
         states.append(child.currentState)
         speeds.append(child.movementSpeed)
-        # Strafe direction from combat poles
         var strafe: float = 0.0
         if child.get(&"north") == true:
             strafe = 1.0
@@ -319,10 +346,8 @@ func _host_tick() -> void:
         flagsArr.append(f)
 
     if ids.is_empty():
-        return
-    if Engine.get_physics_frames() % (SEND_EVERY_N_TICKS * 100) == 0:
-        _log("_host_tick: broadcasting %d AI" % ids.size())
-    receive_ai_batch.rpc(ids, positions, rotations, states, speeds, strafes, healths, flagsArr)
+        return []
+    return [ids, positions, rotations, states, speeds, strafes, healths, flagsArr]
 
 # ---------- Client Receive ----------
 
@@ -339,6 +364,8 @@ func receive_ai_batch(
     healths: PackedInt32Array,
     flagsArr: PackedInt32Array,
 ) -> void:
+    if Engine.get_physics_frames() % 600 == 0:
+        _log("receive_ai_batch: %d ids, slotCount=%d" % [ids.size(), slotCount])
     var now: float = Time.get_ticks_msec() / 1000.0
     for i: int in ids.size():
         var idx: int = ids[i]
@@ -359,6 +386,12 @@ var _interpSnap: AISnapshot = AISnapshot.new(0.0, Vector3.ZERO, 0.0, 0, 0.0, 0.0
 
 
 func _client_interpolate() -> void:
+    if Engine.get_physics_frames() % 600 == 0:
+        var filledSlots: int = 0
+        for idx: int in slotCount:
+            if aiBuffers[idx].count > 0:
+                filledSlots += 1
+        _log("_client_interpolate: slotCount=%d filledBuffers=%d" % [slotCount, filledSlots])
     var now: float = Time.get_ticks_msec() / 1000.0
     var renderTime: float = now - INTERP_DELAY
     var buf: AIBuffer = null
@@ -525,8 +558,8 @@ func broadcast_ai_fire(syncId: int) -> void:
     receive_ai_fire.rpc(syncId)
 
 
-## Client receives fire event — plays audio and muzzle VFX.
-@rpc("authority", "call_remote", "reliable")
+## Client receives fire event — plays audio, muzzle VFX, and near-miss sounds.
+@rpc("authority", "call_remote", "unreliable")
 func receive_ai_fire(syncId: int) -> void:
     if syncId < 0 || syncId >= slotCount:
         return
@@ -535,8 +568,56 @@ func receive_ai_fire(syncId: int) -> void:
         return
     if node.has_method(&"PlayFire"):
         node.PlayFire()
+    if node.has_method(&"PlayTail"):
+        node.PlayTail()
     if node.has_method(&"MuzzleVFX"):
         node.MuzzleVFX()
+    # Near-miss cosmetic — only fire if far enough that bullet arrival would lag audio.
+    if !is_instance_valid(_controller):
+        return
+    if node.global_position.distance_to(_controller.global_position) > 50.0:
+        _play_delayed_near_miss.call_deferred(node)
+
+
+func _play_delayed_near_miss(node: Node) -> void:
+    if !is_instance_valid(node):
+        return
+    await node.get_tree().create_timer(0.1, false).timeout
+    if !is_instance_valid(node):
+        return
+    # Approximation of vanilla: vanilla picks crack-on-hit vs flyby-on-miss
+    # deterministically from raycast result. We don't replicate the raycast to
+    # clients, so pick one of the two per event.
+    if randi_range(0, 1) == 0:
+        if node.has_method(&"PlayCrack"):
+            node.PlayCrack()
+    else:
+        if node.has_method(&"PlayFlyby"):
+            node.PlayFlyby()
+
+
+## Host broadcasts AI voice/damage sounds to clients.
+func broadcast_ai_voice(syncId: int, voiceType: int) -> void:
+    receive_ai_voice.rpc(syncId, voiceType)
+
+
+@rpc("authority", "call_remote", "unreliable")
+func receive_ai_voice(syncId: int, voiceType: int) -> void:
+    if syncId < 0 || syncId >= slotCount:
+        return
+    var node: Node = aiNodes[syncId]
+    if !is_instance_valid(node):
+        return
+    match voiceType:
+        VoiceType.IDLE:
+            if node.has_method(&"PlayIdle"):
+                node.PlayIdle()
+        VoiceType.COMBAT:
+            if node.has_method(&"PlayCombat"):
+                node.PlayCombat()
+        VoiceType.DAMAGE:
+            if node.has_method(&"PlayDamage"):
+                node.PlayDamage()
 
 
 ## Client requests host to apply damage to an AI. Host validates and applies.

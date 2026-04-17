@@ -1285,7 +1285,7 @@ func on_lobby_friends_received(response: Dictionary) -> void:
 
 
 func _on_lobby_invite(steamID: String) -> void:
-    _cm.steamBridge.invite_to_lobby(steamID, _on_lobby_invite_result)
+    _cm.steamBridge.invite_friend(steamID, _on_lobby_invite_result)
 
 
 func _on_lobby_invite_result(response: Dictionary) -> void:

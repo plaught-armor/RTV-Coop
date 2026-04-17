@@ -43,6 +43,8 @@ var worldState: Node = null
 var aiState: Node = null
 ## Reference to the [code]SteamBridge[/code] child node for Steam helper IPC.
 var steamBridge: Node = null
+## Cached reference to /root/Loader autoload.
+var loader: Node = null
 ## Reference to the co-op UI panel.
 var coopUI: Control = null
 var _pendingHostUseSteam: bool = true
@@ -88,6 +90,7 @@ func _ready() -> void:
         force_windowed()
 
     register_patches()
+    loader = get_node_or_null("/root/Loader")
 
     var PlayerStateScript_: Script = preload("res://mod/network/player_state.gd")
     var WorldStateScript: Script = preload("res://mod/network/world_state.gd")
@@ -217,6 +220,7 @@ func register_patches() -> void:
         patch.reload()
         patch.take_over_path(pair[1])
     _log("Patches registered (%d)" % patches.size())
+
 
 # ---------- Peer Lifecycle ----------
 
@@ -560,6 +564,7 @@ func ensure_all_spawned() -> void:
 
 
 func on_scene_changed() -> void:
+    print("[TX] on_scene_changed begin")
     var wasOnMenu: bool = _wasOnMenu
     _wasOnMenu = _is_on_menu()
     _autoLoadInProgress = false
@@ -617,6 +622,7 @@ func on_scene_changed() -> void:
     _update_rich_presence()
     _update_lobby_data()
     _log("Scene changed to %s" % currentMap)
+    print("[TX] on_scene_changed end")
 
 
 ## Client tells host they've finished loading the new scene.
@@ -635,7 +641,8 @@ func notify_scene_loaded() -> void:
 ## Called after every scene change so patches don't need [code]get_node_or_null[/code].
 func inject_manager() -> void:
     var scene: Node = get_tree().current_scene
-    print("[coop] inject_manager: scene=%s" % (scene.scene_file_path if is_instance_valid(scene) else "<null>"))
+    if DEBUG:
+        print("[coop] inject_manager: scene=%s" % (scene.scene_file_path if is_instance_valid(scene) else "<null>"))
     if !is_instance_valid(scene):
         return
 
@@ -1318,8 +1325,7 @@ func _auto_load_game() -> void:
         _log("Auto-load skipped — already in progress")
         return
     _autoLoadInProgress = true
-    var loader: Node = get_node_or_null("/root/Loader")
-    if loader == null:
+    if !is_instance_valid(loader):
         _log("Auto-load failed — Loader not found")
         _autoLoadInProgress = false
         return
@@ -1383,14 +1389,41 @@ func sync_game_start(sceneName: String) -> void:
 func _setup_save_paths() -> void:
     if worldId.is_empty():
         worldId = "world_%d" % Time.get_unix_time_from_system()
-    var loader: Node = get_node_or_null("/root/Loader")
-    if loader == null || !loader.has_method(&"_ensure_save_dir"):
-        return
-    loader.savePath = "user://coop/%s/" % worldId
     var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
-    loader.playerSavePath = "user://coop/%s/players/%s/" % [worldId, localSteamId]
-    loader._ensure_save_dir()
-    _log("Save paths: world=%s player=%s" % [loader.savePath, loader.playerSavePath])
+    _apply_save_paths("user://coop/%s/" % worldId, "user://coop/%s/players/%s/" % [worldId, localSteamId])
+
+
+## Writes savePath/playerSavePath to Loader and ensures dirs exist.
+## Uses the patched [code]savePath[/code] var when available, falls back to
+## node metadata so callers still work if the loader_patch isn't applied.
+func _apply_save_paths(sp: String, pp: String) -> void:
+    if !is_instance_valid(loader):
+        return
+    if "savePath" in loader:
+        loader.savePath = sp
+        loader.playerSavePath = pp
+    else:
+        loader.set_meta(&"savePath", sp)
+        loader.set_meta(&"playerSavePath", pp)
+    DirAccess.make_dir_recursive_absolute(sp)
+    DirAccess.make_dir_recursive_absolute(pp)
+    _log("Save paths: world=%s player=%s" % [sp, pp])
+
+
+func _get_save_path() -> String:
+    if !is_instance_valid(loader):
+        return "user://"
+    if "savePath" in loader:
+        return loader.savePath
+    return loader.get_meta(&"savePath", "user://")
+
+
+func _get_player_save_path() -> String:
+    if !is_instance_valid(loader):
+        return "user://"
+    if "playerSavePath" in loader:
+        return loader.playerSavePath
+    return loader.get_meta(&"playerSavePath", "user://")
 
 
 ## Returns true if [param component] is safe for use in a file path (no traversal).
@@ -1405,9 +1438,7 @@ func _sanitize_path_component(component: String) -> bool:
 ## Resets save paths to default (solo mode).
 func _reset_save_paths() -> void:
     worldId = ""
-    var loader: Node = get_node_or_null("/root/Loader")
-    if loader != null && loader.has_method(&"reset_save_paths"):
-        loader.reset_save_paths()
+    _apply_save_paths("user://", "user://")
 
 
 ## Client requests the world ID from the host.
@@ -1419,14 +1450,12 @@ func _request_world_id() -> void:
     # Include difficulty/season so client can match if they need a fresh save.
     var diff: int = 1
     var season: int = 1
-    var loader: Node = get_node_or_null("/root/Loader")
-    if loader != null:
-        var worldPath: String = loader.savePath + "World.tres"
-        if FileAccess.file_exists(worldPath):
-            var world: Resource = load(worldPath)
-            if world != null:
-                diff = world.get(&"difficulty") if world.get(&"difficulty") != null else 1
-                season = world.get(&"season") if world.get(&"season") != null else 1
+    var worldPath: String = _get_save_path() + "World.tres"
+    if FileAccess.file_exists(worldPath):
+        var world: Resource = load(worldPath)
+        if world != null:
+            diff = world.get(&"difficulty") if world.get(&"difficulty") != null else 1
+            season = world.get(&"season") if world.get(&"season") != null else 1
     _receive_world_id.rpc_id(peerId, worldId, diff, season)
 
 
@@ -1437,23 +1466,22 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
         _log("Invalid worldId from host: %s" % hostWorldId)
         return
     worldId = hostWorldId
-    var loader: Node = get_node_or_null("/root/Loader")
-    if loader == null || !loader.has_method(&"_ensure_save_dir"):
-        return
-    loader.savePath = "user://coop/%s/" % worldId
     var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else str(localPeerId)
-    loader.playerSavePath = "user://coop/%s/players/%s/" % [worldId, localSteamId]
-    loader._ensure_save_dir()
+    _apply_save_paths("user://coop/%s/" % worldId, "user://coop/%s/players/%s/" % [worldId, localSteamId])
     # Store host's difficulty/season so _auto_load_game uses them if fresh save needed.
     set_meta(&"new_world_difficulty", hostDifficulty)
     set_meta(&"new_world_season", hostSeason)
-    _log("Client save paths: world=%s player=%s diff=%d season=%d" % [loader.savePath, loader.playerSavePath, hostDifficulty, hostSeason])
+    _log("Client new_world meta: diff=%d season=%d" % [hostDifficulty, hostSeason])
     # Now safe to auto-load since save paths are configured
     if pendingAutoJoin:
         pendingAutoJoin = false
         _auto_load_game.call_deferred()
     elif _is_on_menu():
-        _recheck_host_state()
+        # Direct connect has no Steam lobby — skip recheck and load immediately
+        if currentLobbyID.is_empty():
+            _auto_load_game.call_deferred()
+        else:
+            _recheck_host_state()
 
 
 ## Client sends their character save file to the host for storage.
@@ -1461,10 +1489,9 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
 func send_character_to_host() -> void:
     if isHost:
         return
-    var loader: Node = get_node_or_null("/root/Loader")
-    if loader == null:
+    if !is_instance_valid(loader):
         return
-    var charPath: String = loader.playerSavePath + "Character.tres"
+    var charPath: String = _get_player_save_path() + "Character.tres"
     if !FileAccess.file_exists(charPath):
         return
     var fileData: PackedByteArray = FileAccess.get_file_as_bytes(charPath)
@@ -1516,13 +1543,12 @@ func send_character_to_client(peerId: int, clientSteamId: String) -> void:
 ## Client receives their character file from the host and writes it locally.
 @rpc("authority", "call_remote", "reliable")
 func _receive_host_character(fileData: PackedByteArray) -> void:
-    var loader: Node = get_node_or_null("/root/Loader")
-    if loader == null:
+    if !is_instance_valid(loader):
         return
     if fileData.is_empty():
         _log("No stored character on host — starting fresh")
         return
-    var dir: String = loader.playerSavePath
+    var dir: String = _get_player_save_path()
     if !DirAccess.dir_exists_absolute(dir):
         DirAccess.make_dir_recursive_absolute(dir)
     var filePath: String = dir + "Character.tres"

@@ -34,10 +34,8 @@ func init_manager(manager: Node) -> void:
         LOS.collision_mask |= COOP_HIT_LAYER
 
 
-## Override _ready to log that the patch is active (diagnostic).
-## Must call super to preserve base game's deferred Initialize call.
+## Override _ready to preserve base game's deferred Initialize call.
 func _ready() -> void:
-    print("[ai_patch] _ready fired on %s" % get_path())
     super._ready()
 
 
@@ -47,7 +45,6 @@ func _ready() -> void:
 ## AI simulation). When the node isn't inside a SubViewport, walking up still
 ## finds the scene root correctly so solo behaviour is preserved.
 func Initialize():
-    print("[ai_patch] Initialize fired on %s" % get_path())
     await get_tree().physics_frame
 
     navigationMap = get_world_3d().get_navigation_map()
@@ -59,7 +56,6 @@ func Initialize():
         var aiNode: Node = mapAncestor.get_node_or_null("AI")
         if aiNode != null:
             AISpawner = aiNode
-            print("[ai_patch] Initialize: AISpawner set to %s" % aiNode.get_path())
         else:
             push_warning("[ai_patch] Initialize: Map found (%s) but no AI child" % mapAncestor.get_path())
     else:
@@ -463,6 +459,35 @@ func WeaponDamage(hitbox: String, damage: float) -> void:
         return
     var syncId: int = get_meta(&"ai_sync_id")
     _cm.aiState.request_ai_damage_from_client.rpc_id(1, syncId, hitbox, damage)
+
+# ---------- Audio Broadcasts ----------
+
+
+const _AIStateScript: GDScript = preload("res://mod/network/ai_state.gd")
+
+
+func PlayIdle() -> void:
+    super.PlayIdle()
+    _broadcast_voice(_AIStateScript.VoiceType.IDLE)
+
+
+func PlayCombat() -> void:
+    super.PlayCombat()
+    _broadcast_voice(_AIStateScript.VoiceType.COMBAT)
+
+
+func PlayDamage() -> void:
+    super.PlayDamage()
+    _broadcast_voice(_AIStateScript.VoiceType.DAMAGE)
+
+
+func _broadcast_voice(voiceType: int) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active() || !_cm.isHost:
+        return
+    if !has_meta(&"ai_sync_id"):
+        return
+    _cm.aiState.broadcast_ai_voice(get_meta(&"ai_sync_id"), voiceType)
+
 
 # ---------- Death (Broadcast Event) ----------
 

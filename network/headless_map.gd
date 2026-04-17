@@ -12,7 +12,6 @@ var viewport: SubViewport = null
 var mapScene: Node = null
 var proxyGameData: Resource = null
 var clientPeers: Array[int] = []
-var aiSyncIdCounter: int = 0
 var syncedAI: Dictionary[int, Node] = {}
 ## Cached AISpawner + pool refs. Resolved in _finalize_setup, cleared in teardown.
 var _aiSpawner: Node = null
@@ -52,9 +51,13 @@ func setup(path: String) -> bool:
     viewport = _make_headless_viewport(path)
     add_child(viewport)
 
-    # CACHE_MODE_REPLACE_DEEP forces deps to resolve through take_over_path.
+    # CACHE_MODE_REUSE lets the threaded load coexist with vanilla
+    # change_scene_to_file on the same path — REPLACE_DEEP fights over
+    # cache locks and deadlocks when both target the same .scn/.tscn.
+    # take_over_path already registered patched scripts system-wide, so
+    # reuse picks them up. _reassign_patched_scripts handles edge cases.
     var err: int = ResourceLoader.load_threaded_request(
-        path, "PackedScene", true, ResourceLoader.CACHE_MODE_REPLACE_DEEP
+        path, "PackedScene", true, ResourceLoader.CACHE_MODE_REUSE
     )
     if err != OK:
         push_error("[HeadlessMap] Failed to queue threaded load (err %d): %s" % [err, path])
@@ -105,6 +108,7 @@ func _finalize_setup() -> void:
 
     _inject_proxy_gamedata()
     _cache_ai_spawner_refs()
+    _inject_coop_manager()
     _setupComplete = true
     _log("SubViewport ready for %s" % mapPath)
     setup_finished.emit(true)
@@ -157,12 +161,39 @@ func _strip_world_environments(root: Node) -> void:
             _strip_world_environments(child)
 
 
+## Broadcast rate pulled from ai_state so the two stay in lockstep.
+const _AIStateScript: GDScript = preload("res://mod/network/ai_state.gd")
+
+
 func start() -> void:
     if viewport == null:
         return
     viewport.process_mode = Node.PROCESS_MODE_INHERIT
     _register_ai_sync_ids.call_deferred()
+    set_physics_process(true)
     _log("SubViewport started for %s" % mapPath)
+
+
+## Broadcasts headless AI state to clients on this map at ~10Hz.
+func _physics_process(_delta: float) -> void:
+    if !_setupComplete || clientPeers.is_empty():
+        return
+    if Engine.get_physics_frames() % _AIStateScript.SEND_EVERY_N_TICKS != 0:
+        return
+    if !is_instance_valid(_aiAgents) || _aiAgents.get_child_count() == 0:
+        return
+    if !is_instance_valid(_cm) || _cm.aiState == null:
+        return
+
+    var batch: Array = _cm.aiState.pack_ai_batch(_aiAgents)
+    if batch.is_empty():
+        return
+
+    # Send to each client on this map individually (not .rpc() which goes to all peers).
+    for peerId: int in clientPeers:
+        _cm.aiState.receive_ai_batch.rpc_id(
+            peerId, batch[0], batch[1], batch[2], batch[3], batch[4], batch[5], batch[6], batch[7]
+        )
 
 
 ## Reassigns patched scripts onto baked-in PackedScene references that
@@ -221,18 +252,46 @@ func _walk_and_inject(node: Node) -> void:
         _walk_and_inject(child)
 
 
+## Injects _cm reference into all patched nodes so RPC broadcasts work.
+func _inject_coop_manager() -> void:
+    if mapScene == null || _cm == null:
+        return
+    _walk_and_inject_cm(mapScene)
+
+
+func _walk_and_inject_cm(node: Node) -> void:
+    if "_cm" in node:
+        node._cm = _cm
+    for child: Node in node.get_children():
+        _walk_and_inject_cm(child)
+
+
 func _register_ai_sync_ids() -> void:
     if mapScene == null:
         return
-    for node: Node in _get_all_ai_nodes():
-        if node.has_meta(_M_AI_SYNC_ID):
+    # Assign 0-based IDs matching ai_spawner_patch._assign_sync_ids order:
+    # A_Pool children first, then B_Pool. Must match client's slot indexing.
+    var idx: int = 0
+    for holder: Node in [_aiAPool, _aiBPool]:
+        if !is_instance_valid(holder):
             continue
-        aiSyncIdCounter += 1
-        node.set_meta(_M_AI_SYNC_ID, aiSyncIdCounter)
-        node.set_meta(_M_AI_TYPE, _get_ai_type(node))
-        # Self-cleaning via tree_exiting — no per-tick dead-ref scan.
-        node.tree_exiting.connect(_on_ai_tree_exiting.bind(aiSyncIdCounter))
-        syncedAI[aiSyncIdCounter] = node
+        for child: Node in holder.get_children():
+            child.set_meta(_M_AI_SYNC_ID, idx)
+            child.set_meta(_M_AI_TYPE, _get_ai_type(child))
+            child.tree_exiting.connect(_on_ai_tree_exiting.bind(idx))
+            syncedAI[idx] = child
+            idx += 1
+    # Also tag any already-active agents (initial spawns reparented before this runs)
+    if is_instance_valid(_aiAgents):
+        for child: Node in _aiAgents.get_children():
+            if child.has_meta(_M_AI_SYNC_ID):
+                continue
+            child.set_meta(_M_AI_SYNC_ID, idx)
+            child.set_meta(_M_AI_TYPE, _get_ai_type(child))
+            child.tree_exiting.connect(_on_ai_tree_exiting.bind(idx))
+            syncedAI[idx] = child
+            idx += 1
+    _log("Registered %d AI sync IDs (0..%d)" % [idx, idx - 1])
 
 
 func _on_ai_tree_exiting(syncId: int) -> void:
@@ -609,6 +668,7 @@ func teardown() -> void:
     _setupCancelled = true
     _loadInProgress = false
     set_process(false)
+    set_physics_process(false)
     savedSnapshot = snapshot()
     if viewport != null:
         viewport.queue_free()

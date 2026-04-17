@@ -18,12 +18,6 @@ var savePath: String = "user://"
 var playerSavePath: String = "user://"
 
 
-## Resets both paths to default (solo mode).
-func reset_save_paths() -> void:
-	savePath = "user://"
-	playerSavePath = "user://"
-
-
 func _ensure_save_dir() -> void:
 	if savePath != "user://" && !DirAccess.dir_exists_absolute(savePath):
 		DirAccess.make_dir_recursive_absolute(savePath)

@@ -31,6 +31,7 @@ func _ensure_cm() -> void:
 
 func Interact() -> void:
     _ensure_cm()
+    print("[TX] Interact begin nextMap=%s" % nextMap)
     # CLIENT in coop: don't run vanilla Interact's save block — it would
     # write replicated host state into the client's user:// and pollute
     # their solo save when they return to the menu. Just trigger the scene
@@ -50,10 +51,12 @@ func Interact() -> void:
             gameData.energy -= energy
             gameData.hydration -= hydration
             Loader.LoadScene(nextMap)
+        print("[TX] Interact end (client)")
         return
 
     super.Interact()
     if !is_instance_valid(_cm):
+        print("[TX] Interact end (solo, no cm)")
         return
     # Vanilla Interact already saved Character/World/Shelter to user://. Mirror
     # those into the appropriate persistent dir based on session type.
@@ -61,3 +64,4 @@ func Interact() -> void:
         _cm.mirror_user_to_world()
     elif !_cm.is_session_active():
         _cm.mirror_user_to_solo()
+    print("[TX] Interact end (host/solo)")
