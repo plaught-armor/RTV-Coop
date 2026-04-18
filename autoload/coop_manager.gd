@@ -23,6 +23,12 @@ var isActive: bool = false
 var connectedPeers: PackedInt32Array = []
 ## Spawned remote player nodes, keyed by peer ID. Only contains live nodes.
 var remoteNodes: Dictionary[int, Node3D] = { }
+## Appearance entries received from peers before their [RemotePlayer] node
+## existed. Drained when [method spawn_remote_player] instantiates the peer.
+var cachedAppearances: Dictionary[int, Dictionary] = { }
+## Weapon-name entries received from peers before their [RemotePlayer] node
+## existed. Drained the same way as [member cachedAppearances].
+var cachedEquipment: Dictionary[int, String] = { }
 ## Maps multiplayer peer ID -> display name (Steam persona or fallback).
 var peerNames: Dictionary[int, String] = { }
 ## Maps multiplayer peer ID -> Steam ID string.
@@ -56,6 +62,7 @@ var SlotSerializerScript: Script = preload("res://mod/network/slot_serializer.gd
 var HeadlessMapScript: Script = preload("res://mod/network/headless_map.gd")
 ## Cached before take_over_path — avoids circular extends after path redirect.
 var PickupPatchScript: Script = preload("res://mod/patches/pickup_patch.gd")
+var AppearanceScript: Script = preload("res://mod/network/appearance.gd")
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
@@ -365,6 +372,8 @@ func on_peer_disconnected(peerId: int) -> void:
     playerState.clear_peer(peerId)
     peerNames.erase(peerId)
     peerSteamIDs.erase(peerId)
+    cachedAppearances.erase(peerId)
+    cachedEquipment.erase(peerId)
     var peerMap: String = peerMaps.get(peerId, "")
     peerMaps.erase(peerId)
     # Remove from headless map if applicable
@@ -540,6 +549,21 @@ func spawn_remote_player(peerId: int) -> void:
     remote.displayName = peerDisplayName
     remoteNodes[peerId] = remote
     _log("Spawned remote player for peer %d (%s)" % [peerId, peerDisplayName])
+
+    # Exchange appearance: apply any cached remote entry, then hand the peer our
+    # local choice so they can swap their placeholder model on their end.
+    if peerId in cachedAppearances:
+        var cached: Dictionary = cachedAppearances[peerId]
+        remote.set_appearance(cached.body, cached.material)
+        cachedAppearances.erase(peerId)
+    var myAppearance: Dictionary = load_local_appearance()
+    playerState.send_appearance_to(peerId, myAppearance.body, myAppearance.material)
+
+    # Equipment: apply cached + push our current weapon to the new peer.
+    if peerId in cachedEquipment:
+        remote.set_active_weapon(cachedEquipment[peerId])
+        cachedEquipment.erase(peerId)
+    playerState.send_equipment_to(peerId, playerState.get_current_weapon_name())
 
 
 func on_remote_node_exiting(peerId: int) -> void:
@@ -1360,7 +1384,7 @@ func _on_recheck_state(response: Dictionary) -> void:
     var hostState: String = data.get(&"value", "")
     if hostState == "in_game" && _is_on_menu():
         _log("Recheck: host is in-game — auto-loading")
-        _auto_load_game()
+        _client_start_load()
 
 
 func _on_recheck_timeout() -> void:
@@ -1374,7 +1398,7 @@ func _on_recheck_timeout() -> void:
 @rpc("authority", "call_remote", "reliable")
 func sync_game_start(sceneName: String) -> void:
     _log("Host started game (%s) — auto-loading" % sceneName)
-    _auto_load_game()
+    _client_start_load()
 
 
 # ---------- World Save Management ----------
@@ -1420,6 +1444,31 @@ func _get_player_save_path() -> String:
     if "playerSavePath" in loader:
         return loader.playerSavePath
     return loader.get_meta(&"playerSavePath", "user://")
+
+
+## Returns the active player's appearance from disk, or defaults if missing or
+## the save path isn't set yet. Never returns null — callers can render safely.
+func load_local_appearance() -> Dictionary:
+    var dir: String = _get_player_save_path()
+    var entry: Variant = AppearanceScript.load_from(dir)
+    if entry == null:
+        return AppearanceScript.get_defaults()
+    return entry
+
+
+## Returns true if an [code]appearance.json[/code] already exists for this
+## player in the current co-op world. Used to decide whether to prompt the
+## character-creation UI on session start.
+func has_local_appearance() -> bool:
+    var dir: String = _get_player_save_path()
+    return FileAccess.file_exists(AppearanceScript.file_path(dir))
+
+
+## Persists [param entry] to the current player save dir. Returns true on success.
+## Rejects invalid paths (non-AI prefix, traversal) via [AppearanceScript.is_valid].
+func save_local_appearance(entry: Dictionary) -> bool:
+    var dir: String = _get_player_save_path()
+    return AppearanceScript.save_to(dir, entry)
 
 
 ## Returns true if [param component] is safe for use in a file path (no traversal).
@@ -1471,13 +1520,41 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
     # Now safe to auto-load since save paths are configured
     if pendingAutoJoin:
         pendingAutoJoin = false
-        _auto_load_game.call_deferred()
+        _client_start_load.call_deferred()
     elif _is_on_menu():
         # Direct connect has no Steam lobby — skip recheck and load immediately
         if currentLobbyID.is_empty():
-            _auto_load_game.call_deferred()
+            _client_start_load.call_deferred()
         else:
             _recheck_host_state()
+
+
+## Client entry point that gates scene load behind the character-creation picker.
+## If no appearance sidecar exists yet the picker is shown first; on confirm the
+## scene loads, on cancel the client disconnects from the host. Without coopUI
+## (headless / debug boot) we fall back to defaults + auto-load.
+func _client_start_load() -> void:
+    if has_local_appearance():
+        _auto_load_game()
+        return
+    if is_instance_valid(coopUI):
+        coopUI.show_character_picker(_on_client_picker_confirm, _on_client_picker_cancel)
+    else:
+        save_local_appearance(AppearanceScript.get_defaults())
+        _auto_load_game()
+
+
+func _on_client_picker_confirm(_entry: Dictionary = {}) -> void:
+    if !has_local_appearance():
+        save_local_appearance(AppearanceScript.get_defaults())
+    _auto_load_game()
+
+
+## Client Back button = give up on the join; tearing down the peer puts us
+## back on the menu rather than leaving a half-connected session behind.
+func _on_client_picker_cancel() -> void:
+    _log("Client cancelled character picker — disconnecting")
+    disconnect_session()
 
 
 ## Client sends their character save file to the host for storage.

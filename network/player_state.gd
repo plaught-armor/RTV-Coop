@@ -84,6 +84,15 @@ var sequenceNumber: int = 0
 ## Dictionary is appropriate here: player count is dynamic (connect/disconnect).
 var peerBuffers: Dictionary[int, PeerBuffer] = {}
 
+## Last weapon name we broadcasted to peers. Used to rate-limit the equipment
+## RPC to actual changes only — polling happens every [member EQUIPMENT_CHECK_TICKS]
+## but the network path only fires when the value diverges.
+var _lastBroadcastedWeapon: String = ""
+## Poll interval for the equipment check. 120 Hz physics / 60 = 2 Hz — enough
+## to catch weapon swaps with no perceptible delay; well under the bandwidth
+## budget since the RPC is reliable + tiny.
+const EQUIPMENT_CHECK_TICKS: int = 60
+
 # ---------- Broadcast ----------
 
 
@@ -133,6 +142,9 @@ func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> 
 func _physics_process(_delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
+
+    if Engine.get_physics_frames() % EQUIPMENT_CHECK_TICKS == 0:
+        _poll_equipment()
 
     var currentTime: float = Time.get_ticks_msec() / 1000.0
     var renderTime: float = currentTime - INTERP_DELAY
@@ -336,6 +348,69 @@ func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: 
             grenade.handle = handleNode
 
 
+## Broadcasts the local player's currently-held weapon name to every peer.
+## [param weaponName] is the base-game file stem (e.g. [code]"AKM"[/code]);
+## empty string means unarmed. Called from [method _physics_process] when the
+## polled weapon changes — no hook into base-game RigManager is needed.
+func broadcast_equipment(weaponName: String) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    receive_equipment.rpc(weaponName)
+
+
+## Targeted variant used when a new peer spawns. Keeps the new peer in sync
+## without re-broadcasting our equipment to everyone already in the session.
+func send_equipment_to(peerId: int, weaponName: String) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    receive_equipment.rpc_id(peerId, weaponName)
+
+
+## Receives another peer's equipment change. Weapon name is validated inside
+## [method RemotePlayer.set_active_weapon] (allowlist regex); we only gate on
+## length here before dispatching. Cached for spawn-order races.
+@rpc("any_peer", "call_remote", "reliable")
+func receive_equipment(weaponName: String) -> void:
+    if !is_instance_valid(_cm):
+        return
+    if weaponName.length() > 32:
+        return
+    var peerId: int = multiplayer.get_remote_sender_id()
+    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    if remoteNode == null:
+        _cm.cachedEquipment[peerId] = weaponName
+        return
+    if remoteNode.has_method(&"set_active_weapon"):
+        remoteNode.set_active_weapon(weaponName)
+
+
+## Sends our chosen appearance to [param peerId]. Used by
+## [code]coop_manager.spawn_remote_player[/code] so a newly-spawned peer can
+## swap its placeholder body to the sender's actual selection.
+func send_appearance_to(peerId: int, body: String, materialPath: String) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    receive_appearance.rpc_id(peerId, body, materialPath)
+
+
+## Receives another peer's appearance choice. Runs it through the allowlist in
+## [AppearanceScript] before touching [RemotePlayer]. When the matching remote
+## node hasn't spawned yet (sync_peer_map race) the entry is cached so
+## [method coop_manager.spawn_remote_player] can apply it after instantiation.
+@rpc("any_peer", "call_remote", "reliable")
+func receive_appearance(body: String, materialPath: String) -> void:
+    if !is_instance_valid(_cm):
+        return
+    var peerId: int = multiplayer.get_remote_sender_id()
+    var sanitized: Dictionary = _cm.AppearanceScript.sanitize({"body": body, "material": materialPath})
+    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    if remoteNode == null:
+        _cm.cachedAppearances[peerId] = sanitized
+        return
+    if remoteNode.has_method(&"set_appearance"):
+        remoteNode.set_appearance(sanitized.body, sanitized.material)
+
+
 ## Encodes [param data] movement booleans into a [enum MoveFlag] bitfield.
 static func encode_flags(data: GameData) -> int:
     var flags: int = 0
@@ -355,3 +430,47 @@ static func encode_flags(data: GameData) -> int:
 ## Removes all buffered state for [param peerId].
 func clear_peer(peerId: int) -> void:
     peerBuffers.erase(peerId)
+
+
+## Returns the weapon name last broadcast to peers, or the currently-drawn
+## weapon if polling hasn't run yet. Used by [code]coop_manager[/code] when a
+## new peer spawns so it receives our equipment immediately (late-join sync).
+func get_current_weapon_name() -> String:
+    if !_lastBroadcastedWeapon.is_empty():
+        return _lastBroadcastedWeapon
+    return _read_current_weapon_name()
+
+
+## Polls the local player's current weapon name and broadcasts on change.
+## Uses a stem like [code]"AKM"[/code] (matches the weapon's dir + pickup
+## scene name under [code]res://Items/Weapons/[/code]); empty string = unarmed.
+## No direct hook into [code]RigManager[/code] — checking its children each tick
+## avoids a take_over_path patch and survives weapon swaps we don't author.
+func _poll_equipment() -> void:
+    var current: String = _read_current_weapon_name()
+    if current == _lastBroadcastedWeapon:
+        return
+    _lastBroadcastedWeapon = current
+    broadcast_equipment(current)
+
+
+## Walks the local scene to find the active weapon name. Returns "" when no
+## weapon is drawn (holstered / unarmed / not in a map yet).
+func _read_current_weapon_name() -> String:
+    var scene: Node = get_tree().current_scene
+    if scene == null:
+        return ""
+    var rigManager: Node = scene.get_node_or_null("Core/Camera/Manager")
+    if rigManager == null:
+        return ""
+    # Drawn weapons are added as RigManager children (see base RigManager.gd
+    # DrawPrimary/DrawSecondary). WeaponRig exposes its data resource which
+    # carries the file stem used across pickup/rig scene paths.
+    for child: Node in rigManager.get_children():
+        var data: Resource = child.get(&"data") as Resource
+        if data == null:
+            continue
+        var fileName: Variant = data.get(&"file")
+        if fileName is String && !(fileName as String).is_empty():
+            return fileName
+    return ""

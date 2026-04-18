@@ -1,6 +1,6 @@
-## Ghost visual representing a remote co-op player.
-## Receives interpolated state from [code]PlayerState[/code] via [method UpdateState].
-## Never reads [code]GameData[/code] directly.
+## Rigged visual for a remote co-op player. Consumes interpolated snapshots
+## from [PlayerState] via [method update_state] + equipment/fire RPCs; never
+## reads [GameData] directly.
 extends Node3D
 
 var _cm: Node
@@ -10,39 +10,62 @@ var targetPosition: Vector3 = Vector3.ZERO
 var targetRotationY: float = 0.0
 var targetRotationX: float = 0.0
 var moveFlags: int = 0
-var smoothSpeed: float = 15.0
-var displayName: String = ""
+var displayName: String = "":
+    set(value):
+        displayName = value
+        _lastRenderedHealth = -999
 var isDead: bool = false
+var _lastRenderedHealth: int = -999
+## Cached so _physics_process doesn't re-resolve _cm.PlayerStateScript.MoveFlag.
+var _moveFlag: Dictionary = {}
+## [method set_appearance] fires twice on spawn (default + RPC) and peers may
+## re-broadcast later; cache avoids redundant .tres parses.
+var _materialCache: Dictionary[String, Material] = {}
 
 var audioPlayer: AudioStreamPlayer3D = null
 
-## Occlusion state
 var occlusionRay: PhysicsRayQueryParameters3D = null
 var isOccluded: bool = false
-const OCCLUSION_CHECK_TICKS: int = 24  ## ~5Hz at 120Hz physics
+const OCCLUSION_CHECK_TICKS: int = 24
 const OCCLUSION_DB_PENALTY: float = -8.0
 const OCCLUSION_CUTOFF_HZ: float = 800.0
 static var occludedBusName: StringName = &""
 static var occludedBusIdx: int = -1
 
-@onready var body: MeshInstance3D = $Body
-@onready var headPivot: Node3D = $HeadPivot
-@onready var headMesh: MeshInstance3D = $HeadPivot/HeadMesh
+var modelRoot: Node3D = null
+var animTree: AnimationTree = null
+var skeleton: Skeleton3D = null
+## [MeshInstance3D] children of Skeleton3D keyed by body name.
+## After [method set_appearance] the losers are freed, leaving one entry.
+var bodyMeshes: Dictionary[String, MeshInstance3D] = {}
+var flashNode: Node3D = null
+var activeWeapon: Node3D = null
+var activeMuzzle: Node3D = null
+
+var currentSpeed: float = 0.0
+var targetSpeed: float = 0.0
+const SPEED_IDLE: float = 0.0
+const SPEED_WALK: float = 1.0
+const SPEED_RUN: float = 2.0
+const SPEED_SPRINT: float = 3.0
+## Cached as StringNames — writing to AnimationTree via a raw String allocates
+## every physics frame.
+const ANIM_PARAM_MOVEMENT_BLEND: StringName = &"parameters/Rifle/Movement/blend_position"
+const ANIM_PARAM_COND_RIFLE: StringName = &"parameters/conditions/Rifle"
+const ANIM_PARAM_COND_PISTOL: StringName = &"parameters/conditions/Pistol"
+const ANIM_PARAM_COND_MOVEMENT: StringName = &"parameters/Rifle/conditions/Movement"
+
+## Bit 19 — ai_patch.gd adds only this bit to its fire/LOS masks, so the
+## HitBody is invisible to Interactor, player weapons, and other systems.
+const COOP_HIT_LAYER: int = 1 << 19
+
+
 @onready var nameLabel: Label3D = $NameLabel
 
 
 func init_manager(manager: Node) -> void:
     _cm = manager
-    var bodyMat: StandardMaterial3D = StandardMaterial3D.new()
-    bodyMat.albedo_color = Color(0.2, 0.6, 0.3, 0.8)
-    bodyMat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-    body.material_override = bodyMat
-
-    var headMat: StandardMaterial3D = StandardMaterial3D.new()
-    headMat.albedo_color = Color(0.8, 0.7, 0.5)
-    headMesh.material_override = headMat
-
-    displayName = name
+    _moveFlag = _cm.PlayerStateScript.MoveFlag
     nameLabel.text = displayName
     targetPosition = global_position
 
@@ -52,19 +75,158 @@ func init_manager(manager: Node) -> void:
     add_child(audioPlayer)
 
     _ensure_occluded_bus()
-
-    # Collision body for AI raycasts (LOS + fire) to detect this remote player
     _create_collision_body()
-    # Group for AI detection — ai_patch checks "CoopRemote" explicitly
     add_to_group("CoopRemote")
 
+    _load_super_rig()
 
-## Creates a StaticBody3D with a capsule collider matching the body mesh.
-## The body is in the "CoopRemote" and "Player" groups so AI raycasts recognize it.
-## Collision layer 20 (bit 19) — dedicated to co-op remote player hit detection.
-## Only AI raycasts have this bit in their mask (set by ai_patch.gd).
-## Keeps HitBody invisible to the Interactor, player weapons, and other systems.
-const COOP_HIT_LAYER: int = 1 << 19
+    var defaults: Dictionary = _cm.AppearanceScript.get_defaults()
+    set_appearance(defaults.body, defaults.material)
+
+
+func _load_super_rig() -> void:
+    var packed: PackedScene = load(_cm.AppearanceScript.SUPER_RIG_PATH) as PackedScene
+    if packed == null:
+        push_warning("super rig missing — run tools/build_super_rig.gd in editor")
+        return
+
+    # The super rig root is a CharacterBody3D wrapper; we only want its Body
+    # child so remote players don't carry a phantom physics body.
+    var rigRoot: Node = packed.instantiate()
+    if rigRoot == null:
+        return
+    var body: Node3D = rigRoot.get_node_or_null("Body") as Node3D
+    if body == null:
+        for child: Node in rigRoot.get_children():
+            if child is Node3D:
+                body = child
+                break
+    if body == null:
+        rigRoot.queue_free()
+        return
+
+    # Collision + Flash sit at the scene root (matching AI_*.tscn); pull them
+    # into Body before freeing the wrapper so they follow the rig.
+    for siblingName: String in ["Collision", "Flash"]:
+        var sibling: Node = rigRoot.get_node_or_null(siblingName)
+        if sibling != null:
+            rigRoot.remove_child(sibling)
+            body.add_child(sibling)
+
+    rigRoot.remove_child(body)
+    rigRoot.queue_free()
+    modelRoot = body
+    add_child(modelRoot)
+
+    animTree = modelRoot.get_node_or_null("Animator") as AnimationTree
+    flashNode = modelRoot.get_node_or_null("Flash") as Node3D
+    skeleton = modelRoot.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
+    if skeleton != null:
+        for child: Node in skeleton.get_children():
+            if child is MeshInstance3D && child.name.begins_with("Mesh_"):
+                var key: String = child.name.substr(5)
+                bodyMeshes[key] = child
+                (child as MeshInstance3D).visible = false
+    _activate_animator()
+
+
+## Equipment-sync entry point. Empty [param weaponName] clears the attachment.
+func set_active_weapon(weaponName: String) -> void:
+    if modelRoot == null:
+        return
+    var weapons: Node = modelRoot.get_node_or_null("Armature/Skeleton3D/Weapons")
+    if weapons == null:
+        return
+
+    if is_instance_valid(activeWeapon):
+        activeWeapon.queue_free()
+    activeWeapon = null
+    activeMuzzle = null
+
+    if weaponName.is_empty() || !_is_valid_weapon_name(weaponName):
+        return
+    var path: String = "res://Items/Weapons/%s/%s.tscn" % [weaponName, weaponName]
+    if !_cm.AppearanceScript.is_visually_allowed(path):
+        return
+    if !ResourceLoader.exists(path):
+        return
+    var packed: PackedScene = load(path) as PackedScene
+    if packed == null:
+        return
+    var weapon: Node = packed.instantiate()
+    if weapon == null:
+        return
+    # Drop Pickup.gd + freeze the body — bone-attached world model, not a pickup.
+    weapon.set_script(null)
+    if weapon is RigidBody3D:
+        var rb: RigidBody3D = weapon
+        rb.freeze = true
+        rb.collision_layer = 0
+        rb.collision_mask = 0
+    weapons.add_child(weapon)
+    activeWeapon = weapon as Node3D
+    activeMuzzle = weapon.get_node_or_null("Muzzle") as Node3D
+
+
+## Allowlist for weapon file names — prevents path traversal / arbitrary load
+## through the equipment RPC.
+static func _is_valid_weapon_name(name: String) -> bool:
+    if name.length() > 32:
+        return false
+    for i: int in name.length():
+        var c: int = name.unicode_at(i)
+        var ok: bool = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95 || c == 45
+        if !ok:
+            return false
+    return true
+
+
+func set_appearance(body: String, materialPath: String) -> void:
+    if !_cm.AppearanceScript.is_valid({"body": body, "material": materialPath}):
+        return
+    if modelRoot == null:
+        return
+
+    # Appearance is picked once per world; free the three losers so the remote
+    # doesn't carry unused skinned meshes on the GPU.
+    var losers: Array[String] = []
+    for key: String in bodyMeshes:
+        if key != body:
+            losers.append(key)
+    for key: String in losers:
+        var mesh: MeshInstance3D = bodyMeshes[key]
+        if is_instance_valid(mesh):
+            mesh.queue_free()
+        bodyMeshes.erase(key)
+
+    var selected: MeshInstance3D = bodyMeshes.get(body)
+    if selected == null:
+        return
+    selected.visible = true
+    var mat: Material = _load_material(materialPath)
+    if mat != null:
+        for i: int in selected.get_surface_override_material_count():
+            selected.set_surface_override_material(i, mat)
+
+
+func _load_material(path: String) -> Material:
+    var cached: Material = _materialCache.get(path)
+    if cached != null:
+        return cached
+    var mat: Material = load(path) as Material
+    if mat != null:
+        _materialCache[path] = mat
+    return mat
+
+
+func _activate_animator() -> void:
+    if animTree == null:
+        return
+    animTree.active = true
+    animTree[ANIM_PARAM_COND_RIFLE] = true
+    animTree[ANIM_PARAM_COND_PISTOL] = false
+    animTree[ANIM_PARAM_COND_MOVEMENT] = true
+    animTree[ANIM_PARAM_MOVEMENT_BLEND] = SPEED_IDLE
 
 
 func _create_collision_body() -> void:
@@ -73,7 +235,6 @@ func _create_collision_body() -> void:
     staticBody.collision_layer = COOP_HIT_LAYER
     staticBody.collision_mask = 0
     staticBody.add_to_group(&"CoopRemote")
-    # Copy peer_id meta so ai_patch can find the peer from the collider
     if has_meta(&"peer_id"):
         staticBody.set_meta(&"peer_id", get_meta(&"peer_id"))
 
@@ -88,16 +249,14 @@ func _create_collision_body() -> void:
     add_child(staticBody)
 
 
-## Creates the shared "CoopOccluded" audio bus with a lowpass filter.
-## Called once per session — static vars persist across instances.
+## Creates the shared "CoopOccluded" bus lazily — bus indices shift at runtime
+## so we look up by name every call and only add the bus on first miss.
 static func _ensure_occluded_bus() -> void:
     occludedBusName = &"CoopOccluded"
-    # Look up by name every time — bus indices can shift at runtime
     var idx: int = AudioServer.get_bus_index(occludedBusName)
     if idx >= 0:
         occludedBusIdx = idx
         return
-    # Create new bus
     AudioServer.add_bus()
     occludedBusIdx = AudioServer.bus_count - 1
     AudioServer.set_bus_name(occludedBusIdx, occludedBusName)
@@ -108,8 +267,6 @@ static func _ensure_occluded_bus() -> void:
     AudioServer.add_bus_effect(occludedBusIdx, lpf)
 
 
-## Raycasts from listener to this remote player. If geometry blocks LOS, route audio
-## through the occluded bus (lowpass + volume reduction).
 func _update_occlusion() -> void:
     if !is_instance_valid(audioPlayer) || occludedBusIdx < 0:
         return
@@ -124,7 +281,7 @@ func _update_occlusion() -> void:
     if occlusionRay == null:
         occlusionRay = PhysicsRayQueryParameters3D.create(from, to)
         occlusionRay.collision_mask = 1
-        # Exclude local player's body so the ray doesn't immediately hit it
+        # Exclude the local player so the ray doesn't immediately self-hit.
         var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
         if controller is PhysicsBody3D:
             occlusionRay.exclude = [controller.get_rid()]
@@ -145,15 +302,26 @@ func die() -> void:
     set_meta(&"is_dead", true)
     set_meta(&"health", 0)
     nameLabel.text = "%s [DEAD]" % displayName
-    # Collapse the body visually.
-    body.scale.y = 0.15
-    headPivot.position.y = 0.2
-    headPivot.rotation.x = -PI / 2.0
-    # Disable AI hit detection so AI stops targeting the corpse.
+    _lastRenderedHealth = 0
+    # Stop the anim tree before ragdoll so they don't fight over bone poses.
+    if animTree != null:
+        animTree.active = false
+    _start_ragdoll()
     var hitBody: Node = get_node_or_null("HitBody")
     if hitBody != null:
         hitBody.collision_layer = 0
         hitBody.remove_from_group(&"CoopRemote")
+
+
+## Uses Ragdoll.gd's ActivateBones helper when attached (it also unlocks each
+## bone's axis locks); falls back to the raw Skeleton3D API otherwise.
+func _start_ragdoll() -> void:
+    if skeleton == null:
+        return
+    if skeleton.has_method(&"ActivateBones"):
+        skeleton.ActivateBones()
+    else:
+        skeleton.physical_bones_start_simulation()
 
 
 func _physics_process(delta: float) -> void:
@@ -161,28 +329,46 @@ func _physics_process(delta: float) -> void:
         return
     global_position = targetPosition
     rotation.y = targetRotationY
-    headPivot.rotation.x = targetRotationX
+    # Pitch skipped — applying to a skinned skeleton needs bone IK (MVP gap).
 
-    if moveFlags & _cm.PlayerStateScript.MoveFlag.CROUCHING:
-        body.scale.y = lerpf(body.scale.y, 0.6, delta * 5.0)
-        headPivot.position.y = lerpf(headPivot.position.y, 1.0, delta * 5.0)
-    else:
-        body.scale.y = lerpf(body.scale.y, 1.0, delta * 5.0)
-        headPivot.position.y = lerpf(headPivot.position.y, 1.6, delta * 5.0)
+    _update_anim_blend(delta)
 
-    # Occlusion check at ~5Hz
     if Engine.get_physics_frames() % OCCLUSION_CHECK_TICKS == 0:
         _update_occlusion()
 
     var health: int = get_meta(&"health", -1)
-    if health >= 0:
-        nameLabel.text = "%s [%d%%]" % [displayName, health]
+    if health != _lastRenderedHealth:
+        _lastRenderedHealth = health
+        if health >= 0:
+            nameLabel.text = "%s [%d%%]" % [displayName, health]
+        else:
+            nameLabel.text = displayName
+
+
+## Flags → target blend position (idle/walk/run/sprint). Lerp hides the 20 Hz
+## packet cadence so transitions stay smooth.
+func _update_anim_blend(delta: float) -> void:
+    if animTree == null:
+        return
+    var flags: int = moveFlags
+    var moving: bool = (flags & _moveFlag.MOVING) != 0
+    var walking: bool = (flags & _moveFlag.WALKING) != 0
+    var running: bool = (flags & _moveFlag.RUNNING) != 0
+
+    if !moving:
+        targetSpeed = SPEED_IDLE
+    elif running:
+        targetSpeed = SPEED_SPRINT
+    elif walking:
+        targetSpeed = SPEED_WALK
     else:
-        nameLabel.text = displayName
+        targetSpeed = SPEED_RUN
+
+    currentSpeed = lerpf(currentSpeed, targetSpeed, clampf(delta * 8.0, 0.0, 1.0))
+    animTree[ANIM_PARAM_MOVEMENT_BLEND] = currentSpeed
 
 
-## Applies a network state snapshot. Called by the interpolation loop in [code]PlayerState[/code].
-## [param pos]: world position. [param rot]: packed rotation (x=yaw, y=pitch). [param flags]: [enum MoveFlag] bitfield.
+## [param rot] packs (yaw=x, pitch=y) to reuse the existing 3-float RPC slot.
 func update_state(pos: Vector3, rot: Vector3, flags: int) -> void:
     targetPosition = pos
     targetRotationY = rot.x
@@ -190,7 +376,6 @@ func update_state(pos: Vector3, rot: Vector3, flags: int) -> void:
     moveFlags = flags
 
 
-## Plays a spatial audio event at this remote player's position.
 func play_remote_audio(audioPath: String) -> void:
     if !is_instance_valid(audioPlayer):
         return
@@ -212,8 +397,6 @@ var hitDefaultScene: PackedScene = preload("res://Effects/Hit_Default.tscn")
 var hitKnifeScene: PackedScene = preload("res://Effects/Hit_Knife.tscn")
 
 
-## Spawns a bullet impact decal + particle at the given world position.
-## Parented to the current scene root so it stays in world space.
 func spawn_bullet_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String) -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -222,7 +405,6 @@ func spawn_bullet_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: Stri
     scene.add_child(hit)
     hit.global_position = hitPoint
 
-    # Orient decal by normal (same logic as WeaponRig.HitEffect)
     if hitNormal == Vector3(0, 1, 0):
         hit.look_at(hitPoint + hitNormal, Vector3.RIGHT)
     elif hitNormal == Vector3(0, -1, 0):
@@ -235,7 +417,6 @@ func spawn_bullet_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: Stri
     hit.PlayHit(hitSurface)
 
 
-## Plays a knife attack audio event spatially.
 func play_knife_attack(isSlash: bool) -> void:
     if !is_instance_valid(_cm):
         return
@@ -249,7 +430,6 @@ func play_knife_attack(isSlash: bool) -> void:
     audioPlayer.play()
 
 
-## Spawns a knife hit decal at the impact point.
 func spawn_knife_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -265,7 +445,7 @@ func spawn_knife_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: Strin
     else:
         decal.look_at(hitPoint + hitNormal, Vector3.DOWN)
 
-    # Rotation by attack type (matches KnifeRig.KnifeDecal)
+    # Angles match KnifeRig.KnifeDecal per combo index.
     match attackId:
         1: decal.global_rotation_degrees.z = 30.0
         2: decal.global_rotation_degrees.z = 10.0
@@ -282,12 +462,10 @@ func spawn_knife_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: Strin
         decal.PlayKnifeHit(hitSurface)
 
 
-## Plays a weapon fire event: gunshot audio, optional tail audio, and muzzle flash.
 func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> void:
-    # Play fire audio
     play_remote_audio(fireAudio)
 
-    # Play tail audio on a separate player so it doesn't cut the fire sound
+    # Tail audio on its own player so it doesn't cut the fire sound.
     if !tailAudio.is_empty():
         var tailEvent: Resource = load(tailAudio)
         if tailEvent != null && !tailEvent.audioClips.is_empty():
@@ -302,17 +480,9 @@ func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> v
             tailPlayer.play()
             tailPlayer.finished.connect(tailPlayer.queue_free)
 
-    # Muzzle flash light (unsuppressed only)
-    if showFlash:
-        var light: OmniLight3D = OmniLight3D.new()
-        light.light_color = Color(1.0, 0.8, 0.4)
-        light.light_energy = 2.0
-        light.omni_range = 8.0
-        light.position = Vector3(0, 1.4, -0.3)
-        add_child(light)
-        get_tree().create_timer(0.05).timeout.connect(_free_if_valid.bind(light))
-
-
-static func _free_if_valid(node: Node) -> void:
-    if is_instance_valid(node):
-        node.queue_free()
+    # Reposition the super rig's Flash to the active muzzle and pulse it —
+    # matches AI.gd per-shot flash handling.
+    if showFlash && is_instance_valid(flashNode) && is_instance_valid(activeMuzzle):
+        flashNode.global_position = activeMuzzle.global_position
+        if flashNode.has_method(&"Activate"):
+            flashNode.Activate()

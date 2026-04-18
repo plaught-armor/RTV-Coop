@@ -1041,9 +1041,25 @@ func on_create_world_confirmed() -> void:
             _cm.clear_active_world()
             return
 
-    # Vanilla NewGame writes user://World.tres + Character.tres. We then mirror
-    # those (plus shelter/trader saves once they exist) into user://coop/<id>/
-    # so the world persists separately.
+    # Save paths are up now, so the picker can write appearance.json. Defer
+    # NewGame + mirror + LoadScene until the host confirms a character — we
+    # don't want to write World.tres / Character.tres for a world they might
+    # back out of during the picker.
+    show_character_picker(
+        _on_host_picker_confirm,
+        _on_host_picker_cancel.bind(worldId, worldDir),
+    )
+
+
+## Spawns the character-creation dialog. [param onConfirm] runs after confirm,
+## [param onCancel] runs on Back — callers differ between host and client.
+func show_character_picker(onConfirm: Callable, onCancel: Callable) -> void:
+    var picker: Control = load("res://mod/ui/character_creation.gd").new()
+    add_child(picker)
+    picker.init(_cm, onConfirm, onCancel)
+
+
+func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
     var loader: Node = get_node_or_null("/root/Loader")
     if loader == null:
         return
@@ -1051,6 +1067,17 @@ func on_create_world_confirmed() -> void:
     loader.NewGame(newWorldDifficulty, newWorldSeason)
     _cm.mirror_user_to_world()
     loader.LoadScene("Cabin")
+
+
+## Back out of world creation from inside the picker: tear down the host
+## session we started pre-picker, delete the empty world dir, and return to
+## the world list so the player can pick again or cancel entirely.
+func _on_host_picker_cancel(worldId: String, worldDir: String) -> void:
+    _cm.disconnect_session()
+    _cm.clear_active_world()
+    _remove_dir_recursive(worldDir)
+    _cm._log("[coop_ui] world creation cancelled in picker (%s)" % worldId)
+    show_world_picker()
 
 
 ## Recursively removes a directory and its contents. Used to clean up an empty

@@ -53,6 +53,11 @@ func launch() -> void:
     if helperPID >= 0:
         return
 
+    # Kill any stale helper from a prior RTV crash. _exit_tree doesn't fire on
+    # force-close, leaving the helper process alive + port 27099 held; our new
+    # spawn then can't bind and the TCP poll stalls for CONNECT_TIMEOUT.
+    _kill_stale_helpers()
+
     var helperSrc: String = get_helper_res_path()
     var libSrc: String = get_steam_lib_res_path()
 
@@ -260,6 +265,21 @@ func send_command(cmd: String, params: Dictionary, callback: Callable) -> void:
     tcp.put_data(jsonLine.to_utf8_buffer())
     if callback.is_valid():
         pendingCallbacks[reqId] = callback
+
+
+## Kills any leftover helper processes from a previous RTV run. Matches by
+## executable name so the kill hits whichever platform's helper is lingering
+## (native Linux binary or the Proton-wrapped Windows binary visible to
+## pkill/taskkill as [code]steam_helper.exe[/code]).
+func _kill_stale_helpers() -> void:
+    match OS.get_name():
+        "Linux":
+            OS.execute("pkill", ["-9", "-f", "steam_helper_linux"])
+            OS.execute("pkill", ["-9", "-f", "steam_helper.exe"])
+        "Windows":
+            OS.execute("taskkill", ["/F", "/IM", "steam_helper.exe"])
+        _:
+            pass
 
 
 ## Shuts down the helper process and TCP connection.
