@@ -17,6 +17,7 @@ enum MoveFlag {
     RUNNING = 4,
     CROUCHING = 8,
     GROUNDED = 16,
+    FLASHLIGHT = 32,
 }
 
 
@@ -424,6 +425,8 @@ static func encode_flags(data: GameData) -> int:
         flags |= MoveFlag.CROUCHING
     if data.isGrounded:
         flags |= MoveFlag.GROUNDED
+    if data.flashlight:
+        flags |= MoveFlag.FLASHLIGHT
     return flags
 
 

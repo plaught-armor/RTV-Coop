@@ -6,9 +6,10 @@ extends Control
 
 const SELECTED_COLOR: Color = Color(1, 1, 1)
 const UNSELECTED_COLOR: Color = Color(1, 1, 1, 0.5)
-const PREVIEW_SIZE: Vector2i = Vector2i(420, 480)
+const PREVIEW_SIZE: Vector2i = Vector2i(416, 416)
 const IDLE_ANIM: StringName = &"Rifle_Idle"
 const GAME_THEME_PATH: String = "res://UI/Themes/Theme.tres"
+const PREVIEW_RIFLE_NAME: String = "AK-12"
 
 var _cm: Node = null
 var _onConfirm: Callable = Callable()
@@ -171,27 +172,23 @@ func _build_preview(parent: Container) -> void:
 
     _previewViewport = SubViewport.new()
     _previewViewport.size = PREVIEW_SIZE
-    _previewViewport.transparent_bg = true
-    # A SubViewport inside a CanvasLayer-based UI has no ambient 3D world —
-    # without its own World3D the clear falls back to opaque black regardless
-    # of transparent_bg. Pairing own_world_3d with a WorldEnvironment (below)
-    # is the standard fix for 3D-in-2D-UI previews.
+    # SubViewport.transparent_bg is unreliable here (premult-alpha output
+    # composites incorrectly over the UI). Render an opaque studio backdrop
+    # via own_world_3d + WorldEnvironment instead.
     _previewViewport.own_world_3d = true
     _previewViewport.handle_input_locally = false
-    _previewViewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+    _previewViewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
     container.add_child(_previewViewport)
 
+    
+    var world_3d: World3D= World3D.new()
     var env: Environment = Environment.new()
-    # BG_CLEAR_COLOR cooperates with SubViewport.transparent_bg — BG_COLOR
-    # was re-filling the frame with alpha-0-multiplied black every frame,
-    # which on Forward+ renders as fully opaque black.
     env.background_mode = Environment.BG_CLEAR_COLOR
-    env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-    env.ambient_light_color = Color(0.7, 0.7, 0.75)
-    env.ambient_light_energy = 0.9
-    var worldEnv: WorldEnvironment = WorldEnvironment.new()
-    worldEnv.environment = env
-    _previewViewport.add_child(worldEnv)
+    env.ambient_light_source = Environment.AMBIENT_SOURCE_BG
+    env.ambient_light_color = Color.BLACK
+    world_3d.environment = env
+
+    _previewViewport.world_3d = world_3d
 
     var body: Node3D = _instantiate_super_rig_body()
     if body != null:
@@ -203,6 +200,7 @@ func _build_preview(parent: Container) -> void:
                     var key: String = child.name.substr(5)
                     _previewMeshes[key] = child
                     (child as MeshInstance3D).visible = false
+            _attach_preview_rifle(skel)
         var animPlayer: AnimationPlayer = body.get_node_or_null("Animations") as AnimationPlayer
         if animPlayer != null && animPlayer.has_animation(IDLE_ANIM):
             animPlayer.play(IDLE_ANIM)
@@ -211,7 +209,8 @@ func _build_preview(parent: Container) -> void:
     # no look_at needed. Height = mid-body so the rig sits centered vertically
     # in the viewport at the default 75° FOV.
     var cam: Camera3D = Camera3D.new()
-    cam.position = Vector3(0, 1.0, 1.8)
+    cam.position = Vector3(0, 1.3, 1.3)
+    cam.rotation_degrees = Vector3(-16.0, 0.0, 0.0)
     _previewViewport.add_child(cam)
 
     var light: DirectionalLight3D = DirectionalLight3D.new()
@@ -219,6 +218,21 @@ func _build_preview(parent: Container) -> void:
     light.rotate_y(deg_to_rad(30))
     light.light_energy = 1.2
     _previewViewport.add_child(light)
+
+
+## Attaches a rifle to the Weapons BoneAttachment on the rig skeleton so the
+## Rifle_Idle pose reads correctly (empty hands look broken in that stance).
+func _attach_preview_rifle(skel: Skeleton3D) -> void:
+    var weapons: Node = skel.get_node_or_null("Weapons")
+    if weapons == null:
+        return
+    # Super rig bakes every AI-owned weapon under Weapons as invisible templates
+    # (see tools/build_super_rig.gd). The baked copy already carries the correct
+    # Transform3D from its source AI scene, so we just toggle visibility.
+    var baked: Node3D = weapons.get_node_or_null(PREVIEW_RIFLE_NAME) as Node3D
+    if baked != null:
+        baked.visible = true
+        return
 
 
 ## Mirrors RemotePlayer's extract: drop the CharacterBody3D wrapper so the

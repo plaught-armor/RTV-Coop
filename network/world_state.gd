@@ -2,6 +2,8 @@
 ## Host is authoritative. Clients send interaction requests, host validates and broadcasts.
 extends Node
 
+var gameData: GameData = preload("res://Resources/GameData.tres")
+
 var _cm: Node
 ## Cached scene refs, refreshed per scene transition.
 var _currentScene: Node = null
@@ -339,6 +341,62 @@ func sync_switch_state(switchPath: String, active: bool) -> void:
         sw.Deactivate()
         sw.PlaySwitch()
 
+# ---------- Bed Sync ----------
+
+
+## Host triggers sleep: runs the bed locally (advances Simulation, adjusts its
+## own vitals, plays transition audio) and broadcasts the duration so clients
+## freeze + play audio in lock-step. Clients also apply matching stat deltas
+## so everyone wakes with the same energy/hydration/mental state.
+func host_bed_interact(bed: Node) -> void:
+    if !_cm.isHost || !is_instance_valid(bed) || !is_instance_valid(_currentScene):
+        return
+    if !bed.has_method(&"Interact") || !bed.canSleep:
+        return
+    var duration: int = int(bed.randomSleep)
+    var bedPath: String = _currentScene.get_path_to(bed)
+    sync_bed_sleep.rpc(bedPath, duration)
+    bed.Interact()
+
+
+## Client asks the host to sleep on a specific bed.
+@rpc("any_peer", "call_remote", "reliable")
+func request_bed_interact(bedPath: String) -> void:
+    if !_cm.isHost:
+        return
+    if !is_valid_path(bedPath):
+        return
+    var bed: Node = _scene_node(bedPath)
+    if !is_instance_valid(bed):
+        return
+    host_bed_interact(bed)
+
+
+## Host broadcasts the sleep fire + duration so clients freeze locally and
+## play the transition/sleep audio. Simulation time advances from the host's
+## own Bed.Interact() via the normal sync_simulation broadcast.
+@rpc("authority", "call_remote", "reliable")
+func sync_bed_sleep(bedPath: String, duration: int) -> void:
+    var bed: Node = _scene_node(bedPath)
+    if !is_instance_valid(bed):
+        return
+    gameData.isSleeping = true
+    gameData.freeze = true
+    if bed.has_method(&"PlayTransition"):
+        bed.PlayTransition()
+    if bed.has_method(&"PlaySleep"):
+        bed.PlaySleep()
+    await get_tree().create_timer(float(duration), false).timeout
+    if !is_instance_valid(self):
+        return
+    gameData.energy -= 20.0
+    gameData.hydration -= 20.0
+    gameData.mental += 20.0
+    gameData.isSleeping = false
+    gameData.freeze = false
+    Loader.Message("You slept " + str(duration) + " hours", Color.GREEN)
+
+
 # ---------- Container Sync ----------
 
 
@@ -637,6 +695,43 @@ func sync_trader_supply_update(traderPath: String, packedSupply: Array[Dictionar
             iface.Resupply()
 
 
+## Client asks host to mark a task as completed. Host applies locally
+## (including the Traders.tres save — host is authoritative for disk) and
+## broadcasts to every peer. Matches [method Trader.CompleteTask] side
+## effects across the session so no one double-completes.
+@rpc("any_peer", "call_remote", "reliable")
+func request_trader_task_complete(traderPath: String, taskName: String) -> void:
+    if !_cm.isHost:
+        return
+    if !is_valid_path(traderPath):
+        return
+    var trader: Node = _scene_node(traderPath)
+    if !is_instance_valid(trader):
+        return
+    if trader.tasksCompleted.has(taskName):
+        return
+    # Host applies + saves the same as solo. No TaskData object in hand, so we
+    # inline the parts of Trader.CompleteTask that don't need one.
+    trader.tasksCompleted.append(taskName)
+    if trader.has_method(&"PlayTraderTask"):
+        trader.PlayTraderTask()
+    if !gameData.tutorial:
+        Loader.SaveTrader(trader.traderData.name)
+        Loader.UpdateProgression()
+    sync_trader_task_complete.rpc(traderPath, taskName)
+
+
+## Host broadcasts a completed task to every peer. Clients simply append +
+## play the cue; host has already written the save.
+@rpc("authority", "call_remote", "reliable")
+func sync_trader_task_complete(traderPath: String, taskName: String) -> void:
+    var trader: Node = _scene_node(traderPath)
+    if !is_instance_valid(trader):
+        return
+    if trader.has_method(&"apply_task_complete"):
+        trader.apply_task_complete(taskName)
+
+
 # ---------- Simulation Sync ----------
 
 
@@ -792,6 +887,47 @@ func sync_furniture_catalog(furniturePath: String) -> void:
     node.queue_free()
 
 
+## Any peer grabbed this furniture piece — everyone else holding it drops so
+## only the latest grabber's transform wins. Sender's own copy ignores.
+@rpc("any_peer", "call_remote", "reliable")
+func sync_furniture_grab(furniturePath: String) -> void:
+    var node: Node = _scene_node(furniturePath)
+    if !is_instance_valid(node):
+        return
+    if node.has_method(&"force_release"):
+        node.force_release()
+
+
+## Peer released this piece — currently a no-op since sync_furniture_place
+## already carries the final pose, but reserved so late-joiners can replay
+## the lock history without tripping over stale grabs.
+@rpc("any_peer", "call_remote", "reliable")
+func sync_furniture_release(_furniturePath: String) -> void:
+    pass
+
+
+# ---------- Coop Settings Sync ----------
+
+
+## Client asks the host to flip a session-wide setting. Host validates
+## [param key] via the defaults dict (unknown keys are refused) and
+## broadcasts if accepted.
+@rpc("any_peer", "call_remote", "reliable")
+func request_setting_change(key: String, value: Variant) -> void:
+    if !_cm.isHost:
+        return
+    if !_cm.settings.has(key):
+        return
+    _cm.set_setting(key, value)
+
+
+## Host broadcasts the full settings dict. Simpler than keyed diffs and the
+## payload is tiny; mostly fires on setting changes + peer join.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_settings(newSettings: Dictionary) -> void:
+    _cm.settings = newSettings.duplicate()
+
+
 # ---------- Event System Sync ----------
 
 
@@ -858,6 +994,10 @@ func send_full_state(peerId: int) -> void:
     # Replay world events (crash sites, vehicles, etc.) for late joiners
     for entry: Array in _firedEvents:
         broadcast_event.rpc_id(peerId, entry[0], entry[1])
+
+    # Push current coop settings so the new peer's simulation/damage patches
+    # see the host's tuning instantly.
+    broadcast_settings.rpc_id(peerId, _cm.settings)
 
 # ---------- Validation ----------
 

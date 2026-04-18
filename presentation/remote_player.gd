@@ -3,6 +3,25 @@
 ## reads [GameData] directly.
 extends Node3D
 
+
+## Fallback grip transforms for weapons the AI scenes never placed (HK416,
+## MK18, MP7, etc.). Lifted from the RIFLE_B / PISTOL archetypes in the
+## Bandit AI scene — matches the "close enough for every weapon of this
+## class" slop the competitor mod relies on.
+const FALLBACK_RIFLE_GRIP: Transform3D = Transform3D(
+    Vector3(-0.168531, 0.983905, 0.0593909),
+    Vector3(0.17101, -0.0301536, 0.984808),
+    Vector3(0.97075, 0.176127, -0.163175),
+    Vector3(0.103742, 0.101099, 0.0396876)
+)
+const FALLBACK_PISTOL_GRIP: Transform3D = Transform3D(
+    Vector3(0.174912, 0.982636, -0.0618917),
+    Vector3(0.0847189, 0.047607, 0.995267),
+    Vector3(0.980934, -0.179328, -0.07492),
+    Vector3(0.0715436, 0.101432, 0.0108366)
+)
+
+
 var _cm: Node
 
 
@@ -35,6 +54,20 @@ static var occludedBusIdx: int = -1
 var modelRoot: Node3D = null
 var animTree: AnimationTree = null
 var skeleton: Skeleton3D = null
+## Spine bone index for aim-pitch override. Resolved once at rig load.
+var _spineBone: int = -1
+## Smoothed pitch (radians); avoids jitter when incoming snapshots land between
+## physics ticks.
+var _spinePitch: float = 0.0
+## Spotlight parented to the Head bone so remote players cast useful light
+## matching their aim direction. Created lazily the first time the peer turns
+## a flashlight on. [member _flashlightOn] tracks the remote's current state.
+var _flashlightMount: BoneAttachment3D = null
+var _flashlight: SpotLight3D = null
+var _flashlightOn: bool = false
+const SPINE_BONE_NAME: StringName = &"Spine_03"
+const HEAD_BONE_NAME: StringName = &"Head"
+const SPINE_PITCH_WEIGHT: float = 0.7
 ## [MeshInstance3D] children of Skeleton3D keyed by body name.
 ## After [method set_appearance] the losers are freed, leaving one entry.
 var bodyMeshes: Dictionary[String, MeshInstance3D] = {}
@@ -122,6 +155,7 @@ func _load_super_rig() -> void:
     flashNode = modelRoot.get_node_or_null("Flash") as Node3D
     skeleton = modelRoot.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
     if skeleton != null:
+        _spineBone = skeleton.find_bone(SPINE_BONE_NAME)
         for child: Node in skeleton.get_children():
             if child is MeshInstance3D && child.name.begins_with("Mesh_"):
                 var key: String = child.name.substr(5)
@@ -138,13 +172,35 @@ func set_active_weapon(weaponName: String) -> void:
     if weapons == null:
         return
 
+    # Hide the previous baked template or queue_free a previous dynamic
+    # instance (dynamic ones live under Weapons with name "_coop_dyn").
     if is_instance_valid(activeWeapon):
-        activeWeapon.queue_free()
+        if activeWeapon.name == &"_coop_dyn":
+            activeWeapon.queue_free()
+        else:
+            activeWeapon.visible = false
     activeWeapon = null
     activeMuzzle = null
 
     if weaponName.is_empty() || !_is_valid_weapon_name(weaponName):
         return
+    # The super rig bakes every AI-owned weapon under Weapons as an invisible
+    # template (see tools/build_super_rig.gd); we just flip the matching one
+    # visible to preserve the authored Hand_R transforms.
+    var baked: Node3D = weapons.get_node_or_null(weaponName) as Node3D
+    if baked != null:
+        baked.visible = true
+        activeWeapon = baked
+        activeMuzzle = baked.get_node_or_null("Muzzle") as Node3D
+        return
+    # No baked template — load the weapon fresh and apply a class-wide grip.
+    _attach_dynamic_weapon(weapons, weaponName)
+
+
+## Instantiates a weapon scene on demand for names not pre-baked into the
+## super rig. Uses a pistol/rifle fallback transform, mirroring how the
+## competitor mod handles every weapon.
+func _attach_dynamic_weapon(weapons: Node, weaponName: String) -> void:
     var path: String = "res://Items/Weapons/%s/%s.tscn" % [weaponName, weaponName]
     if !_cm.AppearanceScript.is_visually_allowed(path):
         return
@@ -156,13 +212,20 @@ func set_active_weapon(weaponName: String) -> void:
     var weapon: Node = packed.instantiate()
     if weapon == null:
         return
-    # Drop Pickup.gd + freeze the body — bone-attached world model, not a pickup.
+    weapon.name = &"_coop_dyn"
     weapon.set_script(null)
     if weapon is RigidBody3D:
         var rb: RigidBody3D = weapon
         rb.freeze = true
         rb.collision_layer = 0
         rb.collision_mask = 0
+    var isPistol: bool = false
+    if weapon.has_method(&"get") && weapon.get(&"slotData") != null:
+        var data: Resource = weapon.slotData.itemData if weapon.slotData != null else null
+        if data != null && data.get(&"weaponType") == "Pistol":
+            isPistol = true
+    if weapon is Node3D:
+        (weapon as Node3D).transform = FALLBACK_PISTOL_GRIP if isPistol else FALLBACK_RIFLE_GRIP
     weapons.add_child(weapon)
     activeWeapon = weapon as Node3D
     activeMuzzle = weapon.get_node_or_null("Muzzle") as Node3D
@@ -329,7 +392,8 @@ func _physics_process(delta: float) -> void:
         return
     global_position = targetPosition
     rotation.y = targetRotationY
-    # Pitch skipped — applying to a skinned skeleton needs bone IK (MVP gap).
+    _apply_spine_pitch(delta)
+    _apply_flashlight()
 
     _update_anim_blend(delta)
 
@@ -343,6 +407,43 @@ func _physics_process(delta: float) -> void:
             nameLabel.text = "%s [%d%%]" % [displayName, health]
         else:
             nameLabel.text = displayName
+
+
+## Mirrors the remote's flashlight toggle. Spotlight is created lazily and
+## parented to a Head BoneAttachment3D so it tracks the skull (+ spine pitch
+## override above) without us having to drive a transform every tick.
+func _apply_flashlight() -> void:
+    var wanted: bool = (moveFlags & _moveFlag.FLASHLIGHT) != 0
+    if wanted == _flashlightOn:
+        return
+    _flashlightOn = wanted
+    if _flashlight == null:
+        if !wanted || skeleton == null:
+            return
+        _flashlightMount = BoneAttachment3D.new()
+        _flashlightMount.bone_name = HEAD_BONE_NAME
+        skeleton.add_child(_flashlightMount)
+        _flashlight = SpotLight3D.new()
+        _flashlight.spot_angle = 30.0
+        _flashlight.spot_range = 50.0
+        _flashlight.light_energy = 20.0
+        _flashlight.shadow_enabled = false
+        # Head bone forward = +Z in this rig; flip so the cone shines ahead.
+        _flashlight.rotate_y(PI)
+        _flashlightMount.add_child(_flashlight)
+    _flashlight.visible = wanted
+
+
+## Bends the spine to match the remote's camera pitch so aiming direction
+## reads at a glance. Mirrors AI.Spine() but without the full look-at rig —
+## we only have the pitch scalar, not a 3D target point.
+func _apply_spine_pitch(delta: float) -> void:
+    if skeleton == null || _spineBone < 0:
+        return
+    _spinePitch = lerpf(_spinePitch, targetRotationX, clampf(delta * 8.0, 0.0, 1.0))
+    var pose: Transform3D = skeleton.get_bone_global_pose_no_override(_spineBone)
+    pose.basis = pose.basis.rotated(pose.basis.x, -_spinePitch * SPINE_PITCH_WEIGHT)
+    skeleton.set_bone_global_pose_override(_spineBone, pose, 1.0, true)
 
 
 ## Flags → target blend position (idle/walk/run/sprint). Lerp hides the 20 Hz

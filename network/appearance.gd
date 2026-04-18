@@ -4,7 +4,7 @@
 extends RefCounted
 
 
-const SUPER_RIG_PATH: String = "res://mod/presentation/rigs/super_rig.tscn"
+const SUPER_RIG_PATH: String = "res://mod/presentation/rigs/super_rig.scn"
 
 ## Only items under these roots render on remote players — everything else
 ## isn't rigged or is invisible by design.

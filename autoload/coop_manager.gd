@@ -41,6 +41,13 @@ var peerMaps: Dictionary[int, String] = { }
 var headlessMaps: Dictionary[String, Node] = {}
 ## Persisted snapshots of headless maps after teardown.
 var mapSnapshots: Dictionary[String, Dictionary] = {}
+## Host-owned session settings broadcast to every peer. Used by patches that
+## want a single tunable knob across the whole session (e.g. simulation day
+## rate, friendly fire). Update via [method set_setting] on the host.
+var settings: Dictionary = {
+    "day_rate_multiplier": 1.0,
+    "night_rate_multiplier": 1.0,
+}
 ## Reference to the [code]PlayerState[/code] child node handling position sync.
 var playerState: Node = null
 ## Reference to the [code]WorldState[/code] child node handling world sync.
@@ -216,6 +223,8 @@ func register_patches() -> void:
         ["res://mod/patches/furniture_patch.gd", "res://Scripts/Furniture.gd"],
         ["res://mod/patches/fish_pool_patch.gd", "res://Scripts/FishPool.gd"],
         ["res://mod/patches/event_system_patch.gd", "res://Scripts/EventSystem.gd"],
+        ["res://mod/patches/trader_patch.gd", "res://Scripts/Trader.gd"],
+        ["res://mod/patches/simulation_patch.gd", "res://Scripts/Simulation.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -703,6 +712,11 @@ func inject_manager() -> void:
         var obj: Node = node.owner if node.owner != null else node
         if obj.has_method(&"init_manager"):
             obj.init_manager(self)
+
+    # Traders — trader_patch routes CompleteTask through the host.
+    for node: Node in get_tree().get_nodes_in_group(&"Trader"):
+        if node.has_method(&"init_manager"):
+            node.init_manager(self)
 
     # Items: Pickups
     for node: Node in get_tree().get_nodes_in_group(&"Item"):
@@ -1860,6 +1874,24 @@ func is_session_active() -> bool:
     return peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED
 
 
+## Reads a session-wide setting. Returns [param fallback] when missing so
+## patches can be written defensively without seeding every key up front.
+func get_setting(key: String, fallback: Variant = null) -> Variant:
+    return settings.get(key, fallback)
+
+
+## Host-only: updates a session-wide setting and broadcasts the new value.
+## Clients call this and it falls through to an RPC request to host.
+func set_setting(key: String, value: Variant) -> void:
+    if !isHost:
+        if worldState != null && worldState.has_method(&"request_setting_change"):
+            worldState.request_setting_change.rpc_id(1, key, value)
+        return
+    settings[key] = value
+    if worldState != null && worldState.has_method(&"broadcast_settings"):
+        worldState.broadcast_settings.rpc(settings)
+
+
 ## Dispatched by interactor_patch for each Interactable target.
 ## Returns true if the target was handled (caller skips local Interact).
 ## Returns false if caller should fall through to target.Interact().
@@ -1869,11 +1901,17 @@ func dispatch_interact(target: Node) -> bool:
 
     var scriptPath: String = target.get_script().resource_path if target.get_script() != null else ""
 
-    # Bed — blocked in co-op. Sleeping advances sim time + freezes gameData globally.
+    # Bed — host runs locally + broadcasts sleep event so all peers freeze +
+    # play transition audio for the same duration. Simulation time advance
+    # rides on the existing sync_simulation broadcast.
     if scriptPath == "res://Scripts/Bed.gd":
-        Loader.Message("Cannot sleep during co-op", Color.RED)
-        if DEBUG:
-            print("[coop] dispatch_interact: Bed blocked")
+        var scene: Node = get_tree().current_scene
+        if !is_instance_valid(scene):
+            return false
+        if isHost:
+            worldState.host_bed_interact(target)
+        else:
+            worldState.request_bed_interact.rpc_id(1, scene.get_path_to(target))
         return true
 
     # Remaining branches need scene-relative path — fetch once.
