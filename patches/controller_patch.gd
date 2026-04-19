@@ -240,61 +240,62 @@ func _broadcast_fire_event() -> void:
     if weaponData == null:
         return
 
-    # Pick the correct fire audio based on mode and attachments
-    var fireAudio: String = ""
-    var tailAudio: String = ""
     var hasSuppressor: bool = rig.get(&"activeMuzzle") != null || (weaponData.get(&"nativeSuppressor") == true)
-
-    if hasSuppressor:
-        var res: Resource = weaponData.get(&"fireSuppressed")
-        if res != null:
-            fireAudio = res.resource_path
-        var tailRes: Resource = null
-        if _cm.gd.get(&"indoor") == true:
-            tailRes = weaponData.get(&"tailIndoorSuppressed")
-        else:
-            tailRes = weaponData.get(&"tailOutdoorSuppressed")
-        if tailRes != null:
-            tailAudio = tailRes.resource_path
-    else:
-        var mode: int = _cm.gd.get(&"firemode") if _cm.gd.get(&"firemode") != null else 1
-        if mode == 2:
-            var res: Resource = weaponData.get(&"fireAuto")
-            if res != null:
-                fireAudio = res.resource_path
-        else:
-            var res: Resource = weaponData.get(&"fireSemi")
-            if res != null:
-                fireAudio = res.resource_path
-        var tailRes: Resource = null
-        if _cm.gd.get(&"indoor") == true:
-            tailRes = weaponData.get(&"tailIndoor")
-        else:
-            tailRes = weaponData.get(&"tailOutdoor")
-        if tailRes != null:
-            tailAudio = tailRes.resource_path
+    var audio: Dictionary = _resolve_fire_audio(weaponData, hasSuppressor)
+    var fireAudio: String = audio.fire
+    var tailAudio: String = audio.tail
 
     if fireAudio.is_empty():
         return
 
-    # Capture bullet impact via immediate physics raycast from camera
-    var hitPoint: Vector3 = Vector3.ZERO
-    var hitNormal: Vector3 = Vector3.ZERO
-    var hitSurface: String = ""
-    var cam: Camera3D = get_viewport().get_camera_3d()
-    if cam != null:
-        var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-        var from: Vector3 = cam.global_position
-        var to: Vector3 = from - cam.global_transform.basis.z * 200.0
-        var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to)
-        var result: Dictionary = space.intersect_ray(query)
-        if !result.is_empty():
-            hitPoint = result["position"]
-            hitNormal = result["normal"]
-            var collider: Object = result["collider"]
-            if collider != null && collider.get(&"surface") != null:
-                hitSurface = collider.get(&"surface")
-            else:
-                hitSurface = "Generic"
+    var hit: Dictionary = _trace_bullet_impact()
+    _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor, hit.point, hit.normal, hit.surface)
 
-    _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor, hitPoint, hitNormal, hitSurface)
+
+## Returns {fire, tail} audio resource paths for the current weapon mode,
+## taking suppressor state and indoor/outdoor context into account.
+func _resolve_fire_audio(weaponData: Resource, hasSuppressor: bool) -> Dictionary:
+    var fireAudio: String = ""
+    var tailAudio: String = ""
+    var fireRes: Resource = null
+    var tailRes: Resource = null
+    var indoor: bool = _cm.gd.get(&"indoor") == true
+
+    if hasSuppressor:
+        fireRes = weaponData.get(&"fireSuppressed")
+        tailRes = weaponData.get(&"tailIndoorSuppressed") if indoor else weaponData.get(&"tailOutdoorSuppressed")
+    else:
+        var mode: int = _cm.gd.get(&"firemode") if _cm.gd.get(&"firemode") != null else 1
+        fireRes = weaponData.get(&"fireAuto") if mode == 2 else weaponData.get(&"fireSemi")
+        tailRes = weaponData.get(&"tailIndoor") if indoor else weaponData.get(&"tailOutdoor")
+
+    if fireRes != null:
+        fireAudio = fireRes.resource_path
+    if tailRes != null:
+        tailAudio = tailRes.resource_path
+
+    return {"fire": fireAudio, "tail": tailAudio}
+
+
+## Casts a ray from the camera 200m forward and returns impact {point, normal, surface}.
+## Returns zero-ed values + empty surface if nothing is hit.
+func _trace_bullet_impact() -> Dictionary:
+    var out: Dictionary = {"point": Vector3.ZERO, "normal": Vector3.ZERO, "surface": ""}
+    var cam: Camera3D = get_viewport().get_camera_3d()
+    if cam == null:
+        return out
+    var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+    var from: Vector3 = cam.global_position
+    var to: Vector3 = from - cam.global_transform.basis.z * 200.0
+    var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to)
+    var result: Dictionary = space.intersect_ray(query)
+    if result.is_empty():
+        return out
+    out.point = result["position"]
+    out.normal = result["normal"]
+    var collider: Object = result["collider"]
+    if collider != null && collider.get(&"surface") != null:
+        out.surface = collider.get(&"surface")
+    else:
+        out.surface = "Generic"
+    return out

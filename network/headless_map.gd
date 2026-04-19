@@ -35,6 +35,8 @@ enum AIType { BANDIT, GUARD, MILITARY, PUNISHER }
 enum DoorFlag { OPEN = 1, LOCKED = 2 }
 
 ## Patched scripts keyed by original resource path. Populated once per mod session.
+## NOT thread-safe: assumes single-threaded Godot main loop. If off-thread access
+## is ever introduced (e.g. WorkerThreadPool scanning), guard with a Mutex.
 static var _patchMap: Dictionary = {}
 static var _patchMapReady: bool = false
 

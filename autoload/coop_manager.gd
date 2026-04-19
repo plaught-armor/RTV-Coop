@@ -106,6 +106,23 @@ func _ready() -> void:
     register_patches()
     loader = get_node_or_null("/root/Loader")
 
+    _spawn_network_children()
+    _spawn_coop_ui()
+    _connect_multiplayer_signals()
+
+    # One-time migration: move pre-mod solo saves out of user:// root so they
+    # don't get clobbered when the player hosts a coop world.
+    migrate_solo_saves_if_needed()
+
+    inject_manager.call_deferred()
+    _register_ai_pools.call_deferred()
+    _log("Initialized (debug: %s)" % str(DEBUG))
+
+
+## Instantiates the four network-layer children (PlayerState, WorldState,
+## AIState, SteamBridge) and kicks off the Steam helper launch immediately so
+## its TCP handshake overlaps with UI setup.
+func _spawn_network_children() -> void:
     var PlayerStateScript_: Script = preload("res://mod/network/player_state.gd")
     var WorldStateScript: Script = preload("res://mod/network/world_state.gd")
     var AIStateScript: Script = preload("res://mod/network/ai_state.gd")
@@ -130,11 +147,11 @@ func _ready() -> void:
     steamBridge.name = "SteamBridge"
     add_child(steamBridge)
     steamBridge.init_manager(self)
-    # Kick off the helper launch immediately so it boots in parallel with UI
-    # setup. Previously this was deferred to the next frame, which added an
-    # unnecessary ~16ms and blocked the helper's TCP handshake behind UI work.
     steamBridge.launch()
 
+
+## Creates the CanvasLayer that hosts CoopUI and CoopHUD above game UI.
+func _spawn_coop_ui() -> void:
     var uiLayer: CanvasLayer = CanvasLayer.new()
     uiLayer.name = "CoopUILayer"
     uiLayer.layer = 100
@@ -149,19 +166,14 @@ func _ready() -> void:
     uiLayer.add_child(coopHUD)
     coopHUD.init_manager(self)
 
+
+## Wires up the MultiplayerAPI signals this autoload listens to.
+func _connect_multiplayer_signals() -> void:
     multiplayer.peer_connected.connect(on_peer_connected)
     multiplayer.peer_disconnected.connect(on_peer_disconnected)
     multiplayer.connected_to_server.connect(on_connected_to_server)
     multiplayer.connection_failed.connect(on_connection_failed)
     multiplayer.server_disconnected.connect(on_server_disconnected)
-
-    # One-time migration: move pre-mod solo saves out of user:// root so they
-    # don't get clobbered when the player hosts a coop world.
-    migrate_solo_saves_if_needed()
-
-    inject_manager.call_deferred()
-    _register_ai_pools.call_deferred()
-    _log("Initialized (debug: %s)" % str(DEBUG))
 
 
 func _physics_process(_delta: float) -> void:
@@ -607,13 +619,35 @@ func on_scene_changed() -> void:
         aiState.refresh_scene_cache()
     if !is_session_active():
         return
+
     var currentMap: String = get_current_map()
     peerMaps[localPeerId] = currentMap
+
     # Host transitioned from menu to in-game — tell waiting clients to load
     if isHost && wasOnMenu && !_wasOnMenu:
-        var mapName: String = _get_current_map_name()
-        sync_game_start.rpc(mapName)
-    # Despawn peers on other maps. Two-phase to avoid mutating during iteration.
+        sync_game_start.rpc(_get_current_map_name())
+
+    _despawn_off_map_peers()
+    ensure_all_spawned()
+
+    aiState.clear()
+    _register_ai_pools()
+    _reset_world_state_item_tracking()
+
+    if isHost:
+        _finalize_host_scene_transition(currentMap)
+
+    if !currentMap.is_empty():
+        sync_peer_map.rpc(currentMap)
+    _update_rich_presence()
+    _update_lobby_data()
+    _log("Scene changed to %s" % currentMap)
+    print("[TX] on_scene_changed end")
+
+
+## Despawns remote player nodes whose owning peers are on a different map.
+## Two-phase (collect, then erase) to avoid mutating remoteNodes during iteration.
+func _despawn_off_map_peers() -> void:
     var toErase: Array[int] = []
     for peerId: int in remoteNodes:
         if !is_peer_on_same_map(peerId):
@@ -623,34 +657,30 @@ func on_scene_changed() -> void:
         if is_instance_valid(node):
             node.queue_free()
         remoteNodes.erase(peerId)
-    ensure_all_spawned()
-    # Reset tracking state from the PREVIOUS scene before registering the new one
-    aiState.clear()
-    _register_ai_pools()
-    if worldState.trackingItems:
-        worldState.syncedItems.clear()
-        worldState.consumedSyncIDs.clear()
-        worldState.droppedItemHistory.clear()
-        worldState.pendingDrops.clear()
-        worldState.syncIdCounter = 0
-    if isHost:
-        # If we arrived at a map that was running headlessly, extract + transfer state
-        var handoffSnap: Dictionary = _teardown_headless_map(currentMap)
-        if !handoffSnap.is_empty():
-            get_tree().create_timer(2.0).timeout.connect(_apply_handoff_state.bind(handoffSnap))
-        # Cancel any previous timer from a rapid scene re-entry
-        if is_instance_valid(itemRegistrationTimer) && itemRegistrationTimer.time_left > 0:
-            itemRegistrationTimer.timeout.disconnect(worldState.register_scene_items)
-        # Delay 2s so Unfreeze physics settles before capturing positions
-        itemRegistrationTimer = get_tree().create_timer(2.0)
-        itemRegistrationTimer.timeout.connect(worldState.register_scene_items)
-    # Broadcast our new map to all peers
-    if !currentMap.is_empty():
-        sync_peer_map.rpc(currentMap)
-    _update_rich_presence()
-    _update_lobby_data()
-    _log("Scene changed to %s" % currentMap)
-    print("[TX] on_scene_changed end")
+
+
+## Clears world_state item-tracking collections so the fresh scene starts empty.
+func _reset_world_state_item_tracking() -> void:
+    if !worldState.trackingItems:
+        return
+    worldState.syncedItems.clear()
+    worldState.consumedSyncIDs.clear()
+    worldState.droppedItemHistory.clear()
+    worldState.pendingDrops.clear()
+    worldState.syncIdCounter = 0
+
+
+## Host-only: applies any queued headless-map handoff snapshot and schedules
+## a 2s-delayed item registration pass (Unfreeze physics needs time to settle
+## before captured positions are stable).
+func _finalize_host_scene_transition(currentMap: String) -> void:
+    var handoffSnap: Dictionary = _teardown_headless_map(currentMap)
+    if !handoffSnap.is_empty():
+        get_tree().create_timer(2.0).timeout.connect(_apply_handoff_state.bind(handoffSnap))
+    if is_instance_valid(itemRegistrationTimer) && itemRegistrationTimer.time_left > 0:
+        itemRegistrationTimer.timeout.disconnect(worldState.register_scene_items)
+    itemRegistrationTimer = get_tree().create_timer(2.0)
+    itemRegistrationTimer.timeout.connect(worldState.register_scene_items)
 
 
 ## Client tells host they've finished loading the new scene.
@@ -674,7 +704,15 @@ func inject_manager() -> void:
     if !is_instance_valid(scene):
         return
 
-    # Controller — known path
+    _inject_controller_tree(scene)
+    _inject_interactables_and_traders()
+    _inject_items_and_transitions()
+    _inject_ai(scene)
+    _maybe_customize_menu(scene)
+
+
+## Injects into fixed-path player-local nodes: Controller, Interactor, Character, Interface, Settings.
+func _inject_controller_tree(scene: Node) -> void:
     var controller: Node = scene.get_node_or_null("Core/Controller")
     if controller != null && controller.has_method(&"init_manager"):
         controller.init_manager(self)
@@ -682,7 +720,6 @@ func inject_manager() -> void:
     # Interactor — single choke point for Door/Switch/Bed/Fire/LootContainer/Trader dispatch
     var interactor: Node = scene.get_node_or_null("Core/Controller/Camera/Interactor")
     if interactor == null:
-        # Fallback — search by class
         for node: Node in scene.find_children("*", "RayCast3D", true, false):
             if node.get_script() != null && node.get_script().resource_path == "res://mod/patches/interactor_patch.gd":
                 interactor = node
@@ -692,66 +729,68 @@ func inject_manager() -> void:
         if DEBUG:
             print("[coop] inject_manager: Interactor patched at %s" % interactor.get_path())
 
-    # Character — vitals/death handler
     var character: Node = scene.get_node_or_null("Core/Controller/Character")
     if character != null && character.has_method(&"init_manager"):
         character.init_manager(self)
 
-    # Interface — inventory UI
     var iface: Node = scene.get_node_or_null("Core/UI/Interface")
     if iface != null && iface.has_method(&"init_manager"):
         iface.init_manager(self)
 
-    # Settings — pause menu (settings_patch adds Multiplayer tab)
     var settings: Node = scene.get_node_or_null("Core/UI/Settings")
     if settings != null && settings.has_method(&"init_manager"):
         settings.init_manager(self)
 
-    # Interactables: Doors, LootContainers
+
+## Injects into Interactable (Doors, LootContainers) and Trader group nodes.
+func _inject_interactables_and_traders() -> void:
     for node: Node in get_tree().get_nodes_in_group(&"Interactable"):
         var obj: Node = node.owner if node.owner != null else node
         if obj.has_method(&"init_manager"):
             obj.init_manager(self)
 
-    # Traders — trader_patch routes CompleteTask through the host.
     for node: Node in get_tree().get_nodes_in_group(&"Trader"):
         if node.has_method(&"init_manager"):
             node.init_manager(self)
 
-    # Items: Pickups
+
+## Injects into Item (Pickup) and Transition group nodes.
+func _inject_items_and_transitions() -> void:
     for node: Node in get_tree().get_nodes_in_group(&"Item"):
         if node.has_method(&"init_manager"):
             node.init_manager(self)
 
-    # Transitions
     for node: Node in get_tree().get_nodes_in_group(&"Transition"):
         var obj: Node = node.owner if node.owner != null else node
         if obj.has_method(&"init_manager"):
             obj.init_manager(self)
 
-    # AISpawner — at /root/Map/AI in game scenes
+
+## Injects into AISpawner (scene "AI" node) and every active AI agent.
+func _inject_ai(scene: Node) -> void:
     var spawner: Node = scene.get_node_or_null("AI")
     if spawner != null && spawner.has_method(&"init_manager"):
         spawner.init_manager(self)
 
-    # AI agents — inject into any already-active agents
     for node: Node in get_tree().get_nodes_in_group(&"AI"):
         if node.has_method(&"init_manager"):
             node.init_manager(self)
 
-    # Main menu — apply co-op customization directly to the running instance
-    # (patching Menu.gd doesn't work because ModLoader defers its init until
-    # after Menu.tscn is already loaded with the original script).
+
+## Main menu path: applies co-op customization, mirrors solo saves if returning
+## from solo play (ModLoader defers init past Menu.tscn load, so patching
+## Menu.gd doesn't work — we modify the running instance instead).
+func _maybe_customize_menu(scene: Node) -> void:
     var scenePath: String = scene.scene_file_path if is_instance_valid(scene) else ""
-    if scenePath == "res://Scenes/Menu.tscn":
-        _customize_menu(scene)
-        # Returning to menu from solo play — capture final state into the solo
-        # dir. Skip if a coop session is active (disconnect_session handles that)
-        # or if we just came back from coop (user:// may hold stale client saves
-        # that would pollute the solo save).
-        if !is_session_active() && !_wasInCoop:
-            mirror_user_to_solo()
-        _wasInCoop = false
+    if scenePath != "res://Scenes/Menu.tscn":
+        return
+    _customize_menu(scene)
+    # Skip if a coop session is active (disconnect_session handles that) or if
+    # we just came back from coop (user:// may hold stale client saves that
+    # would pollute the solo save).
+    if !is_session_active() && !_wasInCoop:
+        mirror_user_to_solo()
+    _wasInCoop = false
 
 
 ## Modifies the running Menu instance in-place: renames New→Singleplayer,
@@ -1898,6 +1937,9 @@ func set_setting(key: String, value: Variant) -> void:
 func dispatch_interact(target: Node) -> bool:
     if !is_instance_valid(target) || !is_session_active():
         return false
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
+        return false
 
     var scriptPath: String = target.get_script().resource_path if target.get_script() != null else ""
 
@@ -1905,62 +1947,36 @@ func dispatch_interact(target: Node) -> bool:
     # play transition audio for the same duration. Simulation time advance
     # rides on the existing sync_simulation broadcast.
     if scriptPath == "res://Scripts/Bed.gd":
-        var scene: Node = get_tree().current_scene
-        if !is_instance_valid(scene):
-            return false
-        if isHost:
-            worldState.host_bed_interact(target)
-        else:
-            worldState.request_bed_interact.rpc_id(1, scene.get_path_to(target))
+        _route_interact(target, scene, &"host_bed_interact", &"request_bed_interact")
         return true
-
-    # Remaining branches need scene-relative path — fetch once.
-    var scene: Node = get_tree().current_scene
-    if !is_instance_valid(scene):
-        return false
-
-    # Door — host runs locally + broadcasts state; client requests host.
     if target is Door:
-        if isHost:
-            worldState.host_door_interact(target)
-        else:
-            worldState.request_door_interact.rpc_id(1, scene.get_path_to(target))
+        _route_interact(target, scene, &"host_door_interact", &"request_door_interact")
         return true
-
-    # LootContainer — host opens UI locally + broadcasts loot; client requests host open.
     if target is LootContainer:
-        if isHost:
-            worldState.host_container_interact(target)
-        else:
-            worldState.request_container_open.rpc_id(1, scene.get_path_to(target))
+        _route_interact(target, scene, &"host_container_interact", &"request_container_open")
         return true
-
-    # Trader — host opens locally; client requests supply from host.
     if target is Trader:
-        if isHost:
-            worldState.host_trader_interact(target)
-        else:
-            worldState.request_trader_open.rpc_id(1, scene.get_path_to(target))
+        _route_interact(target, scene, &"host_trader_interact", &"request_trader_open")
         return true
-
-    # Switch — detected by script path (no class_name on Switch.gd).
+    # Switch/Fire lack class_name, so dispatch by script path.
     if scriptPath == "res://Scripts/Switch.gd":
-        if isHost:
-            worldState.host_switch_interact(target)
-        else:
-            worldState.request_switch_interact.rpc_id(1, scene.get_path_to(target))
+        _route_interact(target, scene, &"host_switch_interact", &"request_switch_interact")
         return true
-
-    # Fire — detected by script path (no class_name on Fire.gd).
     if scriptPath == "res://Scripts/Fire.gd":
-        if isHost:
-            worldState.host_fire_interact(target)
-        else:
-            worldState.request_fire_interact.rpc_id(1, scene.get_path_to(target))
+        _route_interact(target, scene, &"host_fire_interact", &"request_fire_interact")
         return true
 
     # Unhandled type — caller should fall through to target.Interact().
     return false
+
+
+## Host runs the interact locally; client RPCs the host with a scene-relative path.
+## Every Interactable type shares this routing — only the method names differ.
+func _route_interact(target: Node, scene: Node, hostMethod: StringName, requestMethod: StringName) -> void:
+    if isHost:
+        worldState.call(hostMethod, target)
+    else:
+        worldState.rpc_id(1, requestMethod, scene.get_path_to(target))
 
 
 func get_local_ip() -> String:

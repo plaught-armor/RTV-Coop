@@ -658,14 +658,8 @@ func reject_trade() -> void:
 ## Finalizes the trade: removes pending offered items and spawns granted items.
 @rpc("authority", "call_remote", "reliable")
 func sync_trade_granted(grantedSlots: Array[Dictionary]) -> void:
-    # Remove offered items that were hidden pending ACK.
-    var pending: Array = get_meta(&"_pending_trade_elements", [])
     var iface: Node = _interface
-    if is_instance_valid(iface):
-        for element: Node in pending:
-            if is_instance_valid(element):
-                iface.inventoryGrid.Pick(element)
-                element.queue_free()
+    _remove_pending_trade_elements(iface)
     remove_meta(&"_pending_trade_elements")
 
     if !is_instance_valid(iface):
@@ -674,11 +668,22 @@ func sync_trade_granted(grantedSlots: Array[Dictionary]) -> void:
         var slot: SlotData = _slotSerializer.unpack(packed)
         if slot == null:
             continue
-        if slot.itemData.type == "Furniture":
-            iface.Create(slot, iface.catalogGrid, false)
-        else:
-            iface.Create(slot, iface.inventoryGrid, true)
+        var targetGrid: Node = iface.catalogGrid if slot.itemData.type == "Furniture" else iface.inventoryGrid
+        var updateStacks: bool = slot.itemData.type != "Furniture"
+        iface.Create(slot, targetGrid, updateStacks)
     iface.UpdateStats(false)
+
+
+## Frees the offered items that were hidden while a client waited for host ACK.
+func _remove_pending_trade_elements(iface: Node) -> void:
+    if !is_instance_valid(iface):
+        return
+    var pending: Array = get_meta(&"_pending_trade_elements", [])
+    for element: Node in pending:
+        if !is_instance_valid(element):
+            continue
+        iface.inventoryGrid.Pick(element)
+        element.queue_free()
 
 
 ## Host broadcasts updated supply after a trade. All clients refresh if viewing.

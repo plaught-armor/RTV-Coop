@@ -11,6 +11,11 @@ var _cm: Node
 ## Cached local player refs, refreshed per scene transition.
 var _controller: Node = null
 var _character: Node = null
+## Cached [code]/root/Map/AI[/code] spawner and its [code]Agents[/code] child.
+## Populated by [method refresh_scene_cache]; falls back to a scene-walk in
+## [method _get_spawner] if the cache goes stale mid-scene.
+var _spawner: Node = null
+var _agentsNode: Node = null
 
 
 func init_manager(manager: Node) -> void:
@@ -23,9 +28,13 @@ func refresh_scene_cache() -> void:
     if !is_instance_valid(scene):
         _controller = null
         _character = null
+        _spawner = null
+        _agentsNode = null
         return
     _controller = scene.get_node_or_null(^"Core/Controller")
     _character = _controller.get_child(0) if is_instance_valid(_controller) && _controller.get_child_count() > 0 else null
+    _spawner = scene.get_node_or_null(^"AI")
+    _agentsNode = _spawner.get_node_or_null(^"Agents") if is_instance_valid(_spawner) else null
 
 
 
@@ -175,19 +184,15 @@ var pendingActivations: Array[Dictionary] = []
 ## If no [code]ai_sync_id[/code] metas exist (e.g. [code]_ready()[/code] took the super path
 ## because CoopManager wasn't available yet), assigns them deterministically here.
 func register_spawner_pools(spawner: Node) -> void:
-    # Collect all AI nodes from pools + active agents to find max sync ID
-    var allNodes: Array[Node] = []
-    var maxId: int = -1
-    for container_name: String in ["A_Pool", "B_Pool", "Agents"]:
-        var container: Node = spawner.get_node_or_null(container_name)
-        if container == null:
-            continue
-        for child: Node in container.get_children():
-            if child.has_meta(&"ai_sync_id"):
-                allNodes.append(child)
-                var idx: int = child.get_meta(&"ai_sync_id")
-                if idx > maxId:
-                    maxId = idx
+    # Prime the scene-cache with the authoritative spawner passed in here so
+    # later _host_tick / _activate_on_client calls hit the cache instead of
+    # walking the tree every 10Hz.
+    _spawner = spawner
+    _agentsNode = spawner.get_node_or_null(^"Agents") if is_instance_valid(spawner) else null
+
+    var scanResult: Dictionary = _collect_tagged_ai_nodes(spawner)
+    var allNodes: Array[Node] = scanResult.nodes
+    var maxId: int = scanResult.maxId
 
     # If no sync IDs were assigned (spawner _ready took super path), assign now
     if allNodes.is_empty():
@@ -198,44 +203,78 @@ func register_spawner_pools(spawner: Node) -> void:
                 maxId = idx
 
     slotCount = maxId + 1 if maxId >= 0 else 0
+    _resize_slot_arrays()
 
+    var activeCount: int = _populate_slot_arrays(spawner, allNodes)
+    _log("register_spawner_pools: slotCount=%d nodes=%d active=%d" % [slotCount, allNodes.size(), activeCount])
+
+    _flush_pending_activations()
+
+
+## Walks A_Pool, B_Pool, and Agents on the spawner and collects every child that
+## already carries an [code]ai_sync_id[/code] meta, also tracking the max id seen.
+func _collect_tagged_ai_nodes(spawner: Node) -> Dictionary:
+    var out: Array[Node] = []
+    var maxId: int = -1
+    for container_name: String in ["A_Pool", "B_Pool", "Agents"]:
+        var container: Node = spawner.get_node_or_null(container_name)
+        if container == null:
+            continue
+        for child: Node in container.get_children():
+            if !child.has_meta(&"ai_sync_id"):
+                continue
+            out.append(child)
+            var idx: int = child.get_meta(&"ai_sync_id")
+            if idx > maxId:
+                maxId = idx
+    return {"nodes": out, "maxId": maxId}
+
+
+## Resets aiNodes, aiBuffers, and activeOnClient to match the current slotCount.
+func _resize_slot_arrays() -> void:
     aiNodes.clear()
     aiNodes.resize(slotCount)
     aiBuffers.clear()
     aiBuffers.resize(slotCount)
     activeOnClient.resize(slotCount)
     activeOnClient.fill(0)
-
     for i: int in slotCount:
         aiBuffers[i] = AIBuffer.new()
 
+
+## Fills aiNodes by sync-id and flags agents that are already reparented to
+## Agents as active. Returns the number of agents flagged active.
+func _populate_slot_arrays(spawner: Node, allNodes: Array[Node]) -> int:
     var agentsNode: Node = spawner.get_node_or_null("Agents")
     var activeCount: int = 0
     for child: Node in allNodes:
         var idx: int = child.get_meta(&"ai_sync_id")
         aiNodes[idx] = child
-        # Mark already-active agents (reparented to Agents by initial spawns or late join)
         if agentsNode != null && child.get_parent() == agentsNode:
             activeOnClient[idx] = 1
             activeCount += 1
-    _log("register_spawner_pools: slotCount=%d nodes=%d active=%d" % [slotCount, allNodes.size(), activeCount])
+    return activeCount
 
-    # Flush any buffered activations that arrived before pools were ready.
-    if !pendingActivations.is_empty():
-        var flushed: int = 0
-        for pending: Dictionary in pendingActivations:
-            var pid: int = pending.get(&"syncId", -1)
-            if pid < 0 || pid >= slotCount:
-                continue
-            var pnode: Node = aiNodes[pid]
-            if !is_instance_valid(pnode):
-                continue
-            _activate_on_client(pid, pnode)
-            pnode.global_position = pending.get(&"pos", Vector3.ZERO)
-            pnode.global_rotation.y = pending.get(&"rotY", 0.0)
-            flushed += 1
-        _log("Flushed %d pending activations" % flushed)
-        pendingActivations.clear()
+
+## Replays activations that arrived before the pools were populated. Bad/stale
+## ids are silently skipped — we can't do anything useful with them.
+func _flush_pending_activations() -> void:
+    if pendingActivations.is_empty():
+        return
+    var flushed: int = 0
+    for pending: Dictionary in pendingActivations:
+        var pid: int = pending.get(&"syncId", -1)
+        if pid < 0 || pid >= slotCount:
+            continue
+        var pnode: Node = aiNodes[pid]
+        if !is_instance_valid(pnode):
+            continue
+        _activate_on_client(pid, pnode)
+        pnode.global_position = pending.get(&"pos", Vector3.ZERO)
+        pnode.global_rotation.y = pending.get(&"rotY", 0.0)
+        flushed += 1
+    _log("Flushed %d pending activations" % flushed)
+    pendingActivations.clear()
 
 ## Assigns deterministic sync IDs to AI pool children when the spawner patch's
 ## [code]_ready()[/code] couldn't (e.g. CoopManager wasn't available yet).
@@ -281,20 +320,20 @@ func _physics_process(_delta: float) -> void:
 
 
 func _host_tick() -> void:
-    if Engine.get_physics_frames() % SEND_EVERY_N_TICKS != 0:
+    var frame: int = Engine.get_physics_frames()
+    if frame % SEND_EVERY_N_TICKS != 0:
         return
 
-    var spawner: Node = _get_spawner()
-    if spawner == null:
-        return
-    var agentsNode: Node = spawner.get_node_or_null("Agents")
-    if agentsNode == null || agentsNode.get_child_count() == 0:
+    if !is_instance_valid(_agentsNode):
+        if _get_spawner() == null || !is_instance_valid(_agentsNode):
+            return
+    if _agentsNode.get_child_count() == 0:
         return
 
-    var batch: Array = pack_ai_batch(agentsNode)
+    var batch: Array = pack_ai_batch(_agentsNode)
     if batch.is_empty():
         return
-    if Engine.get_physics_frames() % (SEND_EVERY_N_TICKS * 100) == 0:
+    if frame % (SEND_EVERY_N_TICKS * 100) == 0:
         _log("_host_tick: broadcasting %d AI" % batch[0].size())
     # Only broadcast to peers on the host's current map. Clients on other maps
     # receive their AI via headless_map._physics_process; sending them host's
@@ -387,33 +426,22 @@ var _interpSnap: AISnapshot = AISnapshot.new(0.0, Vector3.ZERO, 0.0, 0, 0.0, 0.0
 
 func _client_interpolate() -> void:
     if Engine.get_physics_frames() % 600 == 0:
-        var filledSlots: int = 0
-        for idx: int in slotCount:
-            if aiBuffers[idx].count > 0:
-                filledSlots += 1
-        _log("_client_interpolate: slotCount=%d filledBuffers=%d" % [slotCount, filledSlots])
-    var now: float = Time.get_ticks_msec() / 1000.0
-    var renderTime: float = now - INTERP_DELAY
+        _log_interp_fill_stats()
+
+    var renderTime: float = Time.get_ticks_msec() / 1000.0 - INTERP_DELAY
     var buf: AIBuffer = null
     var node: Node = null
-    var from: AISnapshot = null
-    var to: AISnapshot = null
     var count: int = 0
-    var timeDiff: float = 0.0
-    var t: float = 0.0
 
     for idx: int in slotCount:
         buf = aiBuffers[idx]
         count = buf.count
         if count == 0:
             continue
-
         node = aiNodes[idx]
         if !is_instance_valid(node):
             continue
-        
 
-        # Ensure this AI is visually active on the client
         if activeOnClient[idx] == 0:
             _activate_on_client(idx, node)
 
@@ -421,33 +449,46 @@ func _client_interpolate() -> void:
             _apply_snapshot(node, buf.get_at(0))
             continue
 
-        # Find bracketing snapshots (oldest to newest via ring)
-        from = buf.newest()
-        to = from
-        for j: int in range(1, count):
-            if buf.get_at(j).timestamp >= renderTime:
-                from = buf.get_at(j - 1)
-                to = buf.get_at(j)
-                break
+        _apply_interpolated(node, buf, count, renderTime)
 
-        # No pruning needed — ring buffer overwrites oldest on push
 
-        # Interpolation factor
-        timeDiff = to.timestamp - from.timestamp
-        t = 0.0
-        if timeDiff > 0.0:
-            t = clampf((renderTime - from.timestamp) / timeDiff, 0.0, 1.0)
+## Diagnostic: counts how many slots have at least one buffered snapshot.
+## Logged every 600 physics frames (~5s at 120Hz) to catch stuck buffers.
+func _log_interp_fill_stats() -> void:
+    var filledSlots: int = 0
+    for idx: int in slotCount:
+        if aiBuffers[idx].count > 0:
+            filledSlots += 1
+    _log("_client_interpolate: slotCount=%d filledBuffers=%d" % [slotCount, filledSlots])
 
-        # Mutate reusable scratch snapshot instead of allocating
-        _interpSnap.timestamp = renderTime
-        _interpSnap.position = from.position.lerp(to.position, t)
-        _interpSnap.rotation_y = lerp_angle(from.rotation_y, to.rotation_y, t)
-        _interpSnap.state = to.state
-        _interpSnap.move_speed = lerpf(from.move_speed, to.move_speed, t)
-        _interpSnap.strafe = lerpf(from.strafe, to.strafe, t)
-        _interpSnap.health = to.health
-        _interpSnap.flags = to.flags
-        _apply_snapshot(node, _interpSnap)
+
+## Picks bracketing snapshots around renderTime, computes the lerp factor,
+## writes into the reusable [member _interpSnap] scratch, and applies it.
+func _apply_interpolated(node: Node, buf: AIBuffer, count: int, renderTime: float) -> void:
+    var from: AISnapshot = buf.newest()
+    var to: AISnapshot = from
+    for j: int in range(1, count):
+        var candidate: AISnapshot = buf.get_at(j)
+        if candidate.timestamp >= renderTime:
+            from = buf.get_at(j - 1)
+            to = candidate
+            break
+
+    var timeDiff: float = to.timestamp - from.timestamp
+    var t: float = 0.0
+    if timeDiff > 0.0:
+        t = clampf((renderTime - from.timestamp) / timeDiff, 0.0, 1.0)
+
+    # Mutate reusable scratch snapshot instead of allocating
+    _interpSnap.timestamp = renderTime
+    _interpSnap.position = from.position.lerp(to.position, t)
+    _interpSnap.rotation_y = lerp_angle(from.rotation_y, to.rotation_y, t)
+    _interpSnap.state = to.state
+    _interpSnap.move_speed = lerpf(from.move_speed, to.move_speed, t)
+    _interpSnap.strafe = lerpf(from.strafe, to.strafe, t)
+    _interpSnap.health = to.health
+    _interpSnap.flags = to.flags
+    _apply_snapshot(node, _interpSnap)
 
 
 ## Applies a snapshot to an AI node on the client: position, rotation, animation.
@@ -491,14 +532,11 @@ func _apply_snapshot(node: Node, snap: AISnapshot) -> void:
 ## Reparents from pool to Agents, shows it, enables animator.
 func _activate_on_client(idx: int, node: Node) -> void:
     activeOnClient[idx] = 1
-    var spawner: Node = _get_spawner()
-    if spawner == null:
-        return
-    var agentsNode: Node = spawner.get_node_or_null("Agents")
-    if agentsNode == null:
-        return
-    if node.get_parent() != agentsNode:
-        node.reparent(agentsNode)
+    if !is_instance_valid(_agentsNode):
+        if _get_spawner() == null || !is_instance_valid(_agentsNode):
+            return
+    if node.get_parent() != _agentsNode:
+        node.reparent(_agentsNode)
     node.show()
     # Keep AI paused on client — we drive it via snapshots, not AI logic
     node.set(&"pause", true)
@@ -670,16 +708,15 @@ func receive_explosion_damage() -> void:
 func send_full_state(peerId: int) -> void:
     if !_cm.isHost:
         return
-    var spawner: Node = _get_spawner()
-    if spawner == null:
-        _log("send_full_state: no spawner found")
-        return
-    var agentsNode: Node = spawner.get_node_or_null("Agents")
-    if agentsNode == null:
-        _log("send_full_state: no Agents node")
-        return
+    if !is_instance_valid(_agentsNode):
+        if _get_spawner() == null:
+            _log("send_full_state: no spawner found")
+            return
+        if !is_instance_valid(_agentsNode):
+            _log("send_full_state: no Agents node")
+            return
     var sentCount: int = 0
-    for child: Node in agentsNode.get_children():
+    for child: Node in _agentsNode.get_children():
         if !child.has_meta(&"ai_sync_id"):
             continue
         if child.get(&"dead") == true:
@@ -714,10 +751,14 @@ func untrack(syncId: int) -> void:
 
 
 func _get_spawner() -> Node:
+    if is_instance_valid(_spawner):
+        return _spawner
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
         return null
-    return scene.get_node_or_null("AI")
+    _spawner = scene.get_node_or_null(^"AI")
+    _agentsNode = _spawner.get_node_or_null(^"Agents") if is_instance_valid(_spawner) else null
+    return _spawner
 
 
 func _log(msg: String) -> void:

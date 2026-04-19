@@ -308,7 +308,12 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     rightCol.add_theme_constant_override("separation", 8)
     outerHBox.add_child(rightCol)
 
-    # Left column: session controls
+    _build_mp_left_column(leftCol)
+    _build_mp_right_column(rightCol)
+
+
+## Left column: title, status label, host/join/action rows, connected players list.
+func _build_mp_left_column(leftCol: VBoxContainer) -> void:
     var title: Label = Label.new()
     title.text = "Multiplayer"
     title.add_theme_font_size_override("font_size", 20)
@@ -325,7 +330,20 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     statusLabel.text = "Disconnected"
     leftCol.add_child(statusLabel)
 
-    # Host row
+    _build_mp_host_row(leftCol)
+    _build_mp_join_row(leftCol)
+
+    var ipInfo: VBoxContainer = VBoxContainer.new()
+    ipInfo.name = "MPIpInfo"
+    ipInfo.hide()
+    leftCol.add_child(ipInfo)
+
+    _build_mp_action_row(leftCol)
+    _build_mp_players_section(leftCol)
+
+
+## Host (Steam) + Host (IP) buttons side by side.
+func _build_mp_host_row(leftCol: VBoxContainer) -> void:
     var hostRow: HBoxContainer = HBoxContainer.new()
     hostRow.add_theme_constant_override("separation", 8)
     leftCol.add_child(hostRow)
@@ -346,7 +364,9 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     hostIpBtn.pressed.connect(_on_mp_host_ip)
     hostRow.add_child(hostIpBtn)
 
-    # Direct join row
+
+## Direct-join: address input, port input, Join button.
+func _build_mp_join_row(leftCol: VBoxContainer) -> void:
     var joinRow: HBoxContainer = HBoxContainer.new()
     joinRow.add_theme_constant_override("separation", 4)
     leftCol.add_child(joinRow)
@@ -372,13 +392,9 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     joinBtn.pressed.connect(_on_mp_direct_join)
     joinRow.add_child(joinBtn)
 
-    # IP info (shown when hosting via IP)
-    var ipInfo: VBoxContainer = VBoxContainer.new()
-    ipInfo.name = "MPIpInfo"
-    ipInfo.hide()
-    leftCol.add_child(ipInfo)
 
-    # Action row
+## Disconnect + Logs buttons.
+func _build_mp_action_row(leftCol: VBoxContainer) -> void:
     var actionRow: HBoxContainer = HBoxContainer.new()
     actionRow.add_theme_constant_override("separation", 8)
     leftCol.add_child(actionRow)
@@ -398,6 +414,9 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     logsBtn.pressed.connect(_on_mp_logs)
     actionRow.add_child(logsBtn)
 
+
+## Connected players header + scrolling list.
+func _build_mp_players_section(leftCol: VBoxContainer) -> void:
     var playersHeader: Label = Label.new()
     playersHeader.text = "Connected Players"
     playersHeader.add_theme_font_size_override("font_size", 16)
@@ -415,7 +434,9 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     playersList.add_theme_constant_override("separation", 4)
     playersScroll.add_child(playersList)
 
-    # Right column: friends list
+
+## Right column: friends list header, hint label, scrolling invite list.
+func _build_mp_right_column(rightCol: VBoxContainer) -> void:
     var friendsLabel: Label = Label.new()
     friendsLabel.text = "Invite Friends"
     friendsLabel.add_theme_font_size_override("font_size", 16)
@@ -552,10 +573,12 @@ func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxCo
     var steamId: String = _cm.peerSteamIDs.get(peerId, "")
     if isLocal:
         steamId = _cm.steamBridge.localSteamID if _cm.steamBridge.is_ready() else ""
-    if !steamId.is_empty() && steamId in _cm.avatarCache:
-        avatar.texture = _cm.avatarCache[steamId]
-    elif !steamId.is_empty():
-        _cm.fetch_avatar(steamId)
+    if !steamId.is_empty():
+        var cached: Texture2D = _cm.avatarCache.get(steamId)
+        if cached != null:
+            avatar.texture = cached
+        else:
+            _cm.fetch_avatar(steamId)
     row.add_child(avatar)
 
     var nameLabel: Label = Label.new()
@@ -664,8 +687,9 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
     nameLabel.add_theme_color_override("font_color", nameColor)
 
     var steamID: String = friend.get(&"steam_id", "")
-    if steamID in _cm.avatarCache:
-        avatar.texture = _cm.avatarCache[steamID]
+    var cached: Texture2D = _cm.avatarCache.get(steamID)
+    if cached != null:
+        avatar.texture = cached
     elif !steamID.is_empty():
         _cm.fetch_avatar(steamID)
         _avatarSlots[steamID] = avatar  # patch in once IPC fetch completes
@@ -682,11 +706,12 @@ func _patch_pending_avatars() -> void:
         return
     var resolved: Array[String] = []
     for steamID: String in _avatarSlots:
-        if !(steamID in _cm.avatarCache):
+        var tex: Texture2D = _cm.avatarCache.get(steamID)
+        if tex == null:
             continue
         var slot: TextureRect = _avatarSlots[steamID]
         if is_instance_valid(slot):
-            slot.texture = _cm.avatarCache[steamID]
+            slot.texture = tex
         resolved.append(steamID)
     for sid: String in resolved:
         _avatarSlots.erase(sid)

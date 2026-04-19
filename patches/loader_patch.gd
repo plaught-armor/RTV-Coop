@@ -46,6 +46,24 @@ func SaveCharacter():
 
 	var interface = get_tree().current_scene.get_node("/root/Map/Core/UI/Interface")
 
+	_save_vitals(character)
+	_save_cat(character)
+	_save_loadout(character)
+	_save_inventory_grids(character, interface)
+
+	ResourceSaver.save(character, playerSavePath + "Character.tres")
+	print("SAVE: Character (%s)" % playerSavePath)
+	# Send character to host for world-persistent storage
+	var root: Node = get_tree().root if get_tree() != null else null
+	if root != null:
+		for child: Node in root.get_children():
+			if child.has_meta(&"is_coop_manager") && child.is_session_active():
+				child.send_character_to_host()
+				break
+
+
+## Copies vitals, statuses, and debuff flags from gameData onto the save.
+func _save_vitals(character: CharacterSave) -> void:
 	character.health = gameData.health
 	character.energy = gameData.energy
 	character.hydration = gameData.hydration
@@ -64,10 +82,16 @@ func SaveCharacter():
 	character.rupture = gameData.rupture
 	character.headshot = gameData.headshot
 
+
+## Copies cat companion state from gameData.
+func _save_cat(character: CharacterSave) -> void:
 	character.cat = gameData.cat
 	character.catFound = gameData.catFound
 	character.catDead = gameData.catDead
 
+
+## Copies weapon/grenade/gear slot refs from gameData.
+func _save_loadout(character: CharacterSave) -> void:
 	character.primary = gameData.primary
 	character.secondary = gameData.secondary
 	character.knife = gameData.knife
@@ -76,6 +100,9 @@ func SaveCharacter():
 	character.flashlight = gameData.flashlight
 	character.NVG = gameData.NVG
 
+
+## Serializes inventory, equipment, and catalog grids into character slot arrays.
+func _save_inventory_grids(character: CharacterSave, interface) -> void:
 	character.inventory.clear()
 	character.equipment.clear()
 	character.catalog.clear()
@@ -102,16 +129,6 @@ func SaveCharacter():
 			newSlotData.storage = item.slotData.storage
 		character.catalog.append(newSlotData)
 
-	ResourceSaver.save(character, playerSavePath + "Character.tres")
-	print("SAVE: Character (%s)" % playerSavePath)
-	# Send character to host for world-persistent storage
-	var root: Node = get_tree().root if get_tree() != null else null
-	if root != null:
-		for child: Node in root.get_children():
-			if child.has_meta(&"is_coop_manager") && child.is_session_active():
-				child.send_character_to_host()
-				break
-
 
 func LoadCharacter():
 	await get_tree().create_timer(0.1).timeout;
@@ -126,25 +143,43 @@ func LoadCharacter():
 	var flashlight = get_tree().current_scene.get_node("/root/Map/Core/Camera/Flashlight")
 	var NVG = get_tree().current_scene.get_node("/root/Map/Core/UI/NVG")
 
-	if character.initialSpawn && character.startingKit:
-		for item in character.startingKit.items:
-			var newSlotData = SlotData.new()
-			newSlotData.itemData = item
-			if newSlotData.itemData.stackable:
-				newSlotData.amount = newSlotData.itemData.defaultAmount
-			interface.Create(newSlotData, interface.inventoryGrid, false)
+	_load_initial_kit(character, interface)
+	_load_inventory_grids(character, interface)
+	interface.UpdateStats(false)
 
+	_load_vitals(character)
+	_load_cat(character)
+	_load_loadout(character)
+	_equip_active_rig(character, rigManager, flashlight, NVG)
+
+	UpdateProgression()
+	print("LOAD: Character (%s)" % playerSavePath)
+
+
+## Seeds inventory with items from the selected starting kit on first spawn.
+func _load_initial_kit(character: CharacterSave, interface) -> void:
+	if !(character.initialSpawn && character.startingKit):
+		return
+	for item in character.startingKit.items:
+		var newSlotData = SlotData.new()
+		newSlotData.itemData = item
+		if newSlotData.itemData.stackable:
+			newSlotData.amount = newSlotData.itemData.defaultAmount
+		interface.Create(newSlotData, interface.inventoryGrid, false)
+
+
+## Restores inventory, equipment, and catalog grids from the saved character.
+func _load_inventory_grids(character: CharacterSave, interface) -> void:
 	for slotData in character.inventory:
 		interface.LoadGridItem(slotData, interface.inventoryGrid, slotData.gridPosition)
-
 	for slotData in character.equipment:
 		interface.LoadSlotItem(slotData, slotData.slot)
-
 	for slotData in character.catalog:
 		interface.LoadGridItem(slotData, interface.catalogGrid, slotData.gridPosition)
 
-	interface.UpdateStats(false)
 
+## Restores vitals, statuses, and debuff flags onto gameData.
+func _load_vitals(character: CharacterSave) -> void:
 	gameData.health = character.health
 	gameData.energy = character.energy
 	gameData.hydration = character.hydration
@@ -163,10 +198,16 @@ func LoadCharacter():
 	gameData.rupture = character.rupture
 	gameData.headshot = character.headshot
 
+
+## Restores cat companion state onto gameData.
+func _load_cat(character: CharacterSave) -> void:
 	gameData.cat = character.cat
 	gameData.catFound = character.catFound
 	gameData.catDead = character.catDead
 
+
+## Restores weapon/grenade/gear slot refs onto gameData.
+func _load_loadout(character: CharacterSave) -> void:
 	gameData.primary = character.primary
 	gameData.secondary = character.secondary
 	gameData.knife = character.knife
@@ -175,6 +216,9 @@ func LoadCharacter():
 	gameData.flashlight = character.flashlight
 	gameData.NVG = character.NVG
 
+
+## Activates the held weapon (or grenade) rig and any auxiliary gear that was equipped.
+func _equip_active_rig(character: CharacterSave, rigManager, flashlight, NVG) -> void:
 	if gameData.primary:
 		rigManager.LoadPrimary()
 		gameData.weaponPosition = character.weaponPosition
@@ -192,9 +236,6 @@ func LoadCharacter():
 		flashlight.Load()
 	if gameData.NVG:
 		NVG.Load()
-
-	UpdateProgression()
-	print("LOAD: Character (%s)" % playerSavePath)
 
 
 # ---------- World ----------
@@ -284,6 +325,8 @@ func FormatSave():
 			var removal = directory.remove(savePath + file)
 			if removal == OK:
 				print("File removed: " + file)
+			else:
+				push_warning("FormatSave: failed to remove %s (error %d)" % [file, removal])
 		file = directory.get_next()
 	directory.list_dir_end()
 

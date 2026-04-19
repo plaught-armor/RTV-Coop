@@ -175,9 +175,10 @@ func _physics_process(_delta: float) -> void:
         from = buf.newest()
         to = from
         for i: int in range(1, count):
-            if buf.get_at(i).timestamp >= renderTime:
+            var candidate: Snapshot = buf.get_at(i)
+            if candidate.timestamp >= renderTime:
                 from = buf.get_at(i - 1)
-                to = buf.get_at(i)
+                to = candidate
                 break
 
         # No pruning — ring buffer overwrites oldest on push

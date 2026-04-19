@@ -229,6 +229,7 @@ func _dispatch_binary(payload: PackedByteArray) -> void:
 func _dispatch_response(line: String) -> void:
     var response: Variant = JSON.parse_string(line)
     if response == null || !(response is Dictionary):
+        push_warning("[steam_bridge] Malformed response payload dropped: %s" % line.substr(0, 200))
         return
 
     var cmd: String = response.get(&"cmd", "")

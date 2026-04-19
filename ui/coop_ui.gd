@@ -412,61 +412,69 @@ func on_friends_received(response: Dictionary) -> void:
 
     var friends: Array = response.get(&"data", [])
     for i: int in range(friends.size()):
-        var friend: Dictionary = friends[i]
-        var row: HBoxContainer = get_pooled_friend_row(i)
-        var avatar: TextureRect = row.get_child(0)
-        var nameLabel: Label = row.get_child(1)
-        var btn: Button = row.get_child(2)
-        var friendName: String = friend.get(&"name", "Unknown")
-        var state: int = friend.get(&"state", 0)
-        var gameID: String = friend.get(&"game_id", "")
-        var inGame: bool = !gameID.is_empty()
-
-        var stateText: String = ""
-        var nameColor: Color
-        if inGame:
-            stateText = " (In-Game)"
-            nameColor = Color("#90ba3c")
-        else:
-            match state:
-                1:
-                    stateText = ""
-                    nameColor = Color("#57cbde")
-                2:
-                    stateText = " (Busy)"
-                    nameColor = Color("#57cbde", 0.5)
-                3:
-                    stateText = " (Away)"
-                    nameColor = Color("#57cbde", 0.5)
-                4:
-                    stateText = " (Snooze)"
-                    nameColor = Color("#57cbde", 0.4)
-                _:
-                    stateText = ""
-                    nameColor = Color("#57cbde")
-
-        nameLabel.text = "%s%s" % [friendName, stateText]
-        nameLabel.add_theme_color_override("font_color", nameColor)
-
-        # Fetch avatar via binary channel (faster than inline base64)
-        var steamID: String = friend.get(&"steam_id", "")
-        if steamID in _cm.avatarCache:
-            avatar.texture = _cm.avatarCache[steamID]
-            avatar.show()
-        elif !steamID.is_empty():
-            _cm.fetch_avatar(steamID)
-            avatar.texture = null
-            avatar.hide()
-        else:
-            avatar.texture = null
-            avatar.hide()
-
-        for conn: Dictionary in btn.pressed.get_connections():
-            btn.pressed.disconnect(conn["callable"])
-        btn.pressed.connect(on_invite_friend_pressed.bind(steamID, friendName))
+        _populate_friend_row(friends[i], i)
 
     for i: int in range(friends.size(), friendLabelPool.size()):
         friendLabelPool[i].hide()
+
+
+## Fills one pooled friend row with name, avatar, and invite button state.
+func _populate_friend_row(friend: Dictionary, rowIndex: int) -> void:
+    var row: HBoxContainer = get_pooled_friend_row(rowIndex)
+    var avatar: TextureRect = row.get_child(0)
+    var nameLabel: Label = row.get_child(1)
+    var btn: Button = row.get_child(2)
+    var friendName: String = friend.get(&"name", "Unknown")
+    var state: int = friend.get(&"state", 0)
+    var inGame: bool = !String(friend.get(&"game_id", "")).is_empty()
+
+    var styling: Dictionary = _friend_display_styling(inGame, state)
+    nameLabel.text = "%s%s" % [friendName, styling.text]
+    nameLabel.add_theme_color_override("font_color", styling.color)
+
+    var steamID: String = friend.get(&"steam_id", "")
+    _apply_friend_avatar(avatar, steamID)
+    _rebind_friend_invite(btn, steamID, friendName)
+
+
+## Returns {text, color} for the friend's display suffix based on in-game/online state.
+func _friend_display_styling(inGame: bool, state: int) -> Dictionary:
+    if inGame:
+        return {"text": " (In-Game)", "color": Color("#90ba3c")}
+    match state:
+        1:
+            return {"text": "", "color": Color("#57cbde")}
+        2:
+            return {"text": " (Busy)", "color": Color("#57cbde", 0.5)}
+        3:
+            return {"text": " (Away)", "color": Color("#57cbde", 0.5)}
+        4:
+            return {"text": " (Snooze)", "color": Color("#57cbde", 0.4)}
+        _:
+            return {"text": "", "color": Color("#57cbde")}
+
+
+## Fetches the Steam avatar via binary channel (faster than inline base64).
+## Reveals a cached texture when available, otherwise requests a fetch and hides
+## the slot until the async fill arrives.
+func _apply_friend_avatar(avatar: TextureRect, steamID: String) -> void:
+    var cached: Texture2D = _cm.avatarCache.get(steamID)
+    if cached != null:
+        avatar.texture = cached
+        avatar.show()
+        return
+    if !steamID.is_empty():
+        _cm.fetch_avatar(steamID)
+    avatar.texture = null
+    avatar.hide()
+
+
+## Disconnects prior handlers before rebinding so the invite button stays idempotent
+## across friend-list refreshes (pool reuse would otherwise stack connections).
+func _rebind_friend_invite(btn: Button, steamID: String, friendName: String) -> void:
+    for conn: Dictionary in btn.pressed.get_connections():
+        btn.pressed.disconnect(conn["callable"])
+    btn.pressed.connect(on_invite_friend_pressed.bind(steamID, friendName))
 
 
 func on_invite_friend_pressed(steamID: String, friendName: String) -> void:
