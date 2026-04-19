@@ -558,7 +558,9 @@ func _refresh_players_list(active: bool) -> void:
     # Local player first.
     list.add_child(_make_player_row(_cm.localPeerId, _cm.get_local_name(), true))
     for peerId: int in _cm.connectedPeers:
-        var peerName: String = _cm.peerNames.get(peerId, "Player %d" % peerId)
+        var peerName: String = "Player %d" % peerId
+        if _cm.peerNames.has(peerId):
+            peerName = _cm.peerNames[peerId]
         list.add_child(_make_player_row(peerId, peerName, false))
 
 
@@ -570,11 +572,15 @@ func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxCo
     avatar.custom_minimum_size = Vector2(28, 28)
     avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
     avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-    var steamId: String = _cm.peerSteamIDs.get(peerId, "")
+    var steamId: String = ""
+    if _cm.peerSteamIDs.has(peerId):
+        steamId = _cm.peerSteamIDs[peerId]
     if isLocal:
         steamId = _cm.steamBridge.localSteamID if _cm.steamBridge.is_ready() else ""
     if !steamId.is_empty():
-        var cached: Texture2D = _cm.avatarCache.get(steamId)
+        var cached: Texture2D = null
+        if _cm.avatarCache.has(steamId):
+            cached = _cm.avatarCache[steamId]
         if cached != null:
             avatar.texture = cached
         else:
@@ -687,7 +693,9 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
     nameLabel.add_theme_color_override("font_color", nameColor)
 
     var steamID: String = friend.get(&"steam_id", "")
-    var cached: Texture2D = _cm.avatarCache.get(steamID)
+    var cached: Texture2D = null
+    if _cm.avatarCache.has(steamID):
+        cached = _cm.avatarCache[steamID]
     if cached != null:
         avatar.texture = cached
     elif !steamID.is_empty():
@@ -706,7 +714,9 @@ func _patch_pending_avatars() -> void:
         return
     var resolved: Array[String] = []
     for steamID: String in _avatarSlots:
-        var tex: Texture2D = _cm.avatarCache.get(steamID)
+        var tex: Texture2D = null
+        if _cm.avatarCache.has(steamID):
+            tex = _cm.avatarCache[steamID]
         if tex == null:
             continue
         var slot: TextureRect = _avatarSlots[steamID]

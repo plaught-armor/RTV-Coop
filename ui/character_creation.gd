@@ -26,7 +26,12 @@ var _textureButtons: Array[Button] = []
 var _textureRow: HBoxContainer = null
 
 var _previewViewport: SubViewport = null
-var _previewMeshes: Dictionary[String, MeshInstance3D] = {}
+## Currently-loaded preview body Node3D (subtree of the selected AI rig).
+## Replaced when [member _selectedBody] changes — each rig carries its own
+## skeleton so we can't share meshes across bodies.
+var _previewBody: Node3D = null
+var _previewBodyName: String = ""
+var _previewMesh: MeshInstance3D = null
 
 
 func init(cm: Node, onConfirm: Callable, onCancel: Callable = Callable()) -> void:
@@ -190,20 +195,8 @@ func _build_preview(parent: Container) -> void:
 
     _previewViewport.world_3d = world_3d
 
-    var body: Node3D = _instantiate_super_rig_body()
-    if body != null:
-        _previewViewport.add_child(body)
-        var skel: Skeleton3D = body.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
-        if skel != null:
-            for child: Node in skel.get_children():
-                if child is MeshInstance3D && child.name.begins_with("Mesh_"):
-                    var key: String = child.name.substr(5)
-                    _previewMeshes[key] = child
-                    (child as MeshInstance3D).visible = false
-            _attach_preview_rifle(skel)
-        var animPlayer: AnimationPlayer = body.get_node_or_null("Animations") as AnimationPlayer
-        if animPlayer != null && animPlayer.has_animation(IDLE_ANIM):
-            animPlayer.play(IDLE_ANIM)
+    # Body load is deferred to _apply_preview — selected body may differ from
+    # default and per-rig skeletons can't be swapped after instantiation.
 
     # Default forward is -Z; placing the camera at +Z frames the model with
     # no look_at needed. Height = mid-body so the rig sits centered vertically
@@ -220,42 +213,48 @@ func _build_preview(parent: Container) -> void:
     _previewViewport.add_child(light)
 
 
-## Attaches a rifle to the Weapons BoneAttachment on the rig skeleton so the
-## Rifle_Idle pose reads correctly (empty hands look broken in that stance).
+## Attaches the AI's bundled rifle (if present) to the Weapons BoneAttachment
+## so the Rifle_Idle pose reads correctly (empty hands look broken in that
+## stance). Falls through silently for AI rigs whose bundle lacks the named
+## weapon — preview just shows empty hands.
 func _attach_preview_rifle(skel: Skeleton3D) -> void:
     var weapons: Node = skel.get_node_or_null("Weapons")
     if weapons == null:
         return
-    # Super rig bakes every AI-owned weapon under Weapons as invisible templates
-    # (see tools/build_super_rig.gd). The baked copy already carries the correct
-    # Transform3D from its source AI scene, so we just toggle visibility.
     var baked: Node3D = weapons.get_node_or_null(PREVIEW_RIFLE_NAME) as Node3D
     if baked != null:
         baked.visible = true
-        return
 
 
-## Mirrors RemotePlayer's extract: drop the CharacterBody3D wrapper so the
-## preview carries only the Body Node3D subtree.
-func _instantiate_super_rig_body() -> Node3D:
-    var packed: PackedScene = load(_cm.AppearanceScript.SUPER_RIG_PATH) as PackedScene
+## Loads the AI scene for [param body], strips the AI script + sensors so it's
+## inert, and reparents the visual subtree into the preview viewport. Mirrors
+## remote_player._load_body_rig but trimmed to what the picker needs (no
+## Collision/Flash, no spine pitch override).
+## Lazy-loaded once; gives the picker access to BODY_SCENES without forcing
+## a circular preload at parse time.
+const _RemotePlayerScript: GDScript = preload("res://mod/presentation/remote_player.gd")
+
+
+func _instantiate_body_rig(body: String) -> Node3D:
+    if !_RemotePlayerScript.BODY_SCENES.has(body):
+        return null
+    var path: String = _RemotePlayerScript.BODY_SCENES[body]
+    if path.is_empty():
+        return null
+    var packed: PackedScene = load(path) as PackedScene
     if packed == null:
         return null
     var rigRoot: Node = packed.instantiate()
     if rigRoot == null:
         return null
-    var body: Node3D = rigRoot.get_node_or_null("Body") as Node3D
-    if body == null:
-        for child: Node in rigRoot.get_children():
-            if child is Node3D:
-                body = child
-                break
-    if body == null:
+    rigRoot.set_script(null)
+    var bodyContainer: Node3D = rigRoot.get_node_or_null(body) as Node3D
+    if bodyContainer == null:
         rigRoot.queue_free()
         return null
-    rigRoot.remove_child(body)
+    rigRoot.remove_child(bodyContainer)
     rigRoot.queue_free()
-    return body
+    return bodyContainer
 
 
 func _on_model_pressed(body: String) -> void:
@@ -297,18 +296,34 @@ func _refresh() -> void:
 
 
 func _apply_preview(body: String, materialPath: String) -> void:
-    for key: String in _previewMeshes:
-        var mesh: MeshInstance3D = _previewMeshes[key]
-        if !is_instance_valid(mesh):
-            continue
-        mesh.visible = (key == body)
-    var selected: MeshInstance3D = _previewMeshes.get(body)
-    if selected == null:
+    if body != _previewBodyName:
+        if is_instance_valid(_previewBody):
+            _previewBody.queue_free()
+        _previewBody = null
+        _previewMesh = null
+        _previewBodyName = ""
+        var newBody: Node3D = _instantiate_body_rig(body)
+        if newBody == null:
+            return
+        _previewViewport.add_child(newBody)
+        _previewBody = newBody
+        _previewBodyName = body
+        var skel: Skeleton3D = newBody.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
+        if skel != null:
+            _previewMesh = skel.get_node_or_null("Mesh") as MeshInstance3D
+            _attach_preview_rifle(skel)
+        var animPlayer: AnimationPlayer = newBody.get_node_or_null("Animations") as AnimationPlayer
+        if animPlayer != null && animPlayer.has_animation(IDLE_ANIM):
+            animPlayer.play(IDLE_ANIM)
+
+    var selected: MeshInstance3D = _previewMesh
+    if !is_instance_valid(selected):
         return
     var mat: Material = load(materialPath) as Material
     if mat == null:
         return
-    for i: int in selected.get_surface_override_material_count():
+    var surfaceCount: int = selected.mesh.get_surface_count() if selected.mesh != null else 0
+    for i: int in surfaceCount:
         selected.set_surface_override_material(i, mat)
 
 

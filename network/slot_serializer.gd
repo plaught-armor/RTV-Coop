@@ -18,7 +18,9 @@ static var _itemCache: Dictionary[String, Resource] = {}
 ## Resolves an item path to its [ItemData] resource with validation. Returns
 ## null if the path is disallowed or the resource isn't an [ItemData].
 static func _resolve_item(path: String) -> Resource:
-    var cached: Resource = _itemCache.get(path)
+    var cached: Resource = null
+    if _itemCache.has(path):
+        cached = _itemCache[path]
     if cached != null:
         return cached
     if !is_allowed_path(path):

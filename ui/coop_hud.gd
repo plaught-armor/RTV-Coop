@@ -123,7 +123,9 @@ func update_player_labels() -> void:
     var localLabel: Label = localRow.get_child(1)
     var localName: String = _cm.get_local_name()
     localLabel.text = "%s (Host)" % localName if _cm.isHost else localName
-    var localTex: ImageTexture = _cm.avatarCache.get(_cm.steamBridge.localSteamID)
+    var localTex: ImageTexture = null
+    if _cm.avatarCache.has(_cm.steamBridge.localSteamID):
+        localTex = _cm.avatarCache[_cm.steamBridge.localSteamID]
     if localTex != null:
         localAvatar.texture = localTex
         localAvatar.show()
@@ -136,7 +138,9 @@ func update_player_labels() -> void:
         var avatar: TextureRect = row.get_child(0)
         var label: Label = row.get_child(1)
         var peerName: String = _cm.get_peer_name(peerId)
-        var ping: int = peerPings.get(peerId, -1)
+        var ping: int = -1
+        if peerPings.has(peerId):
+            ping = peerPings[peerId]
         label.text = "%s: %dms" % [peerName, ping] if ping >= 0 else "%s: ..." % peerName
         var tex: ImageTexture = _cm.get_peer_avatar(peerId)
         if tex != null:

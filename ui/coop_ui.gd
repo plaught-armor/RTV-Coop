@@ -203,7 +203,9 @@ func update_player_list() -> void:
         var localAvatar: TextureRect = localRow.get_child(0)
         var localLabel: Label = localRow.get_child(1)
         localLabel.text = "%s (You)" % _cm.get_local_name()
-        var localTex: ImageTexture = _cm.avatarCache.get(_cm.steamBridge.localSteamID)
+        var localTex: ImageTexture = null
+        if _cm.avatarCache.has(_cm.steamBridge.localSteamID):
+            localTex = _cm.avatarCache[_cm.steamBridge.localSteamID]
         if localTex != null:
             localAvatar.texture = localTex
             localAvatar.show()
@@ -374,9 +376,17 @@ func on_lobby_joined(response: Dictionary) -> void:
     if hostSteamID.is_empty():
         _cm._log("Lobby has no host Steam ID")
         return
+    # Steam invite_poll can fire JoinRequested multiple times for the same lobby —
+    # gate so we only start one P2P tunnel per accepted invite.
+    if _cm.currentLobbyID == lobbyID && _cm.isActive:
+        _cm._log("Lobby join callback re-fired for %s — already connected, ignoring" % lobbyID)
+        return
     _cm.currentLobbyID = lobbyID
     _cm._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
-    # Read host state to decide if we should auto-load into the game
+    # Lobby joined successfully — close the browser so it doesn't sit on top of
+    # the character picker and (later) the in-game scene.
+    if menuLobbyBrowser != null:
+        hide_lobby_browser()
     if !lobbyID.is_empty():
         _cm.steamBridge.get_lobby_data(lobbyID, "state", _on_host_state_received)
     _cm.steamBridge.start_p2p_client(hostSteamID, _cm.on_p2p_tunnel_ready)
@@ -458,7 +468,9 @@ func _friend_display_styling(inGame: bool, state: int) -> Dictionary:
 ## Reveals a cached texture when available, otherwise requests a fetch and hides
 ## the slot until the async fill arrives.
 func _apply_friend_avatar(avatar: TextureRect, steamID: String) -> void:
-    var cached: Texture2D = _cm.avatarCache.get(steamID)
+    var cached: Texture2D = null
+    if _cm.avatarCache.has(steamID):
+        cached = _cm.avatarCache[steamID]
     if cached != null:
         avatar.texture = cached
         avatar.show()
@@ -1272,12 +1284,18 @@ func _update_lobby_players() -> void:
     if !_cm.isActive:
         return
     var hostLabel: Label = Label.new()
-    hostLabel.text = "%s (Host)" % _cm.peerNames.get(_cm.localPeerId, "Host")
+    var hostName: String = "Host"
+    if _cm.peerNames.has(_cm.localPeerId):
+        hostName = _cm.peerNames[_cm.localPeerId]
+    hostLabel.text = "%s (Host)" % hostName
     hostLabel.add_theme_font_size_override("font_size", 13)
     _lobbyPlayerList.add_child(hostLabel)
     for peerId: int in _cm.connectedPeers:
         var peerLabel: Label = Label.new()
-        peerLabel.text = _cm.peerNames.get(peerId, "Peer %d" % peerId)
+        var pname: String = "Peer %d" % peerId
+        if _cm.peerNames.has(peerId):
+            pname = _cm.peerNames[peerId]
+        peerLabel.text = pname
         peerLabel.add_theme_font_size_override("font_size", 13)
         _lobbyPlayerList.add_child(peerLabel)
 

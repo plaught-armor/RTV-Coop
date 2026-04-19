@@ -143,6 +143,18 @@ func LoadCharacter():
 	var flashlight = get_tree().current_scene.get_node("/root/Map/Core/Camera/Flashlight")
 	var NVG = get_tree().current_scene.get_node("/root/Map/Core/UI/NVG")
 
+	# Wipe any items the Interface already holds. Coop reloads (sleep, Killbox,
+	# headless handoff) can fire LoadCharacter on a scene whose grids weren't
+	# rebuilt from scratch, doubling the inventory. Vanilla relied on a fresh
+	# Interface per scene change; coop can't.
+	_clear_grid_children(interface.inventoryGrid)
+	_clear_equipment_slots(interface.equipment)
+	_clear_grid_children(interface.catalogGrid)
+	# remove_child unparents synchronously but queue_free runs at frame end —
+	# wait one process tick so the freed nodes stop colliding with LoadGridItem's
+	# layout pass. Same pattern the competitor mod uses.
+	await get_tree().process_frame
+
 	_load_initial_kit(character, interface)
 	_load_inventory_grids(character, interface)
 	interface.UpdateStats(false)
@@ -169,6 +181,7 @@ func _load_initial_kit(character: CharacterSave, interface) -> void:
 
 
 ## Restores inventory, equipment, and catalog grids from the saved character.
+## Caller (LoadCharacter) clears the grids first so reloads don't duplicate.
 func _load_inventory_grids(character: CharacterSave, interface) -> void:
 	for slotData in character.inventory:
 		interface.LoadGridItem(slotData, interface.inventoryGrid, slotData.gridPosition)
@@ -176,6 +189,27 @@ func _load_inventory_grids(character: CharacterSave, interface) -> void:
 		interface.LoadSlotItem(slotData, slotData.slot)
 	for slotData in character.catalog:
 		interface.LoadGridItem(slotData, interface.catalogGrid, slotData.gridPosition)
+
+
+## remove_child runs synchronously so the subsequent LoadGridItem calls don't
+## see the old children in the grid. queue_free alone defers deletion to the
+## end of the frame — between clear and load the grid would still hold the
+## stale items, double-counting them in the layout pass.
+static func _clear_grid_children(grid: Node) -> void:
+	if grid == null:
+		return
+	for item: Node in grid.get_children():
+		grid.remove_child(item)
+		item.queue_free()
+
+
+static func _clear_equipment_slots(equipment: Node) -> void:
+	if equipment == null:
+		return
+	for slot: Node in equipment.get_children():
+		for child: Node in slot.get_children():
+			slot.remove_child(child)
+			child.queue_free()
 
 
 ## Restores vitals, statuses, and debuff flags onto gameData.

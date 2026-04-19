@@ -73,13 +73,24 @@ static func _build_state_mask(states: Array[int]) -> PackedInt32Array:
     return mask
 
 ## Precomputed animator parameter paths as StringName (avoids per-tick String allocation).
+## Top-level Pistol vs Rifle switch — selects which inner state machine drives bones.
 const COND_PISTOL: StringName = &"parameters/conditions/Pistol"
 const COND_RIFLE: StringName = &"parameters/conditions/Rifle"
-const COND_MOVEMENT: StringName = &"parameters/conditions/Movement"
-const COND_COMBAT: StringName = &"parameters/conditions/Combat"
-const COND_HUNT: StringName = &"parameters/conditions/Hunt"
-const COND_DEFEND: StringName = &"parameters/conditions/Defend"
-const COND_GUARD: StringName = &"parameters/conditions/Guard"
+## Per-state conditions live INSIDE the Rifle / Pistol state machines, not at
+## the top level. Set both halves so whichever weapon-machine is active picks
+## up the new state. Path layout verified against AI_Bandit.tscn line 17873+.
+const COND_RIFLE_MOVEMENT: StringName = &"parameters/Rifle/conditions/Movement"
+const COND_RIFLE_COMBAT: StringName = &"parameters/Rifle/conditions/Combat"
+const COND_RIFLE_HUNT: StringName = &"parameters/Rifle/conditions/Hunt"
+const COND_RIFLE_DEFEND: StringName = &"parameters/Rifle/conditions/Defend"
+const COND_RIFLE_GUARD: StringName = &"parameters/Rifle/conditions/Guard"
+const COND_RIFLE_GROUP: StringName = &"parameters/Rifle/conditions/Group"
+const COND_PISTOL_MOVEMENT: StringName = &"parameters/Pistol/conditions/Movement"
+const COND_PISTOL_COMBAT: StringName = &"parameters/Pistol/conditions/Combat"
+const COND_PISTOL_HUNT: StringName = &"parameters/Pistol/conditions/Hunt"
+const COND_PISTOL_DEFEND: StringName = &"parameters/Pistol/conditions/Defend"
+const COND_PISTOL_GUARD: StringName = &"parameters/Pistol/conditions/Guard"
+const COND_PISTOL_GROUP: StringName = &"parameters/Pistol/conditions/Group"
 const BLEND_PISTOL_MOVE: StringName = &"parameters/Pistol/Movement/blend_position"
 const BLEND_PISTOL_COMBAT: StringName = &"parameters/Pistol/Combat/blend_position"
 const BLEND_PISTOL_HUNT: StringName = &"parameters/Pistol/Hunt/blend_position"
@@ -144,10 +155,18 @@ class AIBuffer extends RefCounted:
             slots[i] = AISnapshot.new(0.0, Vector3.ZERO, 0.0, 0, 0.0, 0.0, 0, 0)
 
 
-    ## Pushes a snapshot into the ring. Overwrites oldest if full.
-    func push(snap: AISnapshot) -> void:
+    ## Mutates the next ring slot in-place — avoids per-RPC allocation.
+    func push_fields(timestamp: float, position: Vector3, rotation_y: float, state: int, move_speed: float, strafe: float, health: int, flags: int) -> void:
         var writeIdx: int = (head + count) % capacity
-        slots[writeIdx] = snap
+        var slot: AISnapshot = slots[writeIdx]
+        slot.timestamp = timestamp
+        slot.position = position
+        slot.rotation_y = rotation_y
+        slot.state = state
+        slot.move_speed = move_speed
+        slot.strafe = strafe
+        slot.health = health
+        slot.flags = flags
         if count < capacity:
             count += 1
         else:
@@ -230,6 +249,14 @@ func _collect_tagged_ai_nodes(spawner: Node) -> Dictionary:
     return {"nodes": out, "maxId": maxId}
 
 
+## Per-AI cache of last-applied state + move_speed. Skips redundant animator
+## writes in [method _apply_snapshot] when nothing changed (host broadcasts
+## at 10Hz, client interp at 60Hz, so most ticks see the same state).
+var _lastAppliedState: PackedInt32Array = []
+var _lastAppliedSpeed: PackedFloat32Array = []
+const SPEED_EPSILON: float = 0.01
+
+
 ## Resets aiNodes, aiBuffers, and activeOnClient to match the current slotCount.
 func _resize_slot_arrays() -> void:
     aiNodes.clear()
@@ -238,6 +265,10 @@ func _resize_slot_arrays() -> void:
     aiBuffers.resize(slotCount)
     activeOnClient.resize(slotCount)
     activeOnClient.fill(0)
+    _lastAppliedState.resize(slotCount)
+    _lastAppliedState.fill(-1)
+    _lastAppliedSpeed.resize(slotCount)
+    _lastAppliedSpeed.fill(-999.0)
     for i: int in slotCount:
         aiBuffers[i] = AIBuffer.new()
 
@@ -310,6 +341,7 @@ func _assign_sync_ids_from_spawner(spawner: Node) -> Array[Node]:
 
 
 func _physics_process(_delta: float) -> void:
+    Perf.tick()
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
 
@@ -341,22 +373,20 @@ func _host_tick() -> void:
     for peerId: int in _cm.connectedPeers:
         if !_cm.is_peer_on_same_map(peerId):
             continue
-        receive_ai_batch.rpc_id(peerId, batch[0], batch[1], batch[2], batch[3], batch[4], batch[5], batch[6], batch[7])
+        receive_ai_batch.rpc_id(peerId, batch[0], batch[1], batch[2], batch[3], batch[4])
 
 
-## Packs all sync-ID-tagged children of [param agentsNode] into 8 Packed arrays
-## [ids, positions, rotations, states, speeds, strafes, healths, flags].
-## Returns [] when no tagged agents exist. Shared by [method _host_tick] and
-## [code]headless_map._physics_process[/code] so both wire formats stay identical.
+## Packs sync-ID-tagged AI into 5 PackedArrays:
+## [ids, positions, rotations, speeds_strafes, packed].
+## packed = state(0..7) | flags(8..23) | health(24..31).
+## speeds_strafes = (speedI8 + 128) | ((strafeI8 + 128) << 8) per AI.
 func pack_ai_batch(agentsNode: Node) -> Array:
+    var _pt: int = Perf.start()
     var ids: PackedInt32Array = []
     var positions: PackedVector3Array = []
     var rotations: PackedFloat32Array = []
-    var states: PackedInt32Array = []
-    var speeds: PackedFloat32Array = []
-    var strafes: PackedFloat32Array = []
-    var healths: PackedInt32Array = []
-    var flagsArr: PackedInt32Array = []
+    var speedsStrafes: PackedInt32Array = []
+    var packed: PackedInt32Array = []
 
     for child: Node in agentsNode.get_children():
         if !child.has_meta(&"ai_sync_id"):
@@ -364,15 +394,19 @@ func pack_ai_batch(agentsNode: Node) -> Array:
         ids.append(child.get_meta(&"ai_sync_id"))
         positions.append(child.global_position)
         rotations.append(child.global_rotation.y)
-        states.append(child.currentState)
-        speeds.append(child.movementSpeed)
-        var strafe: float = 0.0
+
+        # Quantize speed (0..3) + strafe (-1..1) to int8 each, pack into int16.
+        var speedI: int = clampi(roundi(child.movementSpeed * 42.0), 0, 255)
+        var strafeRaw: float = 0.0
         if child.get(&"north") == true:
-            strafe = 1.0
+            strafeRaw = 1.0
         elif child.get(&"south") == true:
-            strafe = -1.0
-        strafes.append(strafe)
-        healths.append(clampi(roundi(child.health), 0, 255))
+            strafeRaw = -1.0
+        var strafeI: int = clampi(roundi(strafeRaw * 127.0) + 128, 0, 255)
+        speedsStrafes.append(speedI | (strafeI << 8))
+
+        var state: int = int(child.currentState) & 0xFF
+        var health: int = clampi(roundi(child.health), 0, 255)
         var f: int = 0
         if child.dead:
             f |= AIFlag.DEAD
@@ -382,27 +416,28 @@ func pack_ai_batch(agentsNode: Node) -> Array:
             var wData: Variant = child.get(&"weaponData")
             if wData != null && wData.get(&"weaponType") == "Pistol":
                 f |= AIFlag.PISTOL
-        flagsArr.append(f)
+        packed.append(state | ((f & 0xFFFF) << 8) | ((health & 0xFF) << 24))
 
+    Perf.stop("pack_ai_batch", _pt)
     if ids.is_empty():
         return []
-    return [ids, positions, rotations, states, speeds, strafes, healths, flagsArr]
+    return [ids, positions, rotations, speedsStrafes, packed]
 
 # ---------- Client Receive ----------
 
 
-## Receives batch AI state from host. Unreliable, 10Hz.
+## Receives batch AI state from host. Unreliable, 10Hz. Packed format:
+## packed = state | (flags << 8) | (health << 24).
+## speedsStrafes = (speedI8) | (strafeI8 << 8), both biased +128.
 @rpc("authority", "call_remote", "unreliable")
 func receive_ai_batch(
     ids: PackedInt32Array,
     positions: PackedVector3Array,
     rotations: PackedFloat32Array,
-    states: PackedInt32Array,
-    speeds: PackedFloat32Array,
-    strafes: PackedFloat32Array,
-    healths: PackedInt32Array,
-    flagsArr: PackedInt32Array,
+    speedsStrafes: PackedInt32Array,
+    packed: PackedInt32Array,
 ) -> void:
+    var _pt: int = Perf.start()
     if Engine.get_physics_frames() % 600 == 0:
         _log("receive_ai_batch: %d ids, slotCount=%d" % [ids.size(), slotCount])
     var now: float = Time.get_ticks_msec() / 1000.0
@@ -410,12 +445,18 @@ func receive_ai_batch(
         var idx: int = ids[i]
         if idx < 0 || idx >= slotCount:
             continue
+        var p: int = packed[i]
+        var ss: int = speedsStrafes[i]
         var buf: AIBuffer = aiBuffers[idx]
-        var snap: AISnapshot = AISnapshot.new(
-            now, positions[i], rotations[i], states[i],
-            speeds[i], strafes[i], healths[i], flagsArr[i],
+        buf.push_fields(
+            now, positions[i], rotations[i],
+            p & 0xFF,
+            float(ss & 0xFF) / 42.0,
+            (float((ss >> 8) & 0xFF) - 128.0) / 127.0,
+            (p >> 24) & 0xFF,
+            (p >> 8) & 0xFFFF,
         )
-        buf.push(snap)
+    Perf.stop("receive_ai_batch", _pt)
 
 # ---------- Client Interpolation ----------
 
@@ -446,10 +487,10 @@ func _client_interpolate() -> void:
             _activate_on_client(idx, node)
 
         if count < 2:
-            _apply_snapshot(node, buf.get_at(0))
+            _apply_snapshot(idx, node, buf.get_at(0))
             continue
 
-        _apply_interpolated(node, buf, count, renderTime)
+        _apply_interpolated(idx, node, buf, count, renderTime)
 
 
 ## Diagnostic: counts how many slots have at least one buffered snapshot.
@@ -464,7 +505,8 @@ func _log_interp_fill_stats() -> void:
 
 ## Picks bracketing snapshots around renderTime, computes the lerp factor,
 ## writes into the reusable [member _interpSnap] scratch, and applies it.
-func _apply_interpolated(node: Node, buf: AIBuffer, count: int, renderTime: float) -> void:
+func _apply_interpolated(idx: int, node: Node, buf: AIBuffer, count: int, renderTime: float) -> void:
+    var _pt: int = Perf.start()
     var from: AISnapshot = buf.newest()
     var to: AISnapshot = from
     for j: int in range(1, count):
@@ -488,18 +530,22 @@ func _apply_interpolated(node: Node, buf: AIBuffer, count: int, renderTime: floa
     _interpSnap.strafe = lerpf(from.strafe, to.strafe, t)
     _interpSnap.health = to.health
     _interpSnap.flags = to.flags
-    _apply_snapshot(node, _interpSnap)
+    _apply_snapshot(idx, node, _interpSnap)
+    Perf.stop("apply_interpolated", _pt)
 
 
 ## Applies a snapshot to an AI node on the client: position, rotation, animation.
-## Skips dead AI — once Death() ragdoll fires, snapshots must not overwrite position.
-func _apply_snapshot(node: Node, snap: AISnapshot) -> void:
+## Animator condition + blend writes are skipped when state + speed match the
+## previous tick's apply for this idx — host broadcasts at 10Hz, client interp
+## at 60Hz, so most ticks reapply identical values.
+func _apply_snapshot(idx: int, node: Node, snap: AISnapshot) -> void:
+    var _pt: int = Perf.start()
     if (snap.flags & AIFlag.DEAD) != 0:
+        Perf.stop("apply_snapshot", _pt)
         return
     node.global_position = snap.position
     node.global_rotation.y = snap.rotation_y
 
-    # Drive animator if available
     var animator: AnimationTree = node.get(&"animator")
     if !is_instance_valid(animator):
         return
@@ -507,25 +553,56 @@ func _apply_snapshot(node: Node, snap: AISnapshot) -> void:
         animator.active = true
 
     var isPistol: bool = (snap.flags & AIFlag.PISTOL) != 0
+    # Pack state + isPistol into a single int for the cache compare (state ≤
+    # 256, pistol bit 9). Lets us short-circuit when both are unchanged.
+    var stateKey: int = (snap.state & 0xFF) | (int(isPistol) << 8)
+    if _lastAppliedState[idx] != stateKey:
+        _lastAppliedState[idx] = stateKey
+        animator[COND_RIFLE_MOVEMENT] = false
+        animator[COND_RIFLE_COMBAT] = false
+        animator[COND_RIFLE_HUNT] = false
+        animator[COND_RIFLE_DEFEND] = false
+        animator[COND_RIFLE_GUARD] = false
+        animator[COND_RIFLE_GROUP] = false
+        animator[COND_PISTOL_MOVEMENT] = false
+        animator[COND_PISTOL_COMBAT] = false
+        animator[COND_PISTOL_HUNT] = false
+        animator[COND_PISTOL_DEFEND] = false
+        animator[COND_PISTOL_GUARD] = false
+        animator[COND_PISTOL_GROUP] = false
+        animator[COND_PISTOL] = isPistol
+        animator[COND_RIFLE] = !isPistol
+        if IS_MOVEMENT[snap.state] == 1:
+            animator[COND_RIFLE_MOVEMENT] = true
+            animator[COND_PISTOL_MOVEMENT] = true
+        elif snap.state == AIState.COMBAT:
+            animator[COND_RIFLE_COMBAT] = true
+            animator[COND_PISTOL_COMBAT] = true
+        elif snap.state == AIState.HUNT:
+            animator[COND_RIFLE_HUNT] = true
+            animator[COND_PISTOL_HUNT] = true
+        elif snap.state == AIState.DEFEND:
+            animator[COND_RIFLE_DEFEND] = true
+            animator[COND_PISTOL_DEFEND] = true
+        elif IS_GUARD[snap.state] == 1:
+            animator[COND_RIFLE_GUARD] = true
+            animator[COND_PISTOL_GUARD] = true
+        else:
+            animator[COND_RIFLE_GROUP] = true
+            animator[COND_PISTOL_GROUP] = true
 
-    # Set animator conditions based on AI state
-    animator[COND_PISTOL] = isPistol
-    animator[COND_RIFLE] = !isPistol
-    animator[COND_MOVEMENT] = IS_MOVEMENT[snap.state] == 1
-    animator[COND_COMBAT] = snap.state == AIState.COMBAT
-    animator[COND_HUNT] = snap.state == AIState.HUNT
-    animator[COND_DEFEND] = snap.state == AIState.DEFEND
-    animator[COND_GUARD] = IS_GUARD[snap.state] == 1
+    if absf(_lastAppliedSpeed[idx] - snap.move_speed) > SPEED_EPSILON:
+        _lastAppliedSpeed[idx] = snap.move_speed
+        if isPistol:
+            animator[BLEND_PISTOL_MOVE] = snap.move_speed
+            animator[BLEND_PISTOL_COMBAT] = snap.strafe
+            animator[BLEND_PISTOL_HUNT] = snap.move_speed
+        else:
+            animator[BLEND_RIFLE_MOVE] = snap.move_speed
+            animator[BLEND_RIFLE_COMBAT] = snap.strafe
+            animator[BLEND_RIFLE_HUNT] = snap.move_speed
 
-    # Blend positions for movement/combat/hunt
-    if isPistol:
-        animator[BLEND_PISTOL_MOVE] = snap.move_speed
-        animator[BLEND_PISTOL_COMBAT] = snap.strafe
-        animator[BLEND_PISTOL_HUNT] = snap.move_speed
-    else:
-        animator[BLEND_RIFLE_MOVE] = snap.move_speed
-        animator[BLEND_RIFLE_COMBAT] = snap.strafe
-        animator[BLEND_RIFLE_HUNT] = snap.move_speed
+    Perf.stop("apply_snapshot", _pt)
 
 
 ## Activates an AI node on the client for visual display.
@@ -541,6 +618,12 @@ func _activate_on_client(idx: int, node: Node) -> void:
     # Keep AI paused on client — we drive it via snapshots, not AI logic
     node.set(&"pause", true)
     node.set(&"sensorActive", false)
+    # Activate animator immediately so bones leave T-pose before any snapshot
+    # arrives. If the AI dies before the first _apply_snapshot tick (e.g. one-shot
+    # kill on spawn), Death() ragdolls from the rest pose otherwise.
+    var animator: AnimationTree = node.get(&"animator")
+    if is_instance_valid(animator):
+        animator.active = true
 
 # ---------- Activation / Deactivation Events ----------
 

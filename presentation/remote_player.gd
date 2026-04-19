@@ -41,6 +41,13 @@ var _moveFlag: Dictionary = {}
 ## re-broadcast later; cache avoids redundant .tres parses.
 var _materialCache: Dictionary[String, Material] = {}
 
+## Mirrors the remote peer's [code]gameData.isFiring[/code]. Decoded from
+## the [enum PlayerState.MoveFlag.FIRING] bit on every state snapshot in
+## [method update_state] so AI's FireDetection sees a held-trigger semi-auto
+## burst the same way it sees the host's local firing — no decay window
+## approximation needed.
+var isFiring: bool = false
+
 var audioPlayer: AudioStreamPlayer3D = null
 
 var occlusionRay: PhysicsRayQueryParameters3D = null
@@ -51,8 +58,17 @@ const OCCLUSION_CUTOFF_HZ: float = 800.0
 static var occludedBusName: StringName = &""
 static var occludedBusIdx: int = -1
 
+## Puppet AI scene held as a child. Hosts the skeleton/mesh/weapons/animator
+## refs we read out of [code]ai_patch.gd[/code]'s @onready vars. Same node as
+## [member modelRoot] — kept under both names while the codebase migrates off
+## the older "modelRoot" terminology.
+var aiInstance: Node3D = null
 var modelRoot: Node3D = null
 var animTree: AnimationTree = null
+## AnimationPlayer drives the rig bones directly per remote_player. Cleaner +
+## cheaper than driving the AnimationTree with all its blend conditions.
+var animPlayer: AnimationPlayer = null
+var currentAnim: StringName = &""
 var skeleton: Skeleton3D = null
 ## Spine bone index for aim-pitch override. Resolved once at rig load.
 var _spineBone: int = -1
@@ -68,25 +84,47 @@ var _flashlightOn: bool = false
 const SPINE_BONE_NAME: StringName = &"Spine_03"
 const HEAD_BONE_NAME: StringName = &"Head"
 const SPINE_PITCH_WEIGHT: float = 0.7
-## [MeshInstance3D] children of Skeleton3D keyed by body name.
-## After [method set_appearance] the losers are freed, leaving one entry.
-var bodyMeshes: Dictionary[String, MeshInstance3D] = {}
+## Currently loaded body — empty until first [method set_appearance]. Comparing
+## against the incoming body lets [method set_appearance] skip rig reloads when
+## only the material changes.
+var currentBody: String = ""
+## The single skinned mesh for the currently-loaded body. Each AI rig has one
+## MeshInstance3D under its Skeleton3D; we keep a direct ref for material swap.
+var meshNode: MeshInstance3D = null
 var flashNode: Node3D = null
 var activeWeapon: Node3D = null
 var activeMuzzle: Node3D = null
 
-var currentSpeed: float = 0.0
-var targetSpeed: float = 0.0
-const SPEED_IDLE: float = 0.0
-const SPEED_WALK: float = 1.0
-const SPEED_RUN: float = 2.0
-const SPEED_SPRINT: float = 3.0
-## Cached as StringNames — writing to AnimationTree via a raw String allocates
-## every physics frame.
-const ANIM_PARAM_MOVEMENT_BLEND: StringName = &"parameters/Rifle/Movement/blend_position"
-const ANIM_PARAM_COND_RIFLE: StringName = &"parameters/conditions/Rifle"
-const ANIM_PARAM_COND_PISTOL: StringName = &"parameters/conditions/Pistol"
-const ANIM_PARAM_COND_MOVEMENT: StringName = &"parameters/Rifle/conditions/Movement"
+## Per-body source scene. Each AI rig (Bandit/Guard/Military/Punisher) carries
+## a skeleton tuned to its own mesh — instantiating the source scene per-peer
+## avoids the bone-weight clamping that bit the merged super_rig.scn approach.
+const BODY_SCENES: Dictionary[String, String] = {
+    "Bandit": "res://AI/Bandit/AI_Bandit.tscn",
+    "Guard": "res://AI/Guard/AI_Guard.tscn",
+    "Military": "res://AI/Military/AI_Military.tscn",
+    "Punisher": "res://AI/Punisher/AI_Punisher.tscn",
+}
+
+## Scene-root children to purge from each AI rig instance — same set as the
+## old build_super_rig.gd EditorScript. Collision + Flash kept (used for hit
+## reg + muzzle flash).
+const SCENE_TRASH: Array[String] = ["Detector", "Raycasts", "Poles", "Gizmo", "Agent"]
+## Skeleton3D children to purge per rig.
+const SKEL_TRASH: Array[String] = [
+    "Container", "Eyes", "Backpacks",
+    "HB_Head", "HB_Torso",
+    "HB_Leg_Upper_L", "HB_Leg_Lower_L",
+    "HB_Leg_Upper_R", "HB_Leg_Lower_R",
+]
+
+## Animation clips on the AI rig's AnimationPlayer (Bandit/Guard/Military/
+## Punisher all share the same Rifle_* / Pistol_* clip names). Picked per
+## movement-flag state in [method _update_anim_blend].
+const ANIM_RIFLE_IDLE: StringName = &"Rifle_Idle"
+const ANIM_RIFLE_WALK: StringName = &"Rifle_Walk_F"
+const ANIM_RIFLE_RUN: StringName = &"Rifle_Aim_Run_F"
+const ANIM_RIFLE_SPRINT: StringName = &"Rifle_Sprint_F"
+const ANIM_BLEND: float = 0.3
 
 ## Bit 19 — ai_patch.gd adds only this bit to its fire/LOS masks, so the
 ## HitBody is invisible to Interactor, player weapons, and other systems.
@@ -111,64 +149,160 @@ func init_manager(manager: Node) -> void:
     _create_collision_body()
     add_to_group("CoopRemote")
 
-    _load_super_rig()
-
     var defaults: Dictionary = _cm.AppearanceScript.get_defaults()
     set_appearance(defaults.body, defaults.material)
 
 
-func _load_super_rig() -> void:
-    var packed: PackedScene = load(_cm.AppearanceScript.SUPER_RIG_PATH) as PackedScene
+## Instantiates the per-body AI scene as a puppet rig — keeps the AI script
+## attached but flips [code]puppetMode = true[/code] on it so all sensor /
+## navigation / animator logic short-circuits. Then strips the children we
+## don't need (sensors, hitboxes, container, root collision shape) and uses
+## the AI script's [code]@onready[/code] refs (skeleton/mesh/weapons/animator/
+## eyes/flash) directly instead of walking node paths ourselves.
+func _spawn_puppet_rig(body: String) -> bool:
+    if !BODY_SCENES.has(body):
+        return false
+    var packed: PackedScene = load(BODY_SCENES[body]) as PackedScene
     if packed == null:
-        push_warning("super rig missing — run tools/build_super_rig.gd in editor")
-        return
+        push_warning("[remote_player] failed to load AI scene for body=%s" % body)
+        return false
+    var ai: Node3D = packed.instantiate() as Node3D
+    if ai == null:
+        return false
 
-    # The super rig root is a CharacterBody3D wrapper; we only want its Body
-    # child so remote players don't carry a phantom physics body.
-    var rigRoot: Node = packed.instantiate()
-    if rigRoot == null:
-        return
-    var body: Node3D = rigRoot.get_node_or_null("Body") as Node3D
-    if body == null:
-        for child: Node in rigRoot.get_children():
-            if child is Node3D:
-                body = child
-                break
-    if body == null:
-        rigRoot.queue_free()
-        return
+    # Mark as puppet BEFORE add_child so AI._ready / Initialize see the flag
+    # and skip their normal setup paths.
+    ai.set(&"puppetMode", true)
 
-    # Collision + Flash sit at the scene root (matching AI_*.tscn); pull them
-    # into Body before freeing the wrapper so they follow the rig.
-    for siblingName: String in ["Collision", "Flash"]:
-        var sibling: Node = rigRoot.get_node_or_null(siblingName)
-        if sibling != null:
-            rigRoot.remove_child(sibling)
-            body.add_child(sibling)
+    # Inert collision body — host AI normally is a CharacterBody3D in mask
+    # layers. Our hit detection uses a separate StaticBody3D in COOP_HIT_LAYER
+    # below, not this one.
+    if ai is CollisionObject3D:
+        var co: CollisionObject3D = ai
+        co.collision_layer = 0
+        co.collision_mask = 0
+    # Drop AI / interactable groups so AISpawner pool scans + Interactor
+    # raycasts both ignore the puppet.
+    for g: StringName in ai.get_groups():
+        ai.remove_from_group(g)
 
-    rigRoot.remove_child(body)
-    rigRoot.queue_free()
-    modelRoot = body
-    add_child(modelRoot)
+    # Strip nodes we'll never use on a puppet. SCENE_TRASH lives at the rig
+    # root (sensors, navigation agent, debug gizmos). Skeleton-level junk
+    # (container, eyes, backpacks, hitbox attachments) gets stripped after
+    # the AI script's @onready refs resolve.
+    for trash: String in SCENE_TRASH:
+        var n: Node = ai.get_node_or_null(trash)
+        if n != null:
+            n.get_parent().remove_child(n)
+            n.queue_free()
+    var rootCollision: Node = ai.get_node_or_null("Collision")
+    if rootCollision != null:
+        rootCollision.get_parent().remove_child(rootCollision)
+        rootCollision.queue_free()
 
-    animTree = modelRoot.get_node_or_null("Animator") as AnimationTree
-    flashNode = modelRoot.get_node_or_null("Flash") as Node3D
-    skeleton = modelRoot.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
+    add_child(ai)
+    aiInstance = ai
+
+    # AI script's @onready vars are populated by now (after add_child).
+    # ai_patch.gd._ready already flipped set_physics_process(false) +
+    # set_process(false) since puppetMode was set before add_child fired.
+    skeleton = ai.get(&"skeleton") as Skeleton3D
+    meshNode = ai.get(&"mesh") as MeshInstance3D
+    var weapons: Node = ai.get(&"weapons")
+    flashNode = ai.get(&"flash") as Node3D
+    animTree = ai.get(&"animator") as AnimationTree
+    # Skeleton-level trash strip (container, eyes, backpacks, hit boxes).
     if skeleton != null:
+        for trash: String in SKEL_TRASH:
+            var n: Node = skeleton.get_node_or_null(trash)
+            if n != null:
+                n.get_parent().remove_child(n)
+                n.queue_free()
+        skeleton.show_rest_only = false
+        skeleton.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE
+
+    # AnimationTree is fragile — its blend conditions need to match exactly
+    # what the AI script would set per-state, otherwise the rig snaps to
+    # broken poses. AnimationPlayer drives clips directly; simpler + cheaper.
+    if animTree != null:
+        animTree.active = false
+    animPlayer = _find_anim_player(ai)
+
+    # Spine bone index lookup matches the AI script's spineData if present
+    # (saves a find_bone walk + matches whatever the rig was authored with).
+    var spineData: Variant = ai.get(&"spineData")
+    if spineData != null && spineData.get(&"bone") != null:
+        _spineBone = int(spineData.bone)
+    elif skeleton != null:
         _spineBone = skeleton.find_bone(SPINE_BONE_NAME)
-        for child: Node in skeleton.get_children():
-            if child is MeshInstance3D && child.name.begins_with("Mesh_"):
-                var key: String = child.name.substr(5)
-                bodyMeshes[key] = child
-                (child as MeshInstance3D).visible = false
-    _activate_animator()
+
+    if weapons != null:
+        for w: Node in weapons.get_children():
+            _strip_baked_weapon(w)
+
+    modelRoot = ai
+    _play_anim(ANIM_RIFLE_IDLE)
+    currentBody = body
+    return true
+
+
+## Walks the AI scene to find its AnimationPlayer. Authored layout puts it at
+## "<BodyName>/Animations" (sibling of the Skeleton3D's Armature parent).
+static func _find_anim_player(ai: Node) -> AnimationPlayer:
+    for child: Node in ai.get_children():
+        if child is Node3D:
+            var found: AnimationPlayer = child.get_node_or_null("Animations") as AnimationPlayer
+            if found != null:
+                return found
+    return null
+
+
+## Frees the current rig + its references so [method _load_body_rig] can
+## install a new one. Called when the appearance RPC names a different body.
+func _free_current_rig() -> void:
+    if is_instance_valid(aiInstance):
+        aiInstance.queue_free()
+    aiInstance = null
+    modelRoot = null
+    skeleton = null
+    animTree = null
+    animPlayer = null
+    currentAnim = &""
+    flashNode = null
+    meshNode = null
+    activeWeapon = null
+    activeMuzzle = null
+    _spineBone = -1
+    _flashlight = null
+    _flashlightMount = null
+    _flashlightOn = false
+    currentBody = ""
+
+
+## Baked weapons under super_rig retain their source RigidBody3D + "Item"
+## group, which makes Interactor pick them up through the local player's body.
+## Disable physics + groups so they're purely visual.
+static func _strip_baked_weapon(node: Node) -> void:
+    for g: StringName in node.get_groups():
+        node.remove_from_group(g)
+    if node is RigidBody3D:
+        var rb: RigidBody3D = node
+        rb.freeze = true
+        rb.collision_layer = 0
+        rb.collision_mask = 0
+    elif node is CollisionObject3D:
+        var co: CollisionObject3D = node
+        co.collision_layer = 0
+        co.collision_mask = 0
+    for child: Node in node.get_children():
+        _strip_baked_weapon(child)
 
 
 ## Equipment-sync entry point. Empty [param weaponName] clears the attachment.
 func set_active_weapon(weaponName: String) -> void:
-    if modelRoot == null:
+    if aiInstance == null:
         return
-    var weapons: Node = modelRoot.get_node_or_null("Armature/Skeleton3D/Weapons")
+    var weapons: Node = aiInstance.get(&"weapons")
     if weapons == null:
         return
 
@@ -184,22 +318,53 @@ func set_active_weapon(weaponName: String) -> void:
 
     if weaponName.is_empty() || !_is_valid_weapon_name(weaponName):
         return
-    # The super rig bakes every AI-owned weapon under Weapons as an invisible
-    # template (see tools/build_super_rig.gd); we just flip the matching one
-    # visible to preserve the authored Hand_R transforms.
+    # The AI rig already bundles every weapon its source AI carries under the
+    # Weapons BoneAttachment3D (with the authored Hand_R transform). Flip the
+    # matching one visible if present; otherwise dynamic-attach below.
     var baked: Node3D = weapons.get_node_or_null(weaponName) as Node3D
     if baked != null:
         baked.visible = true
         activeWeapon = baked
         activeMuzzle = baked.get_node_or_null("Muzzle") as Node3D
         return
-    # No baked template — load the weapon fresh and apply a class-wide grip.
     _attach_dynamic_weapon(weapons, weaponName)
 
 
-## Instantiates a weapon scene on demand for names not pre-baked into the
-## super rig. Uses a pistol/rifle fallback transform, mirroring how the
-## competitor mod handles every weapon.
+## Cache of authored hand-slot transforms harvested from every AI rig's
+## Weapons BoneAttachment3D. When a peer's loaded body doesn't bundle the
+## requested weapon, we still grip it with the original Transform3D the
+## designer authored on a sibling rig — only falls back to the class-wide
+## RIFLE / PISTOL grip when no rig bundles it (HK416, MK18, MP7, etc.).
+static var _handSlotTransforms: Dictionary[String, Transform3D] = {}
+static var _handSlotsBuilt: bool = false
+
+
+## Lazily walks every AI rig's Weapons attachment and snapshots each child's
+## Transform3D by name. Runs once per session — first dynamic-attach miss
+## triggers it, subsequent attaches read from the cache.
+static func _ensure_hand_slots() -> void:
+    if _handSlotsBuilt:
+        return
+    _handSlotsBuilt = true
+    for body: String in BODY_SCENES:
+        var bodyPath: String = BODY_SCENES[body]
+        var packed: PackedScene = load(bodyPath) as PackedScene
+        if packed == null:
+            continue
+        var inst: Node = packed.instantiate()
+        if inst == null:
+            continue
+        var weaponsNode: Node = inst.get_node_or_null("%s/Armature/Skeleton3D/Weapons" % body)
+        if weaponsNode != null:
+            for w: Node in weaponsNode.get_children():
+                if w is Node3D && !_handSlotTransforms.has(w.name):
+                    _handSlotTransforms[w.name] = (w as Node3D).transform
+        inst.free()
+
+
+## Instantiates a weapon scene on demand for names not bundled in this peer's
+## rig. Uses the authored hand-slot transform from another AI rig if available,
+## else a class-wide pistol/rifle fallback.
 func _attach_dynamic_weapon(weapons: Node, weaponName: String) -> void:
     var path: String = "res://Items/Weapons/%s/%s.tscn" % [weaponName, weaponName]
     if !_cm.AppearanceScript.is_visually_allowed(path):
@@ -214,18 +379,23 @@ func _attach_dynamic_weapon(weapons: Node, weaponName: String) -> void:
         return
     weapon.name = &"_coop_dyn"
     weapon.set_script(null)
-    if weapon is RigidBody3D:
-        var rb: RigidBody3D = weapon
-        rb.freeze = true
-        rb.collision_layer = 0
-        rb.collision_mask = 0
-    var isPistol: bool = false
-    if weapon.has_method(&"get") && weapon.get(&"slotData") != null:
-        var data: Resource = weapon.slotData.itemData if weapon.slotData != null else null
-        if data != null && data.get(&"weaponType") == "Pistol":
-            isPistol = true
+    _strip_baked_weapon(weapon)
+
+    var slot: Transform3D = Transform3D.IDENTITY
+    var slotFound: bool = false
+    _ensure_hand_slots()
+    if _handSlotTransforms.has(weaponName):
+        slot = _handSlotTransforms[weaponName]
+        slotFound = true
+    if !slotFound:
+        var isPistol: bool = false
+        if weapon.has_method(&"get") && weapon.get(&"slotData") != null:
+            var data: Resource = weapon.slotData.itemData if weapon.slotData != null else null
+            if data != null && data.get(&"weaponType") == "Pistol":
+                isPistol = true
+        slot = FALLBACK_PISTOL_GRIP if isPistol else FALLBACK_RIFLE_GRIP
     if weapon is Node3D:
-        (weapon as Node3D).transform = FALLBACK_PISTOL_GRIP if isPistol else FALLBACK_RIFLE_GRIP
+        (weapon as Node3D).transform = slot
     weapons.add_child(weapon)
     activeWeapon = weapon as Node3D
     activeMuzzle = weapon.get_node_or_null("Muzzle") as Node3D
@@ -247,33 +417,29 @@ static func _is_valid_weapon_name(name: String) -> bool:
 func set_appearance(body: String, materialPath: String) -> void:
     if !_cm.AppearanceScript.is_valid({"body": body, "material": materialPath}):
         return
-    if modelRoot == null:
-        return
 
-    # Appearance is picked once per world; free the three losers so the remote
-    # doesn't carry unused skinned meshes on the GPU.
-    var losers: Array[String] = []
-    for key: String in bodyMeshes:
-        if key != body:
-            losers.append(key)
-    for key: String in losers:
-        var mesh: MeshInstance3D = bodyMeshes[key]
-        if is_instance_valid(mesh):
-            mesh.queue_free()
-        bodyMeshes.erase(key)
+    # Body change → free old rig + load new. Material change only → keep rig,
+    # just re-apply the material below. set_appearance fires twice on spawn
+    # (default body, then cached/RPC body) so the second call may swap the rig.
+    if body != currentBody:
+        _free_current_rig()
+        if !_spawn_puppet_rig(body):
+            return
 
-    var selected: MeshInstance3D = bodyMeshes.get(body)
-    if selected == null:
+    if !is_instance_valid(meshNode):
         return
-    selected.visible = true
     var mat: Material = _load_material(materialPath)
-    if mat != null:
-        for i: int in selected.get_surface_override_material_count():
-            selected.set_surface_override_material(i, mat)
+    if mat == null:
+        return
+    var surfaceCount: int = meshNode.mesh.get_surface_count() if meshNode.mesh != null else 0
+    for i: int in surfaceCount:
+        meshNode.set_surface_override_material(i, mat)
 
 
 func _load_material(path: String) -> Material:
-    var cached: Material = _materialCache.get(path)
+    var cached: Material = null
+    if _materialCache.has(path):
+        cached = _materialCache[path]
     if cached != null:
         return cached
     var mat: Material = load(path) as Material
@@ -282,14 +448,15 @@ func _load_material(path: String) -> Material:
     return mat
 
 
-func _activate_animator() -> void:
-    if animTree == null:
+## Plays [param clip] on the rig's AnimationPlayer with a fixed crossfade.
+## Skips when the clip is already playing to avoid restarting the same loop.
+func _play_anim(clip: StringName) -> void:
+    if animPlayer == null || clip == currentAnim:
         return
-    animTree.active = true
-    animTree[ANIM_PARAM_COND_RIFLE] = true
-    animTree[ANIM_PARAM_COND_PISTOL] = false
-    animTree[ANIM_PARAM_COND_MOVEMENT] = true
-    animTree[ANIM_PARAM_MOVEMENT_BLEND] = SPEED_IDLE
+    if !animPlayer.has_animation(clip):
+        return
+    animPlayer.play(clip, ANIM_BLEND)
+    currentAnim = clip
 
 
 func _create_collision_body() -> void:
@@ -366,7 +533,9 @@ func die() -> void:
     set_meta(&"health", 0)
     nameLabel.text = "%s [DEAD]" % displayName
     _lastRenderedHealth = 0
-    # Stop the anim tree before ragdoll so they don't fight over bone poses.
+    # Stop the animator before ragdoll so they don't fight over bone poses.
+    if animPlayer != null:
+        animPlayer.stop()
     if animTree != null:
         animTree.active = false
     _start_ragdoll()
@@ -437,8 +606,18 @@ func _apply_flashlight() -> void:
 ## Bends the spine to match the remote's camera pitch so aiming direction
 ## reads at a glance. Mirrors AI.Spine() but without the full look-at rig —
 ## we only have the pitch scalar, not a 3D target point.
+##
+## Skip-on-zero: applying a "rotate by 0" override still REPLACES animator's
+## pose for Spine_03 every frame. With native AI rigs the animator hasn't
+## necessarily ticked when the first pitch sample lands, so the pose we read
+## back can be the rest pose — pinning spine to the rest pose stretches the
+## torso mesh because Arm/Head bones still animate relative to it. Until we
+## actually receive a non-zero pitch (peer aiming up/down), let the animator
+## drive Spine_03 unmodified.
 func _apply_spine_pitch(delta: float) -> void:
     if skeleton == null || _spineBone < 0:
+        return
+    if absf(targetRotationX) < 0.001 && absf(_spinePitch) < 0.001:
         return
     _spinePitch = lerpf(_spinePitch, targetRotationX, clampf(delta * 8.0, 0.0, 1.0))
     var pose: Transform3D = skeleton.get_bone_global_pose_no_override(_spineBone)
@@ -446,27 +625,29 @@ func _apply_spine_pitch(delta: float) -> void:
     skeleton.set_bone_global_pose_override(_spineBone, pose, 1.0, true)
 
 
-## Flags → target blend position (idle/walk/run/sprint). Lerp hides the 20 Hz
-## packet cadence so transitions stay smooth.
-func _update_anim_blend(delta: float) -> void:
-    if animTree == null:
+## Animation tracks on the AI rig call PlayFootstep / PlayCombat / etc on the
+## scene root via NodePath "..". With puppetMode the AI script is still
+## attached, so those methods exist natively — no stubs needed here.
+
+## Flags → named animation clip. Plays Rifle_Idle / Walk / Run / Sprint on the
+## AnimationPlayer directly — swapped lazily via [method _play_anim].
+func _update_anim_blend(_delta: float) -> void:
+    if animPlayer == null:
         return
     var flags: int = moveFlags
     var moving: bool = (flags & _moveFlag.MOVING) != 0
     var walking: bool = (flags & _moveFlag.WALKING) != 0
     var running: bool = (flags & _moveFlag.RUNNING) != 0
 
-    if !moving:
-        targetSpeed = SPEED_IDLE
-    elif running:
-        targetSpeed = SPEED_SPRINT
-    elif walking:
-        targetSpeed = SPEED_WALK
-    else:
-        targetSpeed = SPEED_RUN
-
-    currentSpeed = lerpf(currentSpeed, targetSpeed, clampf(delta * 8.0, 0.0, 1.0))
-    animTree[ANIM_PARAM_MOVEMENT_BLEND] = currentSpeed
+    var clip: StringName = ANIM_RIFLE_IDLE
+    if moving:
+        if running:
+            clip = ANIM_RIFLE_SPRINT
+        elif walking:
+            clip = ANIM_RIFLE_WALK
+        else:
+            clip = ANIM_RIFLE_RUN
+    _play_anim(clip)
 
 
 ## [param rot] packs (yaw=x, pitch=y) to reuse the existing 3-float RPC slot.
@@ -475,6 +656,7 @@ func update_state(pos: Vector3, rot: Vector3, flags: int) -> void:
     targetRotationY = rot.x
     targetRotationX = rot.y
     moveFlags = flags
+    isFiring = (flags & _moveFlag.FIRING) != 0
 
 
 func play_remote_audio(audioPath: String) -> void:
@@ -587,3 +769,5 @@ func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> v
         flashNode.global_position = activeMuzzle.global_position
         if flashNode.has_method(&"Activate"):
             flashNode.Activate()
+
+

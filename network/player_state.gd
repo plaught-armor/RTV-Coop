@@ -18,6 +18,11 @@ enum MoveFlag {
     CROUCHING = 8,
     GROUNDED = 16,
     FLASHLIGHT = 32,
+    ## Mirrors local [code]gameData.isFiring[/code] continuously so AI's
+    ## FireDetection on the host sees a remote peer firing the same way it
+    ## sees the host firing. Cheaper than a separate sticky-decay flag and
+    ## stays accurate during semi-auto bursts (whole trigger-hold window).
+    FIRING = 64,
 }
 
 
@@ -53,10 +58,14 @@ class PeerBuffer extends RefCounted:
             slots[i] = Snapshot.new()
 
 
-    ## Pushes a snapshot into the ring. Overwrites oldest if full.
-    func push(snap: Snapshot) -> void:
+    ## Mutates the next ring slot in-place — avoids per-RPC allocation.
+    func push_fields(timestamp: float, position: Vector3, rotation: Vector3, flags: int) -> void:
         var writeIdx: int = (head + count) % capacity
-        slots[writeIdx] = snap
+        var slot: Snapshot = slots[writeIdx]
+        slot.timestamp = timestamp
+        slot.position = position
+        slot.rotation = rotation
+        slot.flags = flags
         if count < capacity:
             count += 1
         else:
@@ -85,6 +94,18 @@ var sequenceNumber: int = 0
 ## Dictionary is appropriate here: player count is dynamic (connect/disconnect).
 var peerBuffers: Dictionary[int, PeerBuffer] = {}
 
+## Last broadcast — used to skip the RPC when player hasn't moved or rotated.
+## Resets on session start so the first broadcast always fires.
+var _lastBroadcastPos: Vector3 = Vector3.INF
+var _lastBroadcastRot: Vector3 = Vector3.INF
+var _lastBroadcastFlags: int = -1
+const POS_EPSILON: float = 0.005
+const ROT_EPSILON: float = 0.001
+## Force a broadcast at least every Nth gated tick so peers don't time out the
+## interp buffer when a player stands still for many seconds.
+const FORCE_KEEPALIVE_TICKS: int = 60
+var _ticksSinceBroadcast: int = 0
+
 ## Last weapon name we broadcasted to peers. Used to rate-limit the equipment
 ## RPC to actual changes only — polling happens every [member EQUIPMENT_CHECK_TICKS]
 ## but the network path only fires when the value diverges.
@@ -97,13 +118,31 @@ const EQUIPMENT_CHECK_TICKS: int = 60
 # ---------- Broadcast ----------
 
 
-## Called by the controller patch every physics tick. Throttles to 20 Hz before sending.
+## Called by the controller patch every physics tick. Throttles to 20 Hz +
+## skips the RPC when the local player hasn't moved/rotated/changed flags
+## since the last send. Forces a keepalive every FORCE_KEEPALIVE_TICKS
+## gated frames so a long-stationary player still refreshes the peer's
+## interp buffer.
 func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
 
     if Engine.get_physics_frames() % SEND_EVERY_N_TICKS != 0:
         return
+
+    _ticksSinceBroadcast += 1
+    var changed: bool = (
+        flags != _lastBroadcastFlags
+        || position.distance_squared_to(_lastBroadcastPos) > POS_EPSILON * POS_EPSILON
+        || rot.distance_squared_to(_lastBroadcastRot) > ROT_EPSILON * ROT_EPSILON
+    )
+    if !changed && _ticksSinceBroadcast < FORCE_KEEPALIVE_TICKS:
+        return
+
+    _lastBroadcastPos = position
+    _lastBroadcastRot = rot
+    _lastBroadcastFlags = flags
+    _ticksSinceBroadcast = 0
     sequenceNumber += 1
 
     receive_position.rpc(sequenceNumber, position, rot, flags)
@@ -133,7 +172,7 @@ func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> 
         peerBuffers[peerId] = buf
 
     buf.seq = seq
-    buf.push(Snapshot.new(Time.get_ticks_msec() / 1000.0, position, rot, flags))
+    buf.push_fields(Time.get_ticks_msec() / 1000.0, position, rot, flags)
 
 # ---------- Interpolation ----------
 
@@ -197,43 +236,120 @@ func _physics_process(_delta: float) -> void:
 # ---------- Utility ----------
 
 
-## Broadcasts a footstep sound to all remote peers. Called by the controller patch.
-## [param audioPath] is the resource path of the [AudioEvent] to play.
+## Surface enum — index in this array is the int sent over the wire. Must
+## stay stable across vmz versions or peers desync surface lookup. Append
+## only; never reorder. Index 0 = Generic fallback for unknown surfaces.
+const SURFACES: Array[String] = [
+    "Generic", "Grass", "Dirt", "Asphalt", "Rock", "Wood",
+    "Metal", "Concrete", "Snow", "Water", "Border", "Cables",
+    "Target", "Flesh",
+]
+
+
+## Nested match on first char, then second only when first is ambiguous
+## (C/G/W). Skips substr() alloc on every call.
+static func _surface_id(s: String) -> int:
+    if s.is_empty():
+        return 0
+    match s[0]:
+        "A": return 3   # Asphalt
+        "B": return 10  # Border
+        "D": return 2   # Dirt
+        "F": return 13  # Flesh
+        "M": return 6   # Metal
+        "R": return 4   # Rock
+        "S": return 8   # Snow
+        "T": return 12  # Target
+        "C":
+            return 11 if s[1] == "a" else 7   # Cables vs Concrete
+        "G":
+            return 1 if s[1] == "r" else 0    # Grass vs Generic
+        "W":
+            return 9 if s[1] == "a" else 5    # Water vs Wood
+    return 0
+
+
+static func _surface_name(id: int) -> String:
+    if id < 0 || id >= SURFACES.size():
+        return "Generic"
+    return SURFACES[id]
+
+
+## Audio path → int registry. Built once at module load by walking
+## [AudioLibrary] + every weapon's fire/tail clips. Both peers preload the
+## same source resources, so [member _audioPathById] is identical across
+## peers and we can ship int IDs over the wire instead of res:// strings.
+static var _audioPathById: Dictionary[int, String] = {}
+static var _audioRegistryReady: bool = false
+
+
+static func _ensure_audio_registry() -> void:
+    if _audioRegistryReady:
+        return
+    _audioRegistryReady = true
+    var lib: Resource = load("res://Resources/AudioLibrary.tres") as Resource
+    if lib != null:
+        for prop: Dictionary in lib.get_property_list():
+            var v: Variant = lib.get(prop.name)
+            if v is Resource && v.resource_path != "":
+                _audioPathById[v.resource_path.hash()] = v.resource_path
+    var db: Node = Engine.get_main_loop().root.get_node_or_null("Database") if Engine.get_main_loop() != null else null
+    if db != null:
+        for child: Node in db.get_children():
+            for prop: Dictionary in child.get_property_list():
+                var v: Variant = child.get(prop.name)
+                if v is Resource && v.resource_path.begins_with("res://Resources/Audio"):
+                    _audioPathById[v.resource_path.hash()] = v.resource_path
+
+
+static func _audio_id(path: String) -> int:
+    if path.is_empty():
+        return 0
+    var h: int = path.hash()
+    if !_audioPathById.has(h):
+        _audioPathById[h] = path
+    return h
+
+
+static func _audio_path(id: int) -> String:
+    if id == 0:
+        return ""
+    _ensure_audio_registry()
+    if _audioPathById.has(id):
+        return _audioPathById[id]
+    return ""
+
+
 func broadcast_footstep(audioPath: String) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
-    receive_footstep.rpc(audioPath)
+    receive_footstep.rpc(_audio_id(audioPath))
 
 
-## Receives a remote player's footstep event and plays it spatially.
 @rpc("any_peer", "call_remote", "unreliable")
-func receive_footstep(audioPath: String) -> void:
+func receive_footstep(audioId: int) -> void:
     var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
-    remoteNode.play_remote_audio(audioPath)
+    var path: String = _audio_path(audioId)
+    if !path.is_empty():
+        remoteNode.play_remote_audio(path)
 
 
-## Broadcasts a weapon fire event to all remote peers. Called by the controller patch
-## on the rising edge of [code]gameData.isFiring[/code].
-## [param fireAudio] and [param tailAudio] are resource paths of [AudioEvent]s.
-## [param showFlash] is false for suppressed weapons.
-## [param hitPoint], [param hitNormal], [param hitSurface] describe the bullet impact.
 func broadcast_fire_event(fireAudio: String, tailAudio: String, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurface: String = "") -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
-    receive_fire_event.rpc(fireAudio, tailAudio, showFlash, hitPoint, hitNormal, hitSurface)
+    receive_fire_event.rpc(_audio_id(fireAudio), _audio_id(tailAudio), showFlash, hitPoint, hitNormal, _surface_id(hitSurface))
 
 
-## Receives a remote player's fire event — plays gunshot audio, muzzle flash, and bullet impact.
 @rpc("any_peer", "call_remote", "unreliable")
-func receive_fire_event(fireAudio: String, tailAudio: String, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurface: String = "") -> void:
+func receive_fire_event(fireAudioId: int, tailAudioId: int, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurfaceId: int = 0) -> void:
     var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
-    remoteNode.play_fire_event(fireAudio, tailAudio, showFlash)
+    remoteNode.play_fire_event(_audio_path(fireAudioId), _audio_path(tailAudioId), showFlash)
     if hitPoint != Vector3.ZERO:
-        remoteNode.spawn_bullet_impact(hitPoint, hitNormal, hitSurface)
+        remoteNode.spawn_bullet_impact(hitPoint, hitNormal, _surface_name(hitSurfaceId))
 
 
 ## Broadcasts health to all remote peers. Called from [method _physics_process] at ~0.5 Hz.
@@ -298,18 +414,17 @@ func receive_knife_attack(isSlash: bool) -> void:
 func broadcast_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
-    receive_knife_hit.rpc(hitPoint, hitNormal, hitSurface, isFlesh, attackId)
+    receive_knife_hit.rpc(hitPoint, hitNormal, _surface_id(hitSurface), isFlesh, attackId)
 
 
-## Receives a remote player's knife hit — spawns decal at impact point.
 @rpc("any_peer", "call_remote", "unreliable")
-func receive_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
+func receive_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurfaceId: int, isFlesh: bool, attackId: int) -> void:
     if !is_instance_valid(_cm):
         return
     var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
-    remoteNode.spawn_knife_impact(hitPoint, hitNormal, hitSurface, isFlesh, attackId)
+    remoteNode.spawn_knife_impact(hitPoint, hitNormal, _surface_name(hitSurfaceId), isFlesh, attackId)
 
 
 ## Broadcasts a grenade throw to all remote peers. Called by grenade_rig_patch
@@ -428,6 +543,8 @@ static func encode_flags(data: GameData) -> int:
         flags |= MoveFlag.GROUNDED
     if data.flashlight:
         flags |= MoveFlag.FLASHLIGHT
+    if data.isFiring:
+        flags |= MoveFlag.FIRING
     return flags
 
 

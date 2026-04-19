@@ -194,7 +194,7 @@ func _physics_process(_delta: float) -> void:
     # Send to each client on this map individually (not .rpc() which goes to all peers).
     for peerId: int in clientPeers:
         _cm.aiState.receive_ai_batch.rpc_id(
-            peerId, batch[0], batch[1], batch[2], batch[3], batch[4], batch[5], batch[6], batch[7]
+            peerId, batch[0], batch[1], batch[2], batch[3], batch[4]
         )
 
 
@@ -363,8 +363,10 @@ const _CP_FLAGS: int = 3
 func update_client_position(peerId: int, pos: Vector3, camPos: Vector3, rot: Vector3, flags: int) -> void:
     if proxyGameData == null:
         return
-    var slot: Array = clientPositions.get(peerId)
-    if slot == null:
+    var slot: Array = []
+    if clientPositions.has(peerId):
+        slot = clientPositions[peerId]
+    if slot.is_empty():
         slot = [pos, camPos, rot, flags]
         clientPositions[peerId] = slot
     else:

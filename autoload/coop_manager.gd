@@ -395,7 +395,9 @@ func on_peer_disconnected(peerId: int) -> void:
     peerSteamIDs.erase(peerId)
     cachedAppearances.erase(peerId)
     cachedEquipment.erase(peerId)
-    var peerMap: String = peerMaps.get(peerId, "")
+    var peerMap: String = ""
+    if peerMaps.has(peerId):
+        peerMap = peerMaps[peerId]
     peerMaps.erase(peerId)
     # Remove from headless map if applicable
     if isHost && !peerMap.is_empty() && peerMap in headlessMaps:
@@ -486,7 +488,9 @@ func get_local_name() -> String:
 
 ## Returns the display name for [param peerId], or a fallback.
 func get_peer_name(peerId: int) -> String:
-    return peerNames.get(peerId, "Player_%d" % peerId)
+    if peerNames.has(peerId):
+        return peerNames[peerId]
+    return "Player_%d" % peerId
 
 
 ## RPC: receives a peer's display name and Steam ID.
@@ -538,10 +542,14 @@ func on_avatar_binary_received(steamID: String, w: int, h: int, rgba: PackedByte
 
 ## Returns the cached avatar texture for a peer, or null.
 func get_peer_avatar(peerId: int) -> ImageTexture:
-    var steamID: String = peerSteamIDs.get(peerId, "")
+    var steamID: String = ""
+    if peerSteamIDs.has(peerId):
+        steamID = peerSteamIDs[peerId]
     if steamID.is_empty():
         return null
-    return avatarCache.get(steamID)
+    if !avatarCache.has(steamID):
+        return null
+    return avatarCache[steamID]
 
 # ---------- Remote Player Management ----------
 
@@ -592,7 +600,9 @@ func on_remote_node_exiting(peerId: int) -> void:
 
 
 func get_remote_player_node(peerId: int) -> Node3D:
-    return remoteNodes.get(peerId)
+    if !remoteNodes.has(peerId):
+        return null
+    return remoteNodes[peerId]
 
 
 func ensure_all_spawned() -> void:
@@ -1583,18 +1593,17 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
 
 
 ## Client entry point that gates scene load behind the character-creation picker.
-## If no appearance sidecar exists yet the picker is shown first; on confirm the
-## scene loads, on cancel the client disconnects from the host. Without coopUI
-## (headless / debug boot) we fall back to defaults + auto-load.
+## Always shows the picker so the client confirms appearance before entering the
+## host's world — even with a stale appearance.json from a prior session, the
+## player should still see "Confirm" before being teleported into gameplay.
+## Without coopUI (headless / debug boot) we fall back to defaults + auto-load.
 func _client_start_load() -> void:
-    if has_local_appearance():
+    if !is_instance_valid(coopUI):
+        if !has_local_appearance():
+            save_local_appearance(AppearanceScript.get_defaults())
         _auto_load_game()
         return
-    if is_instance_valid(coopUI):
-        coopUI.show_character_picker(_on_client_picker_confirm, _on_client_picker_cancel)
-    else:
-        save_local_appearance(AppearanceScript.get_defaults())
-        _auto_load_game()
+    coopUI.show_character_picker(_on_client_picker_confirm, _on_client_picker_cancel)
 
 
 func _on_client_picker_confirm(_entry: Dictionary = {}) -> void:
@@ -1635,7 +1644,9 @@ func _receive_client_character(clientSteamId: String, fileData: PackedByteArray)
     if !isHost:
         return
     var senderId: int = multiplayer.get_remote_sender_id()
-    var trustedSteamId: String = peerSteamIDs.get(senderId, "")
+    var trustedSteamId: String = ""
+    if peerSteamIDs.has(senderId):
+        trustedSteamId = peerSteamIDs[senderId]
     if trustedSteamId.is_empty() || fileData.is_empty():
         return
     if fileData.size() > 1048576:
@@ -1667,8 +1678,12 @@ func send_character_to_client(peerId: int, clientSteamId: String) -> void:
 
 
 ## Client receives their character file from the host and writes it locally.
+## Default param value prevents the "expected 1 argument(s), called with 0"
+## RPC dispatch error that fires when an empty PackedByteArray() arrives —
+## Godot's RPC layer collapses empty packed arrays so the receiver's arg
+## count appears to be 0.
 @rpc("authority", "call_remote", "reliable")
-func _receive_host_character(fileData: PackedByteArray) -> void:
+func _receive_host_character(fileData: PackedByteArray = PackedByteArray()) -> void:
     if !is_instance_valid(loader):
         return
     if fileData.is_empty():
@@ -1700,14 +1715,18 @@ func is_peer_on_same_map(peerId: int) -> bool:
     var localMap: String = get_current_map()
     if localMap.is_empty():
         return false
-    return peerMaps.get(peerId, "") == localMap
+    if !peerMaps.has(peerId):
+        return false
+    return peerMaps[peerId] == localMap
 
 
 ## RPC: peer broadcasts which map they are on.
 @rpc("any_peer", "call_remote", "reliable")
 func sync_peer_map(mapPath: String) -> void:
     var senderId: int = multiplayer.get_remote_sender_id()
-    var oldMap: String = peerMaps.get(senderId, "")
+    var oldMap: String = ""
+    if peerMaps.has(senderId):
+        oldMap = peerMaps[senderId]
     peerMaps[senderId] = mapPath
     var localMap: String = get_current_map()
     _log("Peer %d map: %s" % [senderId, mapPath])
@@ -1735,6 +1754,19 @@ func sync_peer_map(mapPath: String) -> void:
 # ---------- Headless Map Management ----------
 
 
+## Non-gameplay scenes a peer may sit on briefly (Menu before character
+## creation, Death between respawns). No AI/world state to simulate, and Menu
+## audio bleeds through the SubViewport into host's Master bus.
+const _HEADLESS_SKIP_SCENES: Array[String] = [
+    "res://Scenes/Menu.tscn",
+    "res://Scenes/Death.tscn",
+]
+
+
+static func _is_headless_eligible_map(mapPath: String) -> bool:
+    return !(mapPath in _HEADLESS_SKIP_SCENES)
+
+
 ## Creates or updates headless maps when a peer changes maps.
 func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
     var localMap: String = get_current_map()
@@ -1756,7 +1788,10 @@ func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
     # a 20-40MB PackedScene. Subsequent peers joining the same map before the
     # load completes just add to clientPeers; they'll see AI state once the
     # scene finalizes.
-    if !newMap.is_empty() && newMap != localMap:
+    # Skip non-gameplay scenes (Menu/Death/CharacterCreation) — they have no
+    # AI/world state worth simulating, and Menu in particular plays music that
+    # would bleed into the host's audio bus through the SubViewport.
+    if !newMap.is_empty() && newMap != localMap && _is_headless_eligible_map(newMap):
         if newMap not in headlessMaps:
             var hmap: Node = HeadlessMapScript.new()
             hmap.name = "Headless_%s" % newMap.get_file().get_basename()
@@ -1863,7 +1898,9 @@ func _apply_handoff_state(snap: Dictionary) -> void:
 
 ## Forwards a client's position to the appropriate headless map.
 func forward_position_to_headless(peerId: int, pos: Vector3, camPos: Vector3, rot: Vector3, flags: int) -> void:
-    var peerMap: String = peerMaps.get(peerId, "")
+    var peerMap: String = ""
+    if peerMaps.has(peerId):
+        peerMap = peerMaps[peerId]
     if peerMap.is_empty() || peerMap not in headlessMaps:
         return
     headlessMaps[peerMap].update_client_position(peerId, pos, camPos, rot, flags)

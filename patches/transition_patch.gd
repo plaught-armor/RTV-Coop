@@ -50,6 +50,13 @@ func Interact() -> void:
             gameData.previousMap = currentMap
             gameData.energy -= energy
             gameData.hydration -= hydration
+            # Client must save its own character to the per-world coop path
+            # before the scene change so the next map's LoadCharacter restores
+            # the same loadout. Without this, equipment slots reset on every
+            # transition. (Vanilla Interact's save block was skipped to avoid
+            # polluting user://; loader_patch.gd already routes saves to
+            # playerSavePath which is per-world for coop sessions.)
+            Loader.SaveCharacter()
             Loader.LoadScene(nextMap)
         print("[TX] Interact end (client)")
         return
