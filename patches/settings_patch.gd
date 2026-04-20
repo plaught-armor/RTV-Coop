@@ -32,24 +32,24 @@ func init_manager(manager: Node) -> void:
 ## may construct their MP tab BEFORE coop_manager.inject_manager has reached
 ## them (or in the menu case, never reaches them at all because PATH_SETTINGS
 ## targets the in-game Core/UI/Settings only). Walks root once on demand.
-func _ensure_cm() -> void:
+func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
-        return
+        return true
     var root: Node = get_tree().root if get_tree() != null else null
     if root == null:
-        return
+        return false
     for child: Node in root.get_children():
         if child.has_meta(&"is_coop_manager"):
             _cm = child
-            return
+            return true
+    return false
 
 
 const _DEFAULT_PORT_FALLBACK: int = 9050
 
 
 func _default_port() -> int:
-    _ensure_cm()
-    return _cm.DEFAULT_PORT if is_instance_valid(_cm) else _DEFAULT_PORT_FALLBACK
+    return _cm.DEFAULT_PORT if _ensure_cm() else _DEFAULT_PORT_FALLBACK
 
 
 func _ready() -> void:

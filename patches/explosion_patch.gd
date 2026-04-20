@@ -14,28 +14,27 @@ var _cm: Node
 const COOP_HIT_LAYER: int = 1 << 19
 
 
-func _ensure_cm() -> void:
+func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
-        return
+        return true
     var root: Node = get_tree().root if get_tree() != null else null
     if root == null:
-        return
+        return false
     for child: Node in root.get_children():
         if child.has_meta(&"is_coop_manager"):
             _cm = child
-            return
+            return true
+    return false
 
 
 func Explode() -> void:
-    _ensure_cm()
-    if is_instance_valid(_cm) && _cm.is_session_active():
+    if _ensure_cm() && _cm.is_session_active():
         area.collision_mask |= COOP_HIT_LAYER
     super.Explode()
 
 
 func CheckOverlap() -> void:
-    _ensure_cm()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.CheckOverlap()
         return
 
@@ -51,8 +50,7 @@ func CheckOverlap() -> void:
 
 
 func CheckLOS(target) -> void:
-    _ensure_cm()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.CheckLOS(target)
         return
 

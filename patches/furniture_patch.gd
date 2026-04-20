@@ -10,22 +10,22 @@ extends "res://Scripts/Furniture.gd"
 var _cm: Node
 
 
-func _ensure_cm() -> void:
+func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
-        return
+        return true
     var root: Node = get_tree().root if get_tree() != null else null
     if root == null:
-        return
+        return false
     for child: Node in root.get_children():
         if child.has_meta(&"is_coop_manager"):
             _cm = child
-            return
+            return true
+    return false
 
 
 func StartMove() -> void:
     super.StartMove()
-    _ensure_cm()
-    if _cm == null || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         return
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene) || !is_instance_valid(owner):
@@ -39,8 +39,7 @@ func StartMove() -> void:
 
 func ResetMove() -> void:
     super.ResetMove()
-    _ensure_cm()
-    if _cm == null || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         return
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene) || !is_instance_valid(owner):

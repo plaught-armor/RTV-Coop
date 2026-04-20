@@ -15,9 +15,7 @@ func init_manager(manager: Node) -> void:
 func _ready() -> void:
     # _cm may already be set by inject_manager, but AISpawner._ready() runs
     # before inject_manager, so try lazy lookup as fallback.
-    _ensure_cm()
-
-    if _cm == null || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super._ready()
         return
 
@@ -80,8 +78,7 @@ func _assign_sync_ids() -> void:
 ## Overrides spawn distance check to consider ALL player positions.
 ## Clients: no-op (host broadcasts activation via ai_state).
 func SpawnWanderer() -> void:
-    _ensure_cm()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.SpawnWanderer()
         return
     if !_cm.isHost:
@@ -115,8 +112,7 @@ func SpawnWanderer() -> void:
 ## Host spawns a guard and broadcasts activation to clients.
 ## Clients: no-op.
 func SpawnGuard() -> void:
-    _ensure_cm()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.SpawnGuard()
         return
     if !_cm.isHost:
@@ -130,8 +126,7 @@ func SpawnGuard() -> void:
 ## Host spawns a hider and broadcasts activation to clients.
 ## Clients: no-op.
 func SpawnHider() -> void:
-    _ensure_cm()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.SpawnHider()
         return
     if !_cm.isHost:
@@ -145,8 +140,7 @@ func SpawnHider() -> void:
 ## Host spawns a minion and broadcasts activation to clients.
 ## Clients: no-op.
 func SpawnMinion(spawnPosition: Vector3) -> void:
-    _ensure_cm()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.SpawnMinion(spawnPosition)
         return
     if !_cm.isHost:
@@ -160,8 +154,7 @@ func SpawnMinion(spawnPosition: Vector3) -> void:
 ## Host spawns the boss and broadcasts activation to clients.
 ## Clients: no-op.
 func SpawnBoss(spawnPosition: Vector3) -> void:
-    _ensure_cm()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.SpawnBoss(spawnPosition)
         return
     if !_cm.isHost:
@@ -210,16 +203,17 @@ func _min_player_distance(pos: Vector3) -> float:
 
 
 ## Lazy CoopManager lookup — Metro autoloads aren't in ProjectSettings.
-func _ensure_cm() -> void:
+func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
-        return
+        return true
     var root: Node = get_tree().root if get_tree() != null else null
     if root == null:
-        return
+        return false
     for child: Node in root.get_children():
         if child.has_meta(&"is_coop_manager"):
             _cm = child
-            return
+            return true
+    return false
 
 
 func _log(msg: String) -> void:
