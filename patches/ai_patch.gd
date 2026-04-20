@@ -15,7 +15,7 @@
 ## Original behaviour is 100% preserved when not in a co-op session.
 extends "res://Scripts/AI.gd"
 
-const Perf: GDScript = preload("res://mod/network/perf.gd")
+const _Perf: GDScript = preload("res://mod/network/perf.gd")
 
 
 var _cm: Node
@@ -192,7 +192,7 @@ func Parameters(delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Parameters(delta)
         return
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
 
     LKL = lerp(LKL, lastKnownLocation, delta * LKLSpeed)
 
@@ -232,7 +232,7 @@ func Parameters(delta: float) -> void:
     elif playerDistance3D > 50:
         sensorCycle = 0.5
         LKLSpeed = 1.0
-    Perf.stop("ai.Parameters", _pt)
+    _Perf.stop("ai.Parameters", _pt)
 
 # ---------- Sensor ----------
 
@@ -241,7 +241,7 @@ func Sensor(delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Sensor(delta)
         return
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
     sensorTimer += delta
     if sensorTimer > sensorCycle:
         if playerDistance3D <= 200.0:
@@ -262,7 +262,7 @@ func Sensor(delta: float) -> void:
             Hearing()
 
         sensorTimer = 0.0
-    Perf.stop("ai.Sensor", _pt)
+    _Perf.stop("ai.Sensor", _pt)
 
 
 ## Returns the camera/eye position of the currently targeted player.
@@ -282,9 +282,9 @@ func _get_target_camera_position() -> Vector3:
 
 
 func LOSCheck(target: Vector3) -> void:
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
     if !is_instance_valid(_cm) || !_cm.is_session_active():
-        Perf.stop("ai.LOSCheck", _pt)
+        _Perf.stop("ai.LOSCheck", _pt)
         super.LOSCheck(target)
         return
 
@@ -311,11 +311,11 @@ func LOSCheck(target: Vector3) -> void:
                 Decision()
             elif currentState == State.Ambush:
                 ChangeState("Combat")
-            Perf.stop("ai.LOSCheck", _pt)
+            _Perf.stop("ai.LOSCheck", _pt)
             return
 
     playerVisible = false
-    Perf.stop("ai.LOSCheck", _pt)
+    _Perf.stop("ai.LOSCheck", _pt)
 
 # ---------- Hearing ----------
 
@@ -355,7 +355,7 @@ func FireDetection(delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.FireDetection(delta)
         return
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
 
     # Host's local player firing
     if gameData.isFiring && !playerVisible:
@@ -402,7 +402,7 @@ func FireDetection(delta: float) -> void:
             extraVisibility = 0.0
             fireDetectionTimer = 0.0
             fireDetected = false
-    Perf.stop("ai.FireDetection", _pt)
+    _Perf.stop("ai.FireDetection", _pt)
 
 # ---------- Raycast (Hit Remote Players) ----------
 

@@ -53,7 +53,7 @@ enum AIState {
     DEFEND, SHIFT, COMBAT, HUNT, ATTACK, VANTAGE, RETURN,
 }
 
-const Perf: GDScript = preload("res://mod/network/perf.gd")
+const _Perf: GDScript = preload("res://mod/network/perf.gd")
 
 
 ## Animator condition lookup tables indexed by AIState enum value.
@@ -342,7 +342,7 @@ func _assign_sync_ids_from_spawner(spawner: Node) -> Array[Node]:
 
 
 func _physics_process(_delta: float) -> void:
-    Perf.tick()
+    _Perf.tick()
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
 
@@ -382,7 +382,7 @@ func _host_tick() -> void:
 ## packed = state(0..7) | flags(8..23) | health(24..31).
 ## speeds_strafes = (speedI8 + 128) | ((strafeI8 + 128) << 8) per AI.
 func pack_ai_batch(agentsNode: Node) -> Array:
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
     var ids: PackedInt32Array = []
     var positions: PackedVector3Array = []
     var rotations: PackedFloat32Array = []
@@ -419,7 +419,7 @@ func pack_ai_batch(agentsNode: Node) -> Array:
                 f |= AIFlag.PISTOL
         packed.append(state | ((f & 0xFFFF) << 8) | ((health & 0xFF) << 24))
 
-    Perf.stop("pack_ai_batch", _pt)
+    _Perf.stop("pack_ai_batch", _pt)
     if ids.is_empty():
         return []
     return [ids, positions, rotations, speedsStrafes, packed]
@@ -438,7 +438,7 @@ func receive_ai_batch(
     speedsStrafes: PackedInt32Array,
     packed: PackedInt32Array,
 ) -> void:
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
     if Engine.get_physics_frames() % 600 == 0:
         _log("receive_ai_batch: %d ids, slotCount=%d" % [ids.size(), slotCount])
     var now: float = Time.get_ticks_msec() / 1000.0
@@ -457,7 +457,7 @@ func receive_ai_batch(
             (p >> 24) & 0xFF,
             (p >> 8) & 0xFFFF,
         )
-    Perf.stop("receive_ai_batch", _pt)
+    _Perf.stop("receive_ai_batch", _pt)
 
 # ---------- Client Interpolation ----------
 
@@ -507,7 +507,7 @@ func _log_interp_fill_stats() -> void:
 ## Picks bracketing snapshots around renderTime, computes the lerp factor,
 ## writes into the reusable [member _interpSnap] scratch, and applies it.
 func _apply_interpolated(idx: int, node: Node, buf: AIBuffer, count: int, renderTime: float) -> void:
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
     var from: AISnapshot = buf.newest()
     var to: AISnapshot = from
     for j: int in range(1, count):
@@ -532,7 +532,7 @@ func _apply_interpolated(idx: int, node: Node, buf: AIBuffer, count: int, render
     _interpSnap.health = to.health
     _interpSnap.flags = to.flags
     _apply_snapshot(idx, node, _interpSnap)
-    Perf.stop("apply_interpolated", _pt)
+    _Perf.stop("apply_interpolated", _pt)
 
 
 ## Applies a snapshot to an AI node on the client: position, rotation, animation.
@@ -540,9 +540,9 @@ func _apply_interpolated(idx: int, node: Node, buf: AIBuffer, count: int, render
 ## previous tick's apply for this idx — host broadcasts at 10Hz, client interp
 ## at 60Hz, so most ticks reapply identical values.
 func _apply_snapshot(idx: int, node: Node, snap: AISnapshot) -> void:
-    var _pt: int = Perf.start()
+    var _pt: int = _Perf.start()
     if (snap.flags & AIFlag.DEAD) != 0:
-        Perf.stop("apply_snapshot", _pt)
+        _Perf.stop("apply_snapshot", _pt)
         return
     node.global_position = snap.position
     node.global_rotation.y = snap.rotation_y
@@ -603,7 +603,7 @@ func _apply_snapshot(idx: int, node: Node, snap: AISnapshot) -> void:
             animator[BLEND_RIFLE_COMBAT] = snap.strafe
             animator[BLEND_RIFLE_HUNT] = snap.move_speed
 
-    Perf.stop("apply_snapshot", _pt)
+    _Perf.stop("apply_snapshot", _pt)
 
 
 ## Activates an AI node on the client for visual display.
