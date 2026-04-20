@@ -34,16 +34,16 @@ func CompleteTask(taskData: TaskData) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.CompleteTask(taskData)
         return
+    
+    var scene: Node = get_tree().current_scene
     if _cm.isHost:
         super.CompleteTask(taskData)
-        var scene: Node = get_tree().current_scene
         if !is_instance_valid(scene):
             return
         _cm.worldState.sync_trader_task_complete.rpc(scene.get_path_to(self), taskData.name)
         return
     # Client: stage completion through the host. Host's broadcast flips the
     # local state back via apply_task_complete().
-    var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
         return
     _cm.worldState.request_trader_task_complete.rpc_id(1, scene.get_path_to(self), taskData.name)

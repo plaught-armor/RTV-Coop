@@ -670,13 +670,6 @@ func _dialog_vbox(dialog: Control) -> VBoxContainer:
     return dialog.find_child("VBox", true, false) as VBoxContainer
 
 
-## Legacy shim — older callers passed the VBox; now the Return lives on root.
-func _append_return_button(_vbox: VBoxContainer, _callback: Callable) -> void:
-    # Return button is now part of the dialog scaffold. Callers should use
-    # _wire_return_button(dialog, callback) instead.
-    pass
-
-
 ## Hides the world picker. Returns to the Multiplayer submenu when opened from
 ## the main menu, otherwise just closes silently.
 func hide_world_picker() -> void:
@@ -874,7 +867,7 @@ func _format_world_meta(world: Dictionary) -> String:
 
 
 func _format_world_label(world: Dictionary) -> String:
-    var name: String = world.get(&"name", "Unknown")
+    var world_name: String = world.get(&"name", "Unknown")
     var day: int = world.get(&"day", 1)
     var season: int = world.get(&"season", 1)
     var diff: int = world.get(&"difficulty", 1)
@@ -898,7 +891,7 @@ func _format_world_label(world: Dictionary) -> String:
         else:
             timeText = " — %dd ago" % (elapsed / 86400)
 
-    return "%s — %s Day %d, %s, %d player(s)%s" % [name, seasonText, day, diffText, players, timeText]
+    return "%s — %s Day %d, %s, %d player(s)%s" % [world_name, seasonText, day, diffText, players, timeText]
 
 
 func _count_players_in_world(playersDir: String) -> int:
@@ -1248,7 +1241,7 @@ func show_lobby(useSteam: bool) -> void:
         friendsHeader.add_theme_font_size_override("font_size", 14)
         vbox.add_child(friendsHeader)
 
-        var friendScroll: ScrollContainer = ScrollContainer.new()
+        friendScroll = ScrollContainer.new()
         friendScroll.custom_minimum_size = Vector2(0, 150)
         friendScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
         vbox.add_child(friendScroll)

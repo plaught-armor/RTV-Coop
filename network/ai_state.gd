@@ -53,6 +53,9 @@ enum AIState {
     DEFEND, SHIFT, COMBAT, HUNT, ATTACK, VANTAGE, RETURN,
 }
 
+const Perf: GDScript = preload("res://mod/network/perf.gd")
+
+
 ## Animator condition lookup tables indexed by AIState enum value.
 ## Direct access: IS_MOVEMENT[snap.state]. Avoids per-tick allocation.
 static var IS_MOVEMENT: PackedInt32Array = _build_state_mask([
@@ -224,7 +227,7 @@ func register_spawner_pools(spawner: Node) -> void:
     slotCount = maxId + 1 if maxId >= 0 else 0
     _resize_slot_arrays()
 
-    var activeCount: int = _populate_slot_arrays(spawner, allNodes)
+    var activeCount: int = _populate_slot_arrays(allNodes)
     _log("register_spawner_pools: slotCount=%d nodes=%d active=%d" % [slotCount, allNodes.size(), activeCount])
 
     _flush_pending_activations()
@@ -275,13 +278,12 @@ func _resize_slot_arrays() -> void:
 
 ## Fills aiNodes by sync-id and flags agents that are already reparented to
 ## Agents as active. Returns the number of agents flagged active.
-func _populate_slot_arrays(spawner: Node, allNodes: Array[Node]) -> int:
-    var agentsNode: Node = spawner.get_node_or_null("Agents")
+func _populate_slot_arrays(allNodes: Array[Node]) -> int:
     var activeCount: int = 0
     for child: Node in allNodes:
         var idx: int = child.get_meta(&"ai_sync_id")
         aiNodes[idx] = child
-        if agentsNode != null && child.get_parent() == agentsNode:
+        if _agentsNode != null && child.get_parent() == _agentsNode:
             activeOnClient[idx] = 1
             activeCount += 1
     return activeCount
@@ -325,9 +327,8 @@ func _assign_sync_ids_from_spawner(spawner: Node) -> Array[Node]:
             allNodes.append(child)
             idx += 1
     # Tag agents already reparented from pools (host only — spawned before this ran)
-    var agentsNode: Node = spawner.get_node_or_null("Agents")
-    if agentsNode != null:
-        for child: Node in agentsNode.get_children():
+    if _agentsNode != null:
+        for child: Node in _agentsNode.get_children():
             child.set_meta(&"ai_sync_id", idx)
             allNodes.append(child)
             idx += 1

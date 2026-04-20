@@ -28,6 +28,30 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
+## Lazy CoopManager lookup — Settings instances on the menu / pause overlay
+## may construct their MP tab BEFORE coop_manager.inject_manager has reached
+## them (or in the menu case, never reaches them at all because PATH_SETTINGS
+## targets the in-game Core/UI/Settings only). Walks root once on demand.
+func _ensure_cm() -> void:
+    if is_instance_valid(_cm):
+        return
+    var root: Node = get_tree().root if get_tree() != null else null
+    if root == null:
+        return
+    for child: Node in root.get_children():
+        if child.has_meta(&"is_coop_manager"):
+            _cm = child
+            return
+
+
+const _DEFAULT_PORT_FALLBACK: int = 9050
+
+
+func _default_port() -> int:
+    _ensure_cm()
+    return _cm.DEFAULT_PORT if is_instance_valid(_cm) else _DEFAULT_PORT_FALLBACK
+
+
 func _ready() -> void:
     super._ready()
     _restructure_into_tabs.call_deferred()
@@ -195,14 +219,14 @@ func _show_tab(groupName: String) -> void:
     if _activeTab == groupName:
         return
     _activeTab = groupName
-    for name: String in _tabPanels:
-        var panel: Control = _tabPanels[name]
+    for panel_name: String in _tabPanels:
+        var panel: Control = _tabPanels[panel_name]
         if is_instance_valid(panel):
-            panel.visible = (name == groupName)
-    for name: String in _tabButtons:
-        var btn: Button = _tabButtons[name]
+            panel.visible = (panel_name == groupName)
+    for button_name: String in _tabButtons:
+        var btn: Button = _tabButtons[button_name]
         if is_instance_valid(btn):
-            btn.modulate = Color(1, 1, 1, 1) if name == groupName else Color(1, 1, 1, 0.6)
+            btn.modulate = Color(1, 1, 1, 1) if button_name == groupName else Color(1, 1, 1, 0.6)
 
 
 ## Finds a named section anywhere inside the original Settings BoxContainer.
@@ -222,7 +246,7 @@ func _find_section(box: Node, sectionName: String) -> Node:
 ## + Inputs Modes (toggles) stacked on the right. Splits Inputs's children so
 ## the toggles visually group with the Mouse settings.
 func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
-    var inputs: Node = _find_section(origBox, "Inputs")
+    var settings_inputs: Node = _find_section(origBox, "Inputs")
     var mouse: Node = _find_section(origBox, "Mouse")
 
     var hbox: HBoxContainer = HBoxContainer.new()
@@ -242,14 +266,14 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
     rightCol.add_theme_constant_override("separation", 8)
     hbox.add_child(rightCol)
 
-    if inputs != null:
+    if settings_inputs != null:
         # Inputs scene contains: Header, Panel (key bindings), Modes
         # (toggles), Reset (button). We split: Panel + Header + Reset go left,
         # Modes goes right with Mouse.
-        var header: Node = inputs.get_node_or_null("Header")
-        var inputsPanel: Node = inputs.get_node_or_null("Panel")
-        var modes: Node = inputs.get_node_or_null("Modes")
-        var resetBtn: Node = inputs.get_node_or_null("Reset")
+        var header: Node = settings_inputs.get_node_or_null("Header")
+        var inputsPanel: Node = settings_inputs.get_node_or_null("Panel")
+        var modes: Node = settings_inputs.get_node_or_null("Modes")
+        var resetBtn: Node = settings_inputs.get_node_or_null("Reset")
 
         if header != null:
             header.reparent(leftCol)
@@ -279,7 +303,7 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
             (modes as Control).custom_minimum_size = Vector2(0, 130)
             (modes as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-        inputs.hide()  # empty wrapper, keep hidden
+        settings_inputs.hide()  # empty wrapper, keep hidden
 
     if mouse != null:
         mouse.reparent(rightCol)
@@ -381,7 +405,7 @@ func _build_mp_join_row(leftCol: VBoxContainer) -> void:
 
     var portInput: LineEdit = LineEdit.new()
     portInput.name = "MPPortInput"
-    portInput.placeholder_text = str(_cm.DEFAULT_PORT)
+    portInput.placeholder_text = str(_default_port())
     portInput.custom_minimum_size = Vector2(60, 36)
     portInput.mouse_filter = Control.MOUSE_FILTER_STOP
     joinRow.add_child(portInput)
@@ -524,7 +548,7 @@ func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
     ipInfo.show()
     for child: Node in ipInfo.get_children():
         child.queue_free()
-    var port: int = _cm.DEFAULT_PORT
+    var port: int = _default_port()
     for addr: String in _cm.get_sharable_addresses():
         var row: HBoxContainer = HBoxContainer.new()
         ipInfo.add_child(row)
@@ -805,7 +829,7 @@ func _on_mp_host() -> void:
 func _on_mp_host_ip() -> void:
     if !is_instance_valid(_cm) || _cm.is_session_active():
         return
-    _cm.host_game(_cm.DEFAULT_PORT, false)
+    _cm.host_game(_default_port(), false)
 
 
 func _on_mp_direct_join() -> void:
@@ -816,7 +840,7 @@ func _on_mp_direct_join() -> void:
     var addr: String = addrInput.text.strip_edges() if addrInput != null else ""
     if addr.is_empty():
         addr = "127.0.0.1"
-    var port: int = _cm.DEFAULT_PORT
+    var port: int = _default_port()
     if portInput != null && !portInput.text.strip_edges().is_empty():
         port = int(portInput.text.strip_edges())
     _cm.join_game(addr, port, true)
@@ -841,5 +865,3 @@ func _on_mp_logs() -> void:
 
 func _on_copy_ip(btn: Button) -> void:
     DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
-
-

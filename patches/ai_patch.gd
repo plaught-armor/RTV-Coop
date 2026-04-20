@@ -15,6 +15,9 @@
 ## Original behaviour is 100% preserved when not in a co-op session.
 extends "res://Scripts/AI.gd"
 
+const Perf: GDScript = preload("res://mod/network/perf.gd")
+
+
 var _cm: Node
 
 ## Which player this AI is currently targeting. -1 = host's local player.

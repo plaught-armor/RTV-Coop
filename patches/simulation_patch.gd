@@ -24,21 +24,17 @@ func _ensure_cm() -> void:
 
 
 func _process(delta: float) -> void:
+    # Run vanilla tick first — advances time/weather + handles new-day rollover.
+    # Any future base additions benefit automatically.
+    super._process(delta)
     if !simulate:
         return
     _ensure_cm()
     var mult: float = _current_multiplier()
-    time += rate * mult * delta
-    weatherTime -= delta
-
-    if time >= 2400.0:
-        time = 0.0
-        day += 1
-        Loader.UpdateProgression()
-        print("Simulation: New Day (" + str(day) + ")")
-
-    if weatherTime <= 0:
-        WeatherChange()
+    # Apply only the EXTRA advance from the multiplier. mult=1 → no-op.
+    # Next-frame's super() handles the >2400 rollover if we pushed past it.
+    if mult != 1.0:
+        time += rate * (mult - 1.0) * delta
 
 
 ## 2400.0 tick-ticks of time per in-game day. Night window is 2100–500 (matches

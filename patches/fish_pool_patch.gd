@@ -13,29 +13,17 @@ var _cm: Node
 
 
 func _ready() -> void:
-    set_layer_mask_value(1, false)
-    if species.size() == 0:
-        return
-    # Seed from node path for deterministic fish spawns across peers.
-    var pathHash: int = hash(str(get_path()))
-    seed(pathHash)
-    var poolBounds: AABB = mesh.get_aabb()
-    var poolSize: Vector3 = poolBounds.size
-    var poolPosition: Vector3 = global_position + poolBounds.position
-    var fishAmount: int = randi_range(1, 10)
-    for index: int in fishAmount:
-        var randomFish: PackedScene = species[randi_range(0, species.size() - 1)]
-        var randomPosition: Vector3 = Vector3(
-            randf_range(0, poolSize.x),
-            randf_range(0, poolSize.y),
-            randf_range(0, poolSize.z)
-        )
-        var fish: Node3D = randomFish.instantiate()
-        fish.name = "Fish"
-        add_child(fish, true)
-        fish.global_position = randomPosition + poolPosition
+    # Seed the global RNG from node path BEFORE super runs its randi_range
+    # / randf_range calls. Every peer walks the same node tree + same path =
+    # same hash = same seed = same fish count/species/positions. super keeps
+    # owning the spawn logic so future base changes benefit.
+    seed(hash(str(get_path())))
+    super._ready()
 
 
+## Full override (no super) — base only checks local gameData.playerPosition;
+## we need the minimum across all peers so pools wake for any nearby player.
+## If base adds new per-tick logic, port it here.
 func _physics_process(_delta: float) -> void:
     if Engine.get_physics_frames() % 100 != 0:
         return

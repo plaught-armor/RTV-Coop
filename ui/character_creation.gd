@@ -72,11 +72,11 @@ func _group_options() -> void:
         _byBody[body].append({"name": label, "material": opt.material})
 
 
-func _material_belongs_to(body: String, material: String) -> bool:
+func _material_belongs_to(body: String, mat: String) -> bool:
     if !_byBody.has(body):
         return false
     for entry: Dictionary in _byBody[body]:
-        if entry.material == material:
+        if entry.material == mat:
             return true
     return false
 
@@ -177,23 +177,22 @@ func _build_preview(parent: Container) -> void:
 
     _previewViewport = SubViewport.new()
     _previewViewport.size = PREVIEW_SIZE
-    # SubViewport.transparent_bg is unreliable here (premult-alpha output
-    # composites incorrectly over the UI). Render an opaque studio backdrop
-    # via own_world_3d + WorldEnvironment instead.
-    _previewViewport.own_world_3d = true
     _previewViewport.handle_input_locally = false
     _previewViewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
-    container.add_child(_previewViewport)
 
-    
-    var world_3d: World3D= World3D.new()
+    # Assign World3D + Environment BEFORE add_child so the viewport's scenario
+    # is initialized from our world rather than auto-generated then swapped
+    # (which triggers scenario_remove_viewport_visibility_mask null errors).
+    var world_3d: World3D = World3D.new()
     var env: Environment = Environment.new()
     env.background_mode = Environment.BG_CLEAR_COLOR
     env.ambient_light_source = Environment.AMBIENT_SOURCE_BG
     env.ambient_light_color = Color.BLACK
     world_3d.environment = env
-
     _previewViewport.world_3d = world_3d
+    _previewViewport.own_world_3d = true
+
+    container.add_child(_previewViewport)
 
     # Body load is deferred to _apply_preview — selected body may differ from
     # default and per-rig skeletons can't be swapped after instantiation.
@@ -254,7 +253,17 @@ func _instantiate_body_rig(body: String) -> Node3D:
         return null
     rigRoot.remove_child(bodyContainer)
     rigRoot.queue_free()
+    # Clear owner ref recursively — bodyContainer + descendants still point at
+    # the freed scene root, triggering the "owner inconsistent" warning when
+    # add_child happens against the SubViewport.
+    _clear_owners(bodyContainer)
     return bodyContainer
+
+
+static func _clear_owners(node: Node) -> void:
+    node.owner = null
+    for child: Node in node.get_children():
+        _clear_owners(child)
 
 
 func _on_model_pressed(body: String) -> void:
@@ -266,8 +275,8 @@ func _on_model_pressed(body: String) -> void:
     _refresh()
 
 
-func _on_texture_pressed(material: String) -> void:
-    _selectedMaterial = material
+func _on_texture_pressed(mat: String) -> void:
+    _selectedMaterial = mat
     _refresh()
 
 

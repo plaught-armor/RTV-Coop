@@ -18,22 +18,20 @@ var _cm: Node
 
 
 func _ready() -> void:
-    # @onready vars are syntactic sugar for assignment inside _ready().
-    # Override skips super._ready() (it activates events), so set manually.
-    paths = $Paths
-    crashes = $Crashes
-    await get_tree().create_timer(5.0, false).timeout
-    if !is_instance_valid(self):
-        return
-    map = get_tree().current_scene.get_node(^"/root/Map")
     _ensure_cm()
-    # Client populates event lists but skips activation — host sends RPCs.
-    GetAvailableEvents()
+    # Host + solo paths run vanilla _ready verbatim — benefits from any future
+    # base-game additions (new @onready vars, new timer, etc.) without us
+    # re-tracking. Client path skips activations because host broadcasts them.
     if _cm != null && _cm.is_session_active() && !_cm.isHost:
+        paths = $Paths
+        crashes = $Crashes
+        await get_tree().create_timer(5.0, false).timeout
+        if !is_instance_valid(self):
+            return
+        map = get_tree().current_scene.get_node(^"/root/Map")
+        GetAvailableEvents()
         return
-    ActivateDynamicEvent()
-    ActivateTraderEvent()
-    ActivateSpecialEvent()
+    super._ready()
 
 
 func _ensure_cm() -> void:

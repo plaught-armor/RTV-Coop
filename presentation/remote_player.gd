@@ -95,6 +95,12 @@ var flashNode: Node3D = null
 var activeWeapon: Node3D = null
 var activeMuzzle: Node3D = null
 
+const PATH_COLLISION: NodePath = ^"Collision"
+const PATH_ANIMATIONS: NodePath = ^"Animations"
+const PATH_MUZZLE: NodePath = ^"Muzzle"
+const PATH_HITBODY: NodePath = ^"HitBody"
+const PATH_LOCAL_CONTROLLER: NodePath = ^"Core/Controller"
+
 ## Per-body source scene. Each AI rig (Bandit/Guard/Military/Punisher) carries
 ## a skeleton tuned to its own mesh — instantiating the source scene per-peer
 ## avoids the bone-weight clamping that bit the merged super_rig.scn approach.
@@ -195,7 +201,7 @@ func _spawn_puppet_rig(body: String) -> bool:
         if n != null:
             n.get_parent().remove_child(n)
             n.queue_free()
-    var rootCollision: Node = ai.get_node_or_null("Collision")
+    var rootCollision: Node = ai.get_node_or_null(PATH_COLLISION)
     if rootCollision != null:
         rootCollision.get_parent().remove_child(rootCollision)
         rootCollision.queue_free()
@@ -251,7 +257,7 @@ func _spawn_puppet_rig(body: String) -> bool:
 static func _find_anim_player(ai: Node) -> AnimationPlayer:
     for child: Node in ai.get_children():
         if child is Node3D:
-            var found: AnimationPlayer = child.get_node_or_null("Animations") as AnimationPlayer
+            var found: AnimationPlayer = child.get_node_or_null(PATH_ANIMATIONS) as AnimationPlayer
             if found != null:
                 return found
     return null
@@ -325,7 +331,7 @@ func set_active_weapon(weaponName: String) -> void:
     if baked != null:
         baked.visible = true
         activeWeapon = baked
-        activeMuzzle = baked.get_node_or_null("Muzzle") as Node3D
+        activeMuzzle = baked.get_node_or_null(PATH_MUZZLE) as Node3D
         return
     _attach_dynamic_weapon(weapons, weaponName)
 
@@ -398,16 +404,16 @@ func _attach_dynamic_weapon(weapons: Node, weaponName: String) -> void:
         (weapon as Node3D).transform = slot
     weapons.add_child(weapon)
     activeWeapon = weapon as Node3D
-    activeMuzzle = weapon.get_node_or_null("Muzzle") as Node3D
+    activeMuzzle = weapon.get_node_or_null(PATH_MUZZLE) as Node3D
 
 
 ## Allowlist for weapon file names — prevents path traversal / arbitrary load
 ## through the equipment RPC.
-static func _is_valid_weapon_name(name: String) -> bool:
-    if name.length() > 32:
+static func _is_valid_weapon_name(weapon_name: String) -> bool:
+    if weapon_name.length() > 32:
         return false
-    for i: int in name.length():
-        var c: int = name.unicode_at(i)
+    for i: int in weapon_name.length():
+        var c: int = weapon_name.unicode_at(i)
         var ok: bool = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95 || c == 45
         if !ok:
             return false
@@ -769,5 +775,3 @@ func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> v
         flashNode.global_position = activeMuzzle.global_position
         if flashNode.has_method(&"Activate"):
             flashNode.Activate()
-
-

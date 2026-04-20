@@ -79,6 +79,21 @@ var itemRegistrationTimer: SceneTreeTimer = null
 var worldId: String = ""
 ## Check scene every 60 physics frames (~0.5s at 120Hz).
 const SCENE_CHECK_FRAMES: int = 60
+
+const PATH_CONTROLLER: NodePath = ^"Core/Controller"
+const PATH_INTERACTOR: NodePath = ^"Core/Controller/Camera/Interactor"
+const PATH_CHARACTER: NodePath = ^"Core/Controller/Character"
+const PATH_INTERFACE: NodePath = ^"Core/UI/Interface"
+const PATH_SETTINGS: NodePath = ^"Core/UI/Settings"
+const PATH_AI: NodePath = ^"AI"
+const PATH_CORE: NodePath = ^"Core"
+const PATH_LOADER_ABS: NodePath = ^"/root/Loader"
+const PATH_DATABASE_ABS: NodePath = ^"/root/Database"
+const PATH_MENU_MAIN: NodePath = ^"Main"
+const PATH_MENU_MODES: NodePath = ^"Modes"
+const PATH_MENU_SUBMENU: NodePath = ^"CoopMPSubmenu"
+const PATH_MENU_BTN_NEW: NodePath = ^"Main/Buttons/New"
+const PATH_MENU_BTN_LOAD: NodePath = ^"Main/Buttons/Load"
 ## Set when lobby state says host is in-game; consumed in on_connected_to_server.
 var pendingAutoJoin: bool = false
 ## Set while we were in any coop session (host or client). Used to suppress
@@ -104,7 +119,7 @@ func _ready() -> void:
         force_windowed()
 
     register_patches()
-    loader = get_node_or_null("/root/Loader")
+    loader = get_node_or_null(PATH_LOADER_ABS)
 
     _spawn_network_children()
     _spawn_coop_ui()
@@ -206,11 +221,11 @@ func _update_mp_status() -> void:
         return
     var hostBtn: Button = submenu.find_child("HostBtn", true, false) as Button
     var browseBtn: Button = submenu.find_child("BrowseBtn", true, false) as Button
-    var ready: bool = is_instance_valid(steamBridge) && steamBridge.is_ready() && steamBridge.ownsGame
+    var bridge_ready: bool = is_instance_valid(steamBridge) && steamBridge.is_ready() && steamBridge.ownsGame
     if hostBtn != null:
-        hostBtn.disabled = !ready
+        hostBtn.disabled = !bridge_ready
     if browseBtn != null:
-        browseBtn.disabled = !ready
+        browseBtn.disabled = !bridge_ready
 
 
 ## Applies [code]take_over_path[/code] patches to game scripts.
@@ -237,6 +252,7 @@ func register_patches() -> void:
         ["res://mod/patches/event_system_patch.gd", "res://Scripts/EventSystem.gd"],
         ["res://mod/patches/trader_patch.gd", "res://Scripts/Trader.gd"],
         ["res://mod/patches/simulation_patch.gd", "res://Scripts/Simulation.gd"],
+        ["res://mod/patches/decor_mode_patch.gd", "res://Scripts/DecorMode.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -562,7 +578,7 @@ func spawn_remote_player(peerId: int) -> void:
     var mapNode: Node = get_tree().current_scene
     if !is_instance_valid(mapNode):
         return
-    if mapNode.get_node_or_null("Core/Controller") == null:
+    if mapNode.get_node_or_null(PATH_CONTROLLER) == null:
         return
 
     playerState.clear_peer(peerId)
@@ -723,12 +739,12 @@ func inject_manager() -> void:
 
 ## Injects into fixed-path player-local nodes: Controller, Interactor, Character, Interface, Settings.
 func _inject_controller_tree(scene: Node) -> void:
-    var controller: Node = scene.get_node_or_null("Core/Controller")
+    var controller: Node = scene.get_node_or_null(PATH_CONTROLLER)
     if controller != null && controller.has_method(&"init_manager"):
         controller.init_manager(self)
 
     # Interactor — single choke point for Door/Switch/Bed/Fire/LootContainer/Trader dispatch
-    var interactor: Node = scene.get_node_or_null("Core/Controller/Camera/Interactor")
+    var interactor: Node = scene.get_node_or_null(PATH_INTERACTOR)
     if interactor == null:
         for node: Node in scene.find_children("*", "RayCast3D", true, false):
             if node.get_script() != null && node.get_script().resource_path == "res://mod/patches/interactor_patch.gd":
@@ -739,17 +755,17 @@ func _inject_controller_tree(scene: Node) -> void:
         if DEBUG:
             print("[coop] inject_manager: Interactor patched at %s" % interactor.get_path())
 
-    var character: Node = scene.get_node_or_null("Core/Controller/Character")
+    var character: Node = scene.get_node_or_null(PATH_CHARACTER)
     if character != null && character.has_method(&"init_manager"):
         character.init_manager(self)
 
-    var iface: Node = scene.get_node_or_null("Core/UI/Interface")
+    var iface: Node = scene.get_node_or_null(PATH_INTERFACE)
     if iface != null && iface.has_method(&"init_manager"):
         iface.init_manager(self)
 
-    var settings: Node = scene.get_node_or_null("Core/UI/Settings")
-    if settings != null && settings.has_method(&"init_manager"):
-        settings.init_manager(self)
+    var ui_settings: Node = scene.get_node_or_null(PATH_SETTINGS)
+    if ui_settings != null && ui_settings.has_method(&"init_manager"):
+        ui_settings.init_manager(self)
 
 
 ## Injects into Interactable (Doors, LootContainers) and Trader group nodes.
@@ -778,7 +794,7 @@ func _inject_items_and_transitions() -> void:
 
 ## Injects into AISpawner (scene "AI" node) and every active AI agent.
 func _inject_ai(scene: Node) -> void:
-    var spawner: Node = scene.get_node_or_null("AI")
+    var spawner: Node = scene.get_node_or_null(PATH_AI)
     if spawner != null && spawner.has_method(&"init_manager"):
         spawner.init_manager(self)
 
@@ -810,8 +826,8 @@ func _customize_menu(menu: Node) -> void:
         return
     menu.set_meta(&"coop_customized", true)
 
-    var newButton: Button = menu.get_node_or_null("Main/Buttons/New")
-    var loadButton: Button = menu.get_node_or_null("Main/Buttons/Load")
+    var newButton: Button = menu.get_node_or_null(PATH_MENU_BTN_NEW)
+    var loadButton: Button = menu.get_node_or_null(PATH_MENU_BTN_LOAD)
     if newButton == null || loadButton == null:
         _log("[menu] customize aborted: buttons missing")
         return
@@ -851,8 +867,8 @@ func _on_singleplayer_pressed(menu: Node) -> void:
     # coop session that didn't clean up properly.
     wipe_user_saves()
     mirror_solo_to_user()
-    var main: Node = menu.get_node_or_null("Main")
-    var modes: Node = menu.get_node_or_null("Modes")
+    var main: Node = menu.get_node_or_null(PATH_MENU_MAIN)
+    var modes: Node = menu.get_node_or_null(PATH_MENU_MODES)
     if main != null:
         main.hide()
     if modes != null:
@@ -862,8 +878,8 @@ func _on_singleplayer_pressed(menu: Node) -> void:
 func _on_multiplayer_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    var main: Node = menu.get_node_or_null("Main")
-    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    var main: Node = menu.get_node_or_null(PATH_MENU_MAIN)
+    var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if main != null:
         main.hide()
     if submenu != null:
@@ -874,7 +890,7 @@ func _on_multiplayer_pressed(menu: Node) -> void:
 ## as the other coop dialogs (Host World / Browse Lobbies / New World) so all
 ## menus look stylistically consistent.
 func _build_mp_submenu(menu: Node) -> void:
-    if menu.get_node_or_null("CoopMPSubmenu") != null:
+    if menu.get_node_or_null(PATH_MENU_SUBMENU) != null:
         return
 
     var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
@@ -986,7 +1002,7 @@ func _on_mp_host_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     _pendingHostUseSteam = true
-    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
     if is_instance_valid(coopUI):
@@ -997,7 +1013,7 @@ func _on_mp_host_ip_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     _pendingHostUseSteam = false
-    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
     if is_instance_valid(coopUI):
@@ -1007,7 +1023,7 @@ func _on_mp_host_ip_pressed(menu: Node) -> void:
 func _on_mp_show_direct_join(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
     if is_instance_valid(coopUI):
@@ -1017,7 +1033,7 @@ func _on_mp_show_direct_join(menu: Node) -> void:
 func _on_mp_browse_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
+    var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
     if is_instance_valid(coopUI):
@@ -1031,8 +1047,8 @@ func _on_mp_logs_pressed() -> void:
 func _on_mp_back_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    var submenu: Node = menu.get_node_or_null("CoopMPSubmenu")
-    var main: Node = menu.get_node_or_null("Main")
+    var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
+    var main: Node = menu.get_node_or_null(PATH_MENU_MAIN)
     if submenu != null:
         submenu.hide()
     if main != null:
@@ -1045,7 +1061,7 @@ func _register_ai_pools() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
         return
-    var spawner: Node = scene.get_node_or_null("AI")
+    var spawner: Node = scene.get_node_or_null(PATH_AI)
     if spawner != null:
         aiState.register_spawner_pools(spawner)
 

@@ -4,8 +4,10 @@
 ##   Perf.stop("label", _t)
 ## Auto-dumps accumulated stats every PERF_DUMP_TICKS (1s @ 60Hz physics).
 ## Disable globally by flipping ENABLED to false — wrap calls cost ~10ns when off.
+## class_name removed — ModLoader-loaded scripts don't register globally for
+## consumers; consumers must preload this file:
+##   const Perf = preload("res://mod/network/perf.gd")
 extends RefCounted
-class_name Perf
 
 
 const ENABLED: bool = true

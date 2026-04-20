@@ -231,8 +231,11 @@ func PlayMovementGear() -> void:
 
 ## Detects the active weapon's fire audio and broadcasts to peers.
 ## Called on the rising edge of [code]gameData.isFiring[/code].
+const PATH_RIG_MANAGER: NodePath = ^"../Camera/Manager"
+
+
 func _broadcast_fire_event() -> void:
-    var rm: Node3D = get_node_or_null("../Camera/Manager")
+    var rm: Node3D = get_node_or_null(PATH_RIG_MANAGER)
     if rm == null || rm.get_child_count() == 0:
         return
     var rig: Node = rm.get_child(rm.get_child_count() - 1)
