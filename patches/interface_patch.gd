@@ -1,8 +1,14 @@
 ## Patch for [code]Interface.gd[/code] — broadcasts dropped items for co-op sync.
 ## Reimplements [method Drop] with network broadcast after each pickup creation.
+## Also defers client-side trader task completion until host ACK to prevent
+## item loss if the host rejects the task.
 extends "res://Scripts/Interface.gd"
 
 var _cm: Node
+
+## Pending task completions awaiting host ACK. Keyed by task name.
+## Each entry: { selected: Array[Node], taskData: TaskData }.
+var _pendingTasks: Dictionary = {}
 
 
 func init_manager(manager: Node) -> void:
@@ -158,3 +164,92 @@ func _execute_client_trade(traderPath: String, requestedIndices: PackedInt32Arra
             element.set_meta(&"trade_pending", true)
     _cm.worldState.set_meta(&"_pending_trade_elements", pendingElements)
     _cm.worldState.request_trade.rpc_id(1, traderPath, requestedIndices, offeredSlots)
+
+
+# ---------- Trader Task Complete (client-side defer) ----------
+
+
+## Solo + host destroy input items and spawn rewards immediately in vanilla
+## `Complete()`. In co-op a client doing the same before the host validates
+## would lose the inputs and keep fake rewards if the host rejects the task.
+## For client-in-session TaskData, hide selected inputs + stash rewards data
+## and wait for [method finalize_pending_task] or [method reject_pending_task].
+func Complete(data: Resource) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active() || _cm.isHost:
+        super.Complete(data)
+        return
+    if !(data is TaskData):
+        super.Complete(data)
+        return
+    if !is_instance_valid(inputTarget) || !is_instance_valid(trader):
+        super.Complete(data)
+        return
+
+    var taskName: String = inputTarget.taskData.name
+    if _pendingTasks.has(taskName):
+        return
+
+    var selected: Array[Node] = []
+    for child: Node in inventoryGrid.get_children():
+        if child.selected:
+            child.visible = false
+            child.set_meta(&"task_pending", true)
+            selected.append(child)
+
+    _pendingTasks[taskName] = {
+        &"selected": selected,
+        &"taskData": inputTarget.taskData,
+    }
+
+    # Routes through trader_patch.CompleteTask → request_trader_task_complete RPC.
+    trader.CompleteTask(inputTarget.taskData)
+    ResetInput()
+
+
+## Called by [code]world_state.ack_trader_task_complete[/code] when the host
+## confirms this client's task. Destroys the hidden inputs and spawns rewards
+## from the snapshotted TaskData.receive list, mirroring vanilla Complete().
+func finalize_pending_task(taskName: String) -> void:
+    if !_pendingTasks.has(taskName):
+        return
+    var bundle: Dictionary = _pendingTasks[taskName]
+    _pendingTasks.erase(taskName)
+
+    for element: Node in bundle.selected:
+        if is_instance_valid(element):
+            inventoryGrid.Pick(element)
+            element.queue_free()
+
+    var taskData: TaskData = bundle.taskData
+    for itemData: Resource in taskData.receive:
+        var newSlotData: SlotData = SlotData.new()
+        newSlotData.itemData = itemData
+        if itemData.defaultAmount != 0 && itemData.subtype != "Magazine":
+            newSlotData.amount = itemData.defaultAmount
+
+        if itemData.type == "Furniture":
+            Create(newSlotData, catalogGrid, false)
+            Loader.Message("New Furniture Added [Catalog]", Color.GREEN)
+        else:
+            if !AutoStack(newSlotData, inventoryGrid):
+                Create(newSlotData, inventoryGrid, true)
+
+    UpdateTraderInfo()
+
+
+## Called by [code]world_state.reject_trader_task_complete[/code] when the host
+## refuses (unknown task name, already completed, etc). Restores the hidden
+## inventory elements so the client keeps their inputs.
+func reject_pending_task(taskName: String) -> void:
+    if !_pendingTasks.has(taskName):
+        return
+    var bundle: Dictionary = _pendingTasks[taskName]
+    _pendingTasks.erase(taskName)
+
+    for element: Node in bundle.selected:
+        if is_instance_valid(element):
+            element.visible = true
+            element.remove_meta(&"task_pending")
+
+    Loader.Message("Task rejected by host", Color.RED)
+    PlayError()

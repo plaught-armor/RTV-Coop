@@ -381,8 +381,8 @@ func FireDetection(delta: float) -> void:
         var remote: Node3D = _cm.remoteNodes[peerId]
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
-        var isFiring: bool = remote.get(&"isFiring", false)
-        if !isFiring:
+        var firingVal: Variant = remote.get(&"isFiring")
+        if firingVal == null || !bool(firingVal):
             continue
         if playerVisible:
             continue

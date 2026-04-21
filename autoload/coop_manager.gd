@@ -59,6 +59,9 @@ var playerState: Node = null
 var worldState: Node = null
 ## Reference to the [code]AIState[/code] child node handling AI replication.
 var aiState: Node = null
+## Reference to the [code]VehicleState[/code] child node handling Helicopter/BTR
+## transform sync. Host broadcasts, clients lerp via patched _physics_process.
+var vehicleState: Node = null
 ## Reference to the [code]SteamBridge[/code] child node for Steam helper IPC.
 var steamBridge: Node = null
 ## Cached reference to /root/Loader autoload.
@@ -163,6 +166,12 @@ func _spawn_network_children() -> void:
     add_child(aiState)
     aiState.init_manager(self)
 
+    var VehicleStateScript: Script = preload("res://mod/network/vehicle_state.gd")
+    vehicleState = VehicleStateScript.new()
+    vehicleState.name = "VehicleState"
+    add_child(vehicleState)
+    vehicleState.init_manager(self)
+
     steamBridge = SteamBridgeScript.new()
     steamBridge.name = "SteamBridge"
     add_child(steamBridge)
@@ -258,6 +267,8 @@ func register_patches() -> void:
         ["res://mod/patches/trader_patch.gd", "res://Scripts/Trader.gd"],
         ["res://mod/patches/simulation_patch.gd", "res://Scripts/Simulation.gd"],
         ["res://mod/patches/decor_mode_patch.gd", "res://Scripts/DecorMode.gd"],
+        ["res://mod/patches/helicopter_patch.gd", "res://Scripts/Helicopter.gd"],
+        ["res://mod/patches/btr_patch.gd", "res://Scripts/BTR.gd"],
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
@@ -667,6 +678,8 @@ func on_scene_changed() -> void:
         worldState.refresh_scene_cache()
     if aiState != null:
         aiState.refresh_scene_cache()
+    if vehicleState != null:
+        vehicleState.refresh_scene_cache()
     if !is_session_active():
         return
 
@@ -1602,8 +1615,12 @@ func _request_world_id() -> void:
     if FileAccess.file_exists(worldPath):
         var world: Resource = load(worldPath)
         if world != null:
-            diff = world.get(&"difficulty", 1)
-            season = world.get(&"season", 1)
+            var diffVal: Variant = world.get(&"difficulty")
+            if diffVal != null:
+                diff = int(diffVal)
+            var seasonVal: Variant = world.get(&"season")
+            if seasonVal != null:
+                season = int(seasonVal)
     _receive_world_id.rpc_id(peerId, worldId, diff, season)
 
 

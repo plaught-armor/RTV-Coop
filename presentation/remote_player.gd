@@ -22,6 +22,17 @@ const FALLBACK_PISTOL_GRIP: Transform3D = Transform3D(
 )
 
 
+## Per-weapon grip overrides. Consulted before the AI-rig cache and the
+## class-wide fallback. Add an entry when a specific weapon sits wrong in
+## a remote player's hands during a live session — each AI rig only supplies
+## one authored Transform3D per weapon name, so some weapons land with the
+## first rig that bundled them even when a tighter pose exists elsewhere.
+##
+## Keys are weapon node names as they appear under [code]Weapons[/code]
+## (e.g. &"AKM", &"MP7"). Values are Transform3Ds in Weapons-bone space.
+const GRIP_OVERRIDES: Dictionary[StringName, Transform3D] = {}
+
+
 var _cm: Node
 
 
@@ -399,10 +410,15 @@ func _attach_dynamic_weapon(weapons: Node, weaponName: String) -> void:
 
     var slot: Transform3D = Transform3D.IDENTITY
     var slotFound: bool = false
-    _ensure_hand_slots()
-    if _handSlotTransforms.has(weaponName):
-        slot = _handSlotTransforms[weaponName]
+    var overrideKey: StringName = StringName(weaponName)
+    if GRIP_OVERRIDES.has(overrideKey):
+        slot = GRIP_OVERRIDES[overrideKey]
         slotFound = true
+    if !slotFound:
+        _ensure_hand_slots()
+        if _handSlotTransforms.has(weaponName):
+            slot = _handSlotTransforms[weaponName]
+            slotFound = true
     if !slotFound:
         var isPistol: bool = false
         if weapon.has_method(&"get") && weapon.get(&"slotData") != null:
@@ -433,14 +449,14 @@ func set_active_attachments(names: Array[StringName]) -> void:
 func _apply_attachments() -> void:
     if !is_instance_valid(activeWeapon):
         return
-    var attachmentsRoot: Node = activeWeapon.get_node_or_null(&"Attachments")
+    var attachmentsRoot: Node = activeWeapon.get_node_or_null(^"Attachments")
     if attachmentsRoot == null:
         return
     for child: Node in attachmentsRoot.get_children():
         if child is Node3D:
             (child as Node3D).visible = false
     for stem: StringName in _activeAttachments:
-        var node: Node = attachmentsRoot.get_node_or_null(stem)
+        var node: Node = attachmentsRoot.get_node_or_null(NodePath(stem))
         if node is Node3D:
             (node as Node3D).visible = true
             # Update activeMuzzle so fire-event flashes use the equipped muzzle

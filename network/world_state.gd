@@ -704,33 +704,43 @@ func sync_trader_supply_update(traderPath: String, packedSupply: Array[Dictionar
 ## (including the Traders.tres save — host is authoritative for disk) and
 ## broadcasts to every peer. Matches [method Trader.CompleteTask] side
 ## effects across the session so no one double-completes.
+## Any rejection path sends reject_trader_task_complete back to the sender so
+## [method interface_patch.reject_pending_task] can restore hidden inputs.
 @rpc("any_peer", "call_remote", "reliable")
 func request_trader_task_complete(traderPath: String, taskName: String) -> void:
     if !_cm.isHost:
         return
+    var senderId: int = multiplayer.get_remote_sender_id()
     if !is_valid_path(traderPath):
+        reject_trader_task_complete.rpc_id(senderId, taskName)
         return
     var trader: Node = _scene_node(traderPath)
     if !is_instance_valid(trader):
+        reject_trader_task_complete.rpc_id(senderId, taskName)
         return
     if trader.tasksCompleted.has(taskName):
+        reject_trader_task_complete.rpc_id(senderId, taskName)
         return
     # Validate task belongs to this trader's declared task list. Protects
     # against clients spoofing unrelated taskNames (wrong trader, unknown
     # name, empty string) to grab rewards without the input items.
-    var traderData: Resource = trader.get(&"traderData", null)
+    var traderData: Resource = trader.get(&"traderData")
     if !is_instance_valid(traderData):
+        reject_trader_task_complete.rpc_id(senderId, taskName)
         return
-    var tasks: Array = traderData.get(&"tasks", [])
-    if tasks.is_empty():
+    var tasks: Variant = traderData.get(&"tasks")
+    if tasks == null || !(tasks is Array) || (tasks as Array).is_empty():
+        reject_trader_task_complete.rpc_id(senderId, taskName)
         return
     var known: bool = false
-    for taskData: Resource in tasks:
+    for taskData: Resource in tasks as Array:
         if is_instance_valid(taskData) && taskData.name == taskName:
             known = true
             break
     if !known:
-        push_warning("[world_state] Rejecting trader task '%s' from peer %d — not in %s tasks" % [taskName, multiplayer.get_remote_sender_id(), traderData.get(&"name", "?")])
+        var dataName: Variant = traderData.get(&"name")
+        push_warning("[world_state] Rejecting trader task '%s' from peer %d — not in %s tasks" % [taskName, senderId, dataName if dataName != null else "?"])
+        reject_trader_task_complete.rpc_id(senderId, taskName)
         return
     # Host applies + saves the same as solo. No TaskData object in hand, so we
     # inline the parts of Trader.CompleteTask that don't need one.
@@ -741,6 +751,10 @@ func request_trader_task_complete(traderPath: String, taskName: String) -> void:
         Loader.SaveTrader(trader.traderData.name)
         Loader.UpdateProgression()
     sync_trader_task_complete.rpc(traderPath, taskName)
+    # Targeted ack so only the requester finalises its hidden inputs + spawns
+    # rewards. A broadcast finalize would duplicate rewards for peers that
+    # staged the same task concurrently.
+    ack_trader_task_complete.rpc_id(senderId, taskName)
 
 
 ## Host broadcasts a completed task to every peer. Clients simply append +
@@ -752,6 +766,23 @@ func sync_trader_task_complete(traderPath: String, taskName: String) -> void:
         return
     if trader.has_method(&"apply_task_complete"):
         trader.apply_task_complete(taskName)
+
+
+## Host tells the requester their deferred completion succeeded. Client
+## finalises the pending bundle from [method interface_patch.Complete] by
+## destroying hidden inputs + spawning rewards under host authority.
+@rpc("authority", "call_remote", "reliable")
+func ack_trader_task_complete(taskName: String) -> void:
+    if is_instance_valid(_interface) && _interface.has_method(&"finalize_pending_task"):
+        _interface.finalize_pending_task(taskName)
+
+
+## Host tells the requesting client the task was refused. Client restores
+## the hidden inputs and shows an error — nothing else changes.
+@rpc("authority", "call_remote", "reliable")
+func reject_trader_task_complete(taskName: String) -> void:
+    if is_instance_valid(_interface) && _interface.has_method(&"reject_pending_task"):
+        _interface.reject_pending_task(taskName)
 
 
 # ---------- Simulation Sync ----------
