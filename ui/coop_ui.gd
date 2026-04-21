@@ -1229,13 +1229,17 @@ func show_lobby(useSteam: bool) -> void:
     # fall through to _cm.set_setting which broadcasts to all peers via
     # world_state.broadcast_settings. Sliders cover 0.1×..10× — lets the host
     # compress a full day cycle to ~3 min or slow night pacing for sneaking.
-    var settingsHeader: Label = Label.new()
-    settingsHeader.text = "Session Settings"
-    settingsHeader.add_theme_font_size_override("font_size", 14)
-    vbox.add_child(settingsHeader)
+    # Gate on isHost even though show_lobby's call sites are both host entries
+    # today — defensive so future non-host refactors can't re-open this path
+    # and flood request_setting_change on every slider tick.
+    if _cm.isHost:
+        var settingsHeader: Label = Label.new()
+        settingsHeader.text = "Session Settings"
+        settingsHeader.add_theme_font_size_override("font_size", 14)
+        vbox.add_child(settingsHeader)
 
-    _build_rate_slider(vbox, "Day rate", "day_rate_multiplier")
-    _build_rate_slider(vbox, "Night rate", "night_rate_multiplier")
+        _build_rate_slider(vbox, "Day rate", "day_rate_multiplier")
+        _build_rate_slider(vbox, "Night rate", "night_rate_multiplier")
 
     # Connected players
     var playersHeader: Label = Label.new()

@@ -640,6 +640,7 @@ func receive_attachments(names: Array[StringName]) -> void:
     if !is_instance_valid(_cm):
         return
     if names.size() > 16:
+        push_warning("[player_state] Dropping attachment list from peer %d — size %d exceeds cap 16" % [multiplayer.get_remote_sender_id(), names.size()])
         return
     var peerId: int = multiplayer.get_remote_sender_id()
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
