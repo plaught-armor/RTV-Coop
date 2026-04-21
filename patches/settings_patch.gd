@@ -561,8 +561,9 @@ func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
         var copyBtn: Button = Button.new()
         copyBtn.text = "Copy"
         copyBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-        copyBtn.set_meta(&"copyText", text)
-        copyBtn.pressed.connect(_on_copy_ip.bind(copyBtn))
+        # Bind value-type String, not Button ref — prevents dangling Callable
+        # capture when the row is freed on next refresh.
+        copyBtn.pressed.connect(_on_copy_ip_text.bind(text))
         row.add_child(copyBtn)
 
 
@@ -863,5 +864,5 @@ func _on_mp_logs() -> void:
     _cm.collect_logs()
 
 
-func _on_copy_ip(btn: Button) -> void:
-    DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
+func _on_copy_ip_text(copyText: String) -> void:
+    DisplayServer.clipboard_set(copyText)

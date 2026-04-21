@@ -4,6 +4,7 @@
 ## ResetMove → broadcasts final position/rotation to all peers.
 ## Catalog → broadcasts removal. Host-authoritative to prevent dupes.
 ## Intermediate movement during placement is local only.
+@tool
 extends "res://Scripts/Furniture.gd"
 
 

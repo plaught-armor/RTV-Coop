@@ -747,7 +747,7 @@ func populate_world_list() -> void:
         return
 
     # Sort by last_played descending (most recent first)
-    worlds.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.get(&"last_played", 0) > b.get(&"last_played", 0))
+    worlds.sort_custom(_sort_worlds_by_last_played)
 
     for world: Dictionary in worlds:
         var row: HBoxContainer = HBoxContainer.new()
@@ -1222,7 +1222,7 @@ func show_lobby(useSteam: bool) -> void:
             copyBtn.text = "Copy"
             copyBtn.mouse_filter = Control.MOUSE_FILTER_STOP
             copyBtn.set_meta(&"copyText", text)
-            copyBtn.pressed.connect(_on_lobby_copy.bind(copyBtn))
+            copyBtn.pressed.connect(_on_lobby_copy_text.bind(text))
             addrBox.add_child(copyBtn)
 
     # Connected players
@@ -1265,8 +1265,12 @@ func show_lobby(useSteam: bool) -> void:
     outerVBox.move_child(selectBtn, returnBtn.get_index())
 
 
-func _on_lobby_copy(btn: Button) -> void:
-    DisplayServer.clipboard_set(btn.get_meta(&"copyText", ""))
+func _on_lobby_copy_text(copyText: String) -> void:
+    DisplayServer.clipboard_set(copyText)
+
+
+func _sort_worlds_by_last_played(a: Dictionary, b: Dictionary) -> bool:
+    return a.get(&"last_played", 0) > b.get(&"last_played", 0)
 
 
 func _update_lobby_players() -> void:

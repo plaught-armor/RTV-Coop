@@ -50,7 +50,7 @@ static func tick() -> void:
         return
     print("[Perf] --- %d-tick window ---" % PERF_DUMP_TICKS)
     var keys: Array = _totals.keys()
-    keys.sort_custom(func(a, b): return _totals[a] > _totals[b])
+    keys.sort_custom(_sort_keys_by_total_desc)
     for k in keys:
         var total: int = _totals[k]
         var count: int = _counts[k]
@@ -60,3 +60,7 @@ static func tick() -> void:
     _totals.clear()
     _counts.clear()
     _maxes.clear()
+
+
+static func _sort_keys_by_total_desc(a: Variant, b: Variant) -> bool:
+    return _totals[a] > _totals[b]
