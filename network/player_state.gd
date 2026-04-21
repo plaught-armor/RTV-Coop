@@ -110,6 +110,12 @@ var _ticksSinceBroadcast: int = 0
 ## RPC to actual changes only — polling happens every [member EQUIPMENT_CHECK_TICKS]
 ## but the network path only fires when the value diverges.
 var _lastBroadcastedWeapon: String = ""
+## Last attachment-stem list we broadcasted. Tracked alongside
+## [member _lastBroadcastedWeapon] so the attachment RPC only fires when the
+## equipped weapon's nested optic/muzzle/laser actually changes. [StringName]
+## because the source is [member WeaponRig.attachments]'s authored child
+## [member Node.name] values — no need to round-trip through [String].
+var _lastBroadcastedAttachments: Array[StringName] = []
 ## Poll interval for the equipment check. 120 Hz physics / 60 = 2 Hz — enough
 ## to catch weapon swaps with no perceptible delay; well under the bandwidth
 ## budget since the RPC is reliable + tiny.
@@ -569,10 +575,88 @@ func get_current_weapon_name() -> String:
 ## avoids a take_over_path patch and survives weapon swaps we don't author.
 func _poll_equipment() -> void:
     var current: String = _read_current_weapon_name()
-    if current == _lastBroadcastedWeapon:
+    var weaponChanged: bool = current != _lastBroadcastedWeapon
+    if weaponChanged:
+        _lastBroadcastedWeapon = current
+        broadcast_equipment(current)
+
+    var attachments: Array[StringName] = _read_current_attachments()
+    # Weapon-change forces a broadcast so remotes always get an authoritative
+    # attachment list for the new weapon — otherwise an armed→armed swap with
+    # matching (or both empty) attachment sets would leave stale visuals from
+    # the previous weapon on the remote side.
+    if weaponChanged || attachments != _lastBroadcastedAttachments:
+        _lastBroadcastedAttachments = attachments
+        broadcast_attachments(attachments)
+
+
+## Reads currently-equipped attachment node names from the active [WeaponRig].
+## Source is the rig's [member WeaponRig.attachments] child whose visible
+## children are the ones [RigManager.UpdateRig] flipped on (Muzzle, Optic,
+## Laser, and the Mount helper when [code]useMount && !optic.hasMount[/code]).
+## Returns the [StringName]s directly so no [String] round-trip is needed on
+## send, receive, or the per-peer [method RemotePlayer._apply_attachments]
+## lookup into its own Attachments node.
+func _read_current_attachments() -> Array[StringName]:
+    var out: Array[StringName] = []
+    var scene: Node = get_tree().current_scene
+    if scene == null:
+        return out
+    var rigManager: Node = scene.get_node_or_null("Core/Camera/Manager")
+    if rigManager == null:
+        return out
+    for rig: Node in rigManager.get_children():
+        var attachmentsNode: Node3D = rig.get(&"attachments", null) as Node3D
+        if attachmentsNode == null:
+            continue
+        for child: Node in attachmentsNode.get_children():
+            if child is Node3D && (child as Node3D).visible:
+                out.append(child.name)
+        break
+    return out
+
+
+## Broadcasts the current attachment [StringName]s to all peers. Empty list =
+## weapon has no attachments / no weapon drawn.
+func broadcast_attachments(names: Array[StringName]) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
-    _lastBroadcastedWeapon = current
-    broadcast_equipment(current)
+    receive_attachments.rpc(names)
+
+
+## Targeted variant used when a new peer spawns. Mirrors [method send_equipment_to]
+## so late-joiners see our current optic/muzzle/laser without waiting for a swap.
+func send_attachments_to(peerId: int, names: Array[StringName]) -> void:
+    if !is_instance_valid(_cm) || !_cm.is_session_active():
+        return
+    receive_attachments.rpc_id(peerId, names)
+
+
+## Receives another peer's attachment change. No server authority check: the
+## equipment RPC already gates visuals, and attachments don't affect damage on
+## remote rigs (clients render host-authoritative hits). Cached for late-spawn.
+@rpc("any_peer", "call_remote", "reliable")
+func receive_attachments(names: Array[StringName]) -> void:
+    if !is_instance_valid(_cm):
+        return
+    if names.size() > 16:
+        return
+    var peerId: int = multiplayer.get_remote_sender_id()
+    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    if remoteNode == null:
+        _cm.cachedAttachments[peerId] = names
+        return
+    if remoteNode.has_method(&"set_active_attachments"):
+        remoteNode.set_active_attachments(names)
+
+
+## Returns the attachment list last broadcast to peers. Used by
+## [code]coop_manager[/code] on new-peer spawn so the late-joiner sees our
+## current optic/muzzle/laser without waiting for the next attachment poll.
+func get_current_attachments() -> Array[StringName]:
+    if !_lastBroadcastedAttachments.is_empty():
+        return _lastBroadcastedAttachments
+    return _read_current_attachments()
 
 
 ## Walks the local scene to find the active weapon name. Returns "" when no

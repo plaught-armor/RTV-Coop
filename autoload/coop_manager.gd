@@ -29,6 +29,11 @@ var cachedAppearances: Dictionary[int, Dictionary] = { }
 ## Weapon-name entries received from peers before their [RemotePlayer] node
 ## existed. Drained the same way as [member cachedAppearances].
 var cachedEquipment: Dictionary[int, String] = { }
+## Attachment [StringName] lists from peers whose [RemotePlayer] wasn't up yet
+## at RPC receive time. Drained on spawn. Names are the authored
+## [code]Attachments[/code] child [member Node.name] values read from the
+## sender's own [WeaponRig], so no String conversion is needed.
+var cachedAttachments: Dictionary[int, Array] = { }
 ## Maps multiplayer peer ID -> display name (Steam persona or fallback).
 var peerNames: Dictionary[int, String] = { }
 ## Maps multiplayer peer ID -> Steam ID string.
@@ -411,6 +416,7 @@ func on_peer_disconnected(peerId: int) -> void:
     peerSteamIDs.erase(peerId)
     cachedAppearances.erase(peerId)
     cachedEquipment.erase(peerId)
+    cachedAttachments.erase(peerId)
     var peerMap: String = ""
     if peerMaps.has(peerId):
         peerMap = peerMaps[peerId]
@@ -597,18 +603,36 @@ func spawn_remote_player(peerId: int) -> void:
 
     # Exchange appearance: apply any cached remote entry, then hand the peer our
     # local choice so they can swap their placeholder model on their end.
-    if peerId in cachedAppearances:
-        var cached: Dictionary = cachedAppearances[peerId]
-        remote.set_appearance(cached.body, cached.material)
-        cachedAppearances.erase(peerId)
+    _drain_peer_cache(cachedAppearances, peerId, _apply_cached_appearance.bind(remote))
     var myAppearance: Dictionary = load_local_appearance()
     playerState.send_appearance_to(peerId, myAppearance.body, myAppearance.material)
 
-    # Equipment: apply cached + push our current weapon to the new peer.
-    if peerId in cachedEquipment:
-        remote.set_active_weapon(cachedEquipment[peerId])
-        cachedEquipment.erase(peerId)
+    # Attachments before equipment so the weapon-change apply picks up the
+    # stored list in one pass. set_active_attachments stores the list but is a
+    # no-op until an activeWeapon exists; set_active_weapon then runs
+    # _apply_attachments() internally using the stored list.
+    _drain_peer_cache(cachedAttachments, peerId, remote.set_active_attachments)
+    _drain_peer_cache(cachedEquipment, peerId, remote.set_active_weapon)
     playerState.send_equipment_to(peerId, playerState.get_current_weapon_name())
+    playerState.send_attachments_to(peerId, playerState.get_current_attachments())
+
+
+## Generic peer-keyed cache drain. [param apply] receives the cached value as
+## its sole dispatched argument (additional context can be bound via
+## [method Callable.bind], which appends to the call args). Keeps the
+## appearance/equipment/attachments spawn handshake symmetric and avoids
+## repeating the has/read/erase triplet in three places.
+func _drain_peer_cache(cache: Dictionary, peerId: int, apply: Callable) -> void:
+    if !cache.has(peerId):
+        return
+    apply.call(cache[peerId])
+    cache.erase(peerId)
+
+
+func _apply_cached_appearance(cached: Dictionary, remote: Node3D) -> void:
+    if !is_instance_valid(remote):
+        return
+    remote.set_appearance(cached.body, cached.material)
 
 
 func on_remote_node_exiting(peerId: int) -> void:
@@ -1578,8 +1602,8 @@ func _request_world_id() -> void:
     if FileAccess.file_exists(worldPath):
         var world: Resource = load(worldPath)
         if world != null:
-            diff = world.get(&"difficulty") if world.get(&"difficulty") != null else 1
-            season = world.get(&"season") if world.get(&"season") != null else 1
+            diff = world.get(&"difficulty", 1)
+            season = world.get(&"season", 1)
     _receive_world_id.rpc_id(peerId, worldId, diff, season)
 
 

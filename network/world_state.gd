@@ -715,6 +715,23 @@ func request_trader_task_complete(traderPath: String, taskName: String) -> void:
         return
     if trader.tasksCompleted.has(taskName):
         return
+    # Validate task belongs to this trader's declared task list. Protects
+    # against clients spoofing unrelated taskNames (wrong trader, unknown
+    # name, empty string) to grab rewards without the input items.
+    var traderData: Resource = trader.get(&"traderData", null)
+    if !is_instance_valid(traderData):
+        return
+    var tasks: Array = traderData.get(&"tasks", [])
+    if tasks.is_empty():
+        return
+    var known: bool = false
+    for taskData: Resource in tasks:
+        if is_instance_valid(taskData) && taskData.name == taskName:
+            known = true
+            break
+    if !known:
+        push_warning("[world_state] Rejecting trader task '%s' from peer %d — not in %s tasks" % [taskName, multiplayer.get_remote_sender_id(), traderData.get(&"name", "?")])
+        return
     # Host applies + saves the same as solo. No TaskData object in hand, so we
     # inline the parts of Trader.CompleteTask that don't need one.
     trader.tasksCompleted.append(taskName)

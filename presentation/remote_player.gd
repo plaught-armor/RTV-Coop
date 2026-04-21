@@ -94,6 +94,14 @@ var meshNode: MeshInstance3D = null
 var flashNode: Node3D = null
 var activeWeapon: Node3D = null
 var activeMuzzle: Node3D = null
+## Attachment file-stem list ([code]&"AKM_Muzzle"[/code], [code]&"Kobra"[/code],
+## ...) last received from the remote via [method set_active_attachments].
+## Stored as [StringName] so [method _apply_attachments]'s
+## [method Node.get_node_or_null] lookup pointer-compares against the
+## [code]Attachments[/code] child names instead of running the String match
+## path on every poll. Cached so [method set_active_weapon] can re-apply them
+## when the weapon node swaps.
+var _activeAttachments: Array[StringName] = []
 
 const PATH_COLLISION: NodePath = ^"Collision"
 const PATH_ANIMATIONS: NodePath = ^"Animations"
@@ -332,8 +340,10 @@ func set_active_weapon(weaponName: String) -> void:
         baked.visible = true
         activeWeapon = baked
         activeMuzzle = baked.get_node_or_null(PATH_MUZZLE) as Node3D
+        _apply_attachments()
         return
     _attach_dynamic_weapon(weapons, weaponName)
+    _apply_attachments()
 
 
 ## Cache of authored hand-slot transforms harvested from every AI rig's
@@ -405,6 +415,39 @@ func _attach_dynamic_weapon(weapons: Node, weaponName: String) -> void:
     weapons.add_child(weapon)
     activeWeapon = weapon as Node3D
     activeMuzzle = weapon.get_node_or_null(PATH_MUZZLE) as Node3D
+
+
+## Equipment-sync entry for attachments. Mirrors [method Pickup._ready]'s
+## attachment reveal: walks the active weapon's [code]Attachments[/code] child,
+## hides every attachment node, then [code].show()[/code]s the ones whose
+## [code]name[/code] matches the incoming [StringName] list. Names are the
+## authored Attachments-child [member Node.name] values that the sender pulled
+## straight from its own [member WeaponRig.attachments] — no String round-trip
+## and no allowlist needed since untrusted peers can only point the lookup at
+## nodes that already exist under our activeWeapon.
+func set_active_attachments(names: Array[StringName]) -> void:
+    _activeAttachments = names
+    _apply_attachments()
+
+
+func _apply_attachments() -> void:
+    if !is_instance_valid(activeWeapon):
+        return
+    var attachmentsRoot: Node = activeWeapon.get_node_or_null(&"Attachments")
+    if attachmentsRoot == null:
+        return
+    for child: Node in attachmentsRoot.get_children():
+        if child is Node3D:
+            (child as Node3D).visible = false
+    for stem: StringName in _activeAttachments:
+        var node: Node = attachmentsRoot.get_node_or_null(stem)
+        if node is Node3D:
+            (node as Node3D).visible = true
+            # Update activeMuzzle so fire-event flashes use the equipped muzzle
+            # instead of the bare-barrel Muzzle node.
+            var candidate: Node3D = node.get_node_or_null(PATH_MUZZLE) as Node3D
+            if candidate != null:
+                activeMuzzle = candidate
 
 
 ## Allowlist for weapon file names — prevents path traversal / arbitrary load
@@ -603,8 +646,9 @@ func _apply_flashlight() -> void:
         _flashlight.spot_range = 50.0
         _flashlight.light_energy = 20.0
         _flashlight.shadow_enabled = false
-        # Head bone forward = +Z in this rig; flip so the cone shines ahead.
-        _flashlight.rotate_y(PI)
+        # AI rigs' Eyes BoneAttachment3D (bound to Head with identity transform)
+        # uses -basis.z as forward per AI.gd Sensor — Head bone's -Z = face forward.
+        # SpotLight3D default forward is also -Z, so no rotation needed.
         _flashlightMount.add_child(_flashlight)
     _flashlight.visible = wanted
 

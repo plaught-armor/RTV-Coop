@@ -825,9 +825,9 @@ func _read_world_meta(worldDir: String, dirName: String) -> Dictionary:
     # Read World.tres for game data
     var worldSave: Resource = load(worldDir + "World.tres")
     if worldSave != null:
-        meta["day"] = worldSave.get(&"day") if worldSave.get(&"day") != null else 1
-        meta["season"] = worldSave.get(&"season") if worldSave.get(&"season") != null else 1
-        meta["difficulty"] = worldSave.get(&"difficulty") if worldSave.get(&"difficulty") != null else 1
+        meta["day"] = worldSave.get(&"day", 1)
+        meta["season"] = worldSave.get(&"season", 1)
+        meta["difficulty"] = worldSave.get(&"difficulty", 1)
 
     meta["players"] = _count_players_in_world(worldDir + "players/")
     return meta
@@ -1225,6 +1225,18 @@ func show_lobby(useSteam: bool) -> void:
             copyBtn.pressed.connect(_on_lobby_copy_text.bind(text))
             addrBox.add_child(copyBtn)
 
+    # Session settings (host-only). Daylight/night Simulation rate multipliers
+    # fall through to _cm.set_setting which broadcasts to all peers via
+    # world_state.broadcast_settings. Sliders cover 0.1×..10× — lets the host
+    # compress a full day cycle to ~3 min or slow night pacing for sneaking.
+    var settingsHeader: Label = Label.new()
+    settingsHeader.text = "Session Settings"
+    settingsHeader.add_theme_font_size_override("font_size", 14)
+    vbox.add_child(settingsHeader)
+
+    _build_rate_slider(vbox, "Day rate", "day_rate_multiplier")
+    _build_rate_slider(vbox, "Night rate", "night_rate_multiplier")
+
     # Connected players
     var playersHeader: Label = Label.new()
     playersHeader.text = "Players"
@@ -1267,6 +1279,45 @@ func show_lobby(useSteam: bool) -> void:
 
 func _on_lobby_copy_text(copyText: String) -> void:
     DisplayServer.clipboard_set(copyText)
+
+
+## Builds a labeled HSlider row bound to a [member CoopManager.settings] key.
+## Value range mirrors the simulation_patch clamp (0.1×..10×). Label on the
+## right updates live as the host drags. Slider → _cm.set_setting broadcasts
+## to every peer through world_state.
+func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> void:
+    var row: HBoxContainer = HBoxContainer.new()
+    row.add_theme_constant_override("separation", 8)
+    row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    parent.add_child(row)
+
+    var label: Label = Label.new()
+    label.text = caption
+    label.custom_minimum_size = Vector2(96, 0)
+    row.add_child(label)
+
+    var slider: HSlider = HSlider.new()
+    slider.min_value = 0.1
+    slider.max_value = 10.0
+    slider.step = 0.1
+    slider.value = float(_cm.get_setting(key, 1.0))
+    slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    slider.custom_minimum_size = Vector2(160, 0)
+    row.add_child(slider)
+
+    var valueLabel: Label = Label.new()
+    valueLabel.text = "%.1fx" % slider.value
+    valueLabel.custom_minimum_size = Vector2(48, 0)
+    row.add_child(valueLabel)
+
+    slider.value_changed.connect(_on_rate_slider_changed.bind(key, valueLabel))
+
+
+func _on_rate_slider_changed(value: float, key: String, valueLabel: Label) -> void:
+    if is_instance_valid(valueLabel):
+        valueLabel.text = "%.1fx" % value
+    if is_instance_valid(_cm) && _cm.has_method(&"set_setting"):
+        _cm.set_setting(key, value)
 
 
 func _sort_worlds_by_last_played(a: Dictionary, b: Dictionary) -> bool:

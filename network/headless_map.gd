@@ -516,7 +516,7 @@ func extract_switch_states() -> Dictionary[NodePath, bool]:
             continue
         if !mapScene.is_ancestor_of(obj):
             continue
-        switches[mapScene.get_path_to(obj)] = obj.get(&"active") == true
+        switches[mapScene.get_path_to(obj)] = obj.get(&"active", false)
     return switches
 
 # ---------- Snapshot / Restore ----------

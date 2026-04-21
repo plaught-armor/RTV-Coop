@@ -262,13 +262,13 @@ func _resolve_fire_audio(weaponData: Resource, hasSuppressor: bool) -> Dictionar
     var tailAudio: String = ""
     var fireRes: Resource = null
     var tailRes: Resource = null
-    var indoor: bool = _cm.gd.get(&"indoor") == true
+    var indoor: bool = _cm.gd.get(&"indoor", false)
 
     if hasSuppressor:
         fireRes = weaponData.get(&"fireSuppressed")
         tailRes = weaponData.get(&"tailIndoorSuppressed") if indoor else weaponData.get(&"tailOutdoorSuppressed")
     else:
-        var mode: int = _cm.gd.get(&"firemode") if _cm.gd.get(&"firemode") != null else 1
+        var mode: int = _cm.gd.get(&"firemode", 1)
         fireRes = weaponData.get(&"fireAuto") if mode == 2 else weaponData.get(&"fireSemi")
         tailRes = weaponData.get(&"tailIndoor") if indoor else weaponData.get(&"tailOutdoor")
 
