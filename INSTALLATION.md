@@ -13,17 +13,16 @@
    - **Windows:** `C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok\mods\`
    - **Linux:** `~/.local/share/Steam/steamapps/common/Road to Vostok/mods/`
 3. Launch the game through Steam
-4. You should see **[Ins] Multiplayer** in the top-right corner
+4. The main menu shows **Singleplayer** and **Multiplayer** buttons
 
 ## Verify
 
-Once in-game and loaded into a map:
+1. From the main menu, click **Multiplayer** — submenu shows **Host (Steam)**, **Host (IP)**, **Browse**, **Direct Join**
+2. Click **Host (Steam)** and pick (or create) a world — in-game HUD shows a connected peer count
+3. In-game, press **Esc** to open the settings menu, then the **Multiplayer** tab — lists connected players, friends to invite, and the session IP
+4. Press **F12** in-game to toggle the HUD overlay (player list + ping)
 
-1. **Top-right corner** shows `[Ins] Multiplayer`
-2. Press **INS** (Insert key) to open the multiplayer panel
-3. You should see **Host**, **Refresh**, and **Invite** buttons
-
-If the HUD shows `Steam: offline` or `Steam: connecting...`:
+If the Multiplayer submenu shows `Steam: offline` or the Invite Friends list is empty:
 - Make sure Steam is running before launching the game
 - Check the logs (see below)
 
