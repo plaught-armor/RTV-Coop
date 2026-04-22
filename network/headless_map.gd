@@ -6,6 +6,12 @@ extends Node
 ## Emitted once the threaded scene load + finalize completes.
 signal setup_finished(success: bool)
 
+const PATH_CORE: NodePath = ^"Core"
+const PATH_AI: NodePath = ^"AI"
+const PATH_A_POOL: NodePath = ^"A_Pool"
+const PATH_B_POOL: NodePath = ^"B_Pool"
+const PATH_AGENTS: NodePath = ^"Agents"
+
 var _cm: Node
 var mapPath: String = ""
 var viewport: SubViewport = null
@@ -100,7 +106,7 @@ func _finalize_setup() -> void:
     viewport.add_child(mapScene)
 
     # Headless doesn't need player/UI (Core) or sky/glow buffers (WorldEnvironment).
-    var core: Node = mapScene.get_node_or_null("Core")
+    var core: Node = mapScene.get_node_or_null(PATH_CORE)
     if core != null:
         core.queue_free()
     _strip_world_environments(mapScene)
@@ -120,12 +126,12 @@ func _finalize_setup() -> void:
 func _cache_ai_spawner_refs() -> void:
     if mapScene == null:
         return
-    _aiSpawner = mapScene.get_node_or_null("AI")
+    _aiSpawner = mapScene.get_node_or_null(PATH_AI)
     if _aiSpawner == null:
         return
-    _aiAPool = _aiSpawner.get_node_or_null("A_Pool")
-    _aiBPool = _aiSpawner.get_node_or_null("B_Pool")
-    _aiAgents = _aiSpawner.get_node_or_null("Agents")
+    _aiAPool = _aiSpawner.get_node_or_null(PATH_A_POOL)
+    _aiBPool = _aiSpawner.get_node_or_null(PATH_B_POOL)
+    _aiAgents = _aiSpawner.get_node_or_null(PATH_AGENTS)
 
 
 ## Builds a SubViewport with rendering/audio/buffers fully disabled.
@@ -516,7 +522,8 @@ func extract_switch_states() -> Dictionary[NodePath, bool]:
             continue
         if !mapScene.is_ancestor_of(obj):
             continue
-        switches[mapScene.get_path_to(obj)] = obj.get(&"active", false)
+        var activeVal: Variant = obj.get(&"active")
+        switches[mapScene.get_path_to(obj)] = activeVal == true
     return switches
 
 # ---------- Snapshot / Restore ----------

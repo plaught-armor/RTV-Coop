@@ -216,7 +216,7 @@ func _spawn_puppet_rig(body: String) -> bool:
     # (container, eyes, backpacks, hitbox attachments) gets stripped after
     # the AI script's @onready refs resolve.
     for trash: String in SCENE_TRASH:
-        var n: Node = ai.get_node_or_null(trash)
+        var n: Node = ai.get_node_or_null(NodePath(trash))
         if n != null:
             n.get_parent().remove_child(n)
             n.queue_free()
@@ -239,7 +239,7 @@ func _spawn_puppet_rig(body: String) -> bool:
     # Skeleton-level trash strip (container, eyes, backpacks, hit boxes).
     if skeleton != null:
         for trash: String in SKEL_TRASH:
-            var n: Node = skeleton.get_node_or_null(trash)
+            var n: Node = skeleton.get_node_or_null(NodePath(trash))
             if n != null:
                 n.get_parent().remove_child(n)
                 n.queue_free()
@@ -346,7 +346,7 @@ func set_active_weapon(weaponName: String) -> void:
     # The AI rig already bundles every weapon its source AI carries under the
     # Weapons BoneAttachment3D (with the authored Hand_R transform). Flip the
     # matching one visible if present; otherwise dynamic-attach below.
-    var baked: Node3D = weapons.get_node_or_null(weaponName) as Node3D
+    var baked: Node3D = weapons.get_node_or_null(NodePath(weaponName)) as Node3D
     if baked != null:
         baked.visible = true
         activeWeapon = baked
@@ -381,7 +381,7 @@ static func _ensure_hand_slots() -> void:
         var inst: Node = packed.instantiate()
         if inst == null:
             continue
-        var weaponsNode: Node = inst.get_node_or_null("%s/Armature/Skeleton3D/Weapons" % body)
+        var weaponsNode: Node = inst.get_node_or_null(NodePath("%s/Armature/Skeleton3D/Weapons" % body))
         if weaponsNode != null:
             for w: Node in weaponsNode.get_children():
                 if w is Node3D && !_handSlotTransforms.has(w.name):
@@ -577,7 +577,7 @@ func _update_occlusion() -> void:
         occlusionRay = PhysicsRayQueryParameters3D.create(from, to)
         occlusionRay.collision_mask = 1
         # Exclude the local player so the ray doesn't immediately self-hit.
-        var controller: Node = get_tree().current_scene.get_node_or_null("Core/Controller")
+        var controller: Node = get_tree().current_scene.get_node_or_null(PATH_LOCAL_CONTROLLER)
         if controller is PhysicsBody3D:
             occlusionRay.exclude = [controller.get_rid()]
     else:
@@ -604,7 +604,7 @@ func die() -> void:
     if animTree != null:
         animTree.active = false
     _start_ragdoll()
-    var hitBody: Node = get_node_or_null("HitBody")
+    var hitBody: Node = get_node_or_null(PATH_HITBODY)
     if hitBody != null:
         hitBody.collision_layer = 0
         hitBody.remove_from_group(&"CoopRemote")

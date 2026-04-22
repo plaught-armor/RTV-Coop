@@ -48,6 +48,13 @@ const META_FILE: String = "meta.cfg"
 const SELECTED_COLOR: Color = Color(0.4, 0.8, 0.4)
 const UNSELECTED_COLOR: Color = Color(0.7, 0.7, 0.7)
 
+# Scene-node NodePath constants. Using literal ^"..." avoids per-call String→NodePath
+# re-parsing and keeps lookups type-safe with Godot 4.6's stricter Node APIs.
+const PATH_CONTROLLER: NodePath = ^"Core/Controller"
+const PATH_MENU_SUBMENU: NodePath = ^"CoopMPSubmenu"
+const PATH_MENU_MAIN: NodePath = ^"Main"
+const PATH_LOADER_ABS: NodePath = ^"/root/Loader"
+
 # Direct-connect dialog
 var directJoinPanel: Control = null
 var djAddressInput: LineEdit = null
@@ -265,7 +272,7 @@ func close_panel() -> void:
 
 func is_in_gameplay() -> bool:
     var scene: Node = get_tree().current_scene
-    return is_instance_valid(scene) && scene.get_node_or_null("Core/Controller") != null
+    return is_instance_valid(scene) && scene.get_node_or_null(PATH_CONTROLLER) != null
 
 # ---------- Actions ----------
 
@@ -696,8 +703,8 @@ func _show_mp_submenu_if_on_menu() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene) || scene.scene_file_path != "res://Scenes/Menu.tscn":
         return
-    var submenu: Node = scene.get_node_or_null("CoopMPSubmenu")
-    var main: Node = scene.get_node_or_null("Main")
+    var submenu: Node = scene.get_node_or_null(PATH_MENU_SUBMENU)
+    var main: Node = scene.get_node_or_null(PATH_MENU_MAIN)
     if submenu != null:
         submenu.show()
     elif main != null:
@@ -711,7 +718,7 @@ func _restore_main_menu_if_open() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene) || scene.scene_file_path != "res://Scenes/Menu.tscn":
         return
-    var main: Node = scene.get_node_or_null("Main")
+    var main: Node = scene.get_node_or_null(PATH_MENU_MAIN)
     if main != null:
         main.show()
 
@@ -825,9 +832,12 @@ func _read_world_meta(worldDir: String, dirName: String) -> Dictionary:
     # Read World.tres for game data
     var worldSave: Resource = load(worldDir + "World.tres")
     if worldSave != null:
-        meta["day"] = worldSave.get(&"day", 1)
-        meta["season"] = worldSave.get(&"season", 1)
-        meta["difficulty"] = worldSave.get(&"difficulty", 1)
+        var dayVal: Variant = worldSave.get(&"day")
+        var seasonVal: Variant = worldSave.get(&"season")
+        var diffVal: Variant = worldSave.get(&"difficulty")
+        meta["day"] = dayVal if dayVal != null else 1
+        meta["season"] = seasonVal if seasonVal != null else 1
+        meta["difficulty"] = diffVal if diffVal != null else 1
 
     meta["players"] = _count_players_in_world(worldDir + "players/")
     return meta
@@ -855,12 +865,14 @@ func _format_world_meta(world: Dictionary) -> String:
         var now: int = int(Time.get_unix_time_from_system())
         var elapsed: int = now - lastPlayed
         var elapsedText: String = ""
+        @warning_ignore_start("integer_division")
         if elapsed < 3600:
             elapsedText = "%dm ago" % max(1, elapsed / 60)
         elif elapsed < 86400:
             elapsedText = "%dh ago" % (elapsed / 3600)
         else:
             elapsedText = "%dd ago" % (elapsed / 86400)
+        @warning_ignore_restore("integer_division")
         base += " • " + elapsedText
 
     return base
@@ -884,12 +896,14 @@ func _format_world_label(world: Dictionary) -> String:
     if lastPlayed > 0:
         var now: int = int(Time.get_unix_time_from_system())
         var elapsed: int = now - lastPlayed
+        @warning_ignore_start("integer_division")
         if elapsed < 3600:
             timeText = " — %dm ago" % (elapsed / 60)
         elif elapsed < 86400:
             timeText = " — %dh ago" % (elapsed / 3600)
         else:
             timeText = " — %dd ago" % (elapsed / 86400)
+        @warning_ignore_restore("integer_division")
 
     return "%s — %s Day %d, %s, %d player(s)%s" % [world_name, seasonText, day, diffText, players, timeText]
 
@@ -1073,7 +1087,7 @@ func show_character_picker(onConfirm: Callable, onCancel: Callable) -> void:
 
 
 func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
-    var loader: Node = get_node_or_null("/root/Loader")
+    var loader: Node = get_node_or_null(PATH_LOADER_ABS)
     if loader == null:
         return
     _cm.wipe_user_saves()
@@ -1435,7 +1449,7 @@ func on_world_selected(worldId: String) -> void:
         _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
 
     # Resume from the most recently visited shelter (or Cabin if none).
-    var loader: Node = get_node_or_null("/root/Loader")
+    var loader: Node = get_node_or_null(PATH_LOADER_ABS)
     if loader == null:
         return
     var shelter: String = loader.ValidateShelter() if loader.has_method(&"ValidateShelter") else ""

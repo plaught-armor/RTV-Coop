@@ -4,6 +4,11 @@ extends Node
 
 var gameData: GameData = preload("res://Resources/GameData.tres")
 
+const PATH_UI: NodePath = ^"Core/UI"
+const PATH_INTERFACE: NodePath = ^"Core/UI/Interface"
+const PATH_EVENT_SYSTEM: NodePath = ^"EventSystem"
+const PATH_DATABASE_ABS: NodePath = ^"/root/Database"
+
 var _cm: Node
 ## Cached scene refs, refreshed per scene transition.
 var _currentScene: Node = null
@@ -33,15 +38,17 @@ func refresh_scene_cache() -> void:
         _uiManager = null
         _interface = null
         return
-    _uiManager = _currentScene.get_node_or_null("Core/UI")
-    _interface = _currentScene.get_node_or_null("Core/UI/Interface")
+    _uiManager = _currentScene.get_node_or_null(PATH_UI)
+    _interface = _currentScene.get_node_or_null(PATH_INTERFACE)
 
 
-## Null-safe lookup against [member _currentScene].
+## Null-safe lookup against [member _currentScene]. Accepts [String] for RPC-
+## delivered paths and wraps them in a [NodePath] (Godot 4.6 requires NodePath
+## for [method Node.get_node_or_null]).
 func _scene_node(path: String) -> Node:
     if !is_instance_valid(_currentScene):
         return null
-    return _currentScene.get_node_or_null(path)
+    return _currentScene.get_node_or_null(NodePath(path))
 
 
 ## Item sync: unique sync_id on each dropped item.
@@ -503,7 +510,7 @@ func grant_pickup_to_client(packedSlot: Dictionary) -> void:
 ## Looks up a Pickup PackedScene from Database constants by file key.
 func find_pickup_scene(fileKey: String) -> PackedScene:
     if !_dbConstantsReady:
-        var db: Node = get_node_or_null("/root/Database")
+        var db: Node = get_node_or_null(PATH_DATABASE_ABS)
         if db == null:
             return null
         _dbConstants = db.get_script().get_script_constant_map()
@@ -585,7 +592,7 @@ func sync_trader_supply(traderPath: String, packedSupply: Array[Dictionary], tax
     # Replace local supply with host's authoritative copy.
     trader.supply = _slotSerializer.unpack_array(packedSupply)
     trader.tax = tax
-    var uiMgr: Node = _scene_node("Core/UI")
+    var uiMgr: Node = _uiManager
     if is_instance_valid(uiMgr) && uiMgr.has_method(&"OpenTrader"):
         uiMgr.OpenTrader(trader)
 
@@ -994,7 +1001,7 @@ func broadcast_event(eventName: String, params: PackedInt32Array) -> void:
     var scene: Node = _currentScene
     if !is_instance_valid(scene):
         return
-    var eventSystem: Node = scene.get_node_or_null(^"EventSystem")
+    var eventSystem: Node = scene.get_node_or_null(PATH_EVENT_SYSTEM)
     if eventSystem == null:
         return
     if eventSystem.has_method(&"receive_event"):

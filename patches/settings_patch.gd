@@ -47,14 +47,109 @@ func _ensure_cm() -> bool:
 
 const _DEFAULT_PORT_FALLBACK: int = 9050
 
+const PATH_COOP_TABS: NodePath = ^"CoopTabs"
+const PATH_SETTINGS: NodePath = ^"Settings"
+const PATH_EXIT_BAR: NodePath = ^"ExitBar"
+const PATH_HEADER: NodePath = ^"Header"
+const PATH_PANEL: NodePath = ^"Panel"
+const PATH_MODES: NodePath = ^"Modes"
+const PATH_RESET: NodePath = ^"Reset"
+const PATH_MARGIN: NodePath = ^"Margin"
+const PATH_MENU_BTN: NodePath = ^"Menu"
+const PATH_QUIT_BTN: NodePath = ^"Quit"
+
+const PATH_ROOT_MAP_WORLD: NodePath = ^"/root/Map/World"
+const PATH_ROOT_MENU: NodePath = ^"/root/Menu"
+
 
 func _default_port() -> int:
     return _cm.DEFAULT_PORT if _ensure_cm() else _DEFAULT_PORT_FALLBACK
 
 
+## Overrides base [method Settings._ready] to null-guard the absolute-path
+## lookups for [code]/root/Map/World[/code] and [code]/root/Menu[/code]. Base
+## uses [method Node.get_node] (no fallback) after a 100 ms await, so a scene
+## transition landing mid-await — or any instance where [member GameData.menu]
+## disagrees with the actual current_scene — crashes with "Node not found".
+## Replicates base body otherwise; [code]super._ready()[/code] is intentionally
+## skipped to avoid the unguarded lookup.
 func _ready() -> void:
-    super._ready()
+    await get_tree().create_timer(0.1, false).timeout
+    if !is_instance_valid(self):
+        return
+    currentRID = get_tree().get_root().get_viewport_rid()
+
+    if !gameData.menu:
+        world = get_node_or_null(PATH_ROOT_MAP_WORLD)
+    else:
+        mainMenu = get_node_or_null(PATH_ROOT_MENU)
+
+    if pause != null:
+        if !gameData.menu:
+            pause.show()
+        else:
+            pause.hide()
+
+    if menu != null && quit != null:
+        if !gameData.menu:
+            menu.disabled = false
+            quit.disabled = false
+        else:
+            menu.disabled = true
+            quit.disabled = true
+
+    GetMonitors()
+    GetWindowSizes()
+
+    preferences = Preferences.Load() as Preferences
+    LoadPreferences()
+
+    if blocker != null:
+        blocker.mouse_filter = MOUSE_FILTER_IGNORE
+
     _restructure_into_tabs.call_deferred()
+
+
+## Overrides base [method Settings.LoadPreferences] only to guard the
+## [code]!gameData.menu[/code] branch that calls [member interface] methods.
+## Base assumes [member interface] is wired (Core.tscn sets it via NodePath
+## export) but the Menu-layer Settings instance — and editor-driven runs that
+## instantiate Settings.tscn at [code]/root/Settings[/code] standalone —
+## leave it null. Loose [member gameData] timing during scene transitions
+## (menu→map / map→menu) also lands here: [member gameData.menu] stays stale
+## after a reparent so the branch fires when it shouldn't. Crash path:
+## [code]interface.LoadDefaultType → "Nonexistent function on Nil"[/code].
+func LoadPreferences() -> void:
+    # Delegate the menu-side prefs wiring to base unconditionally — those
+    # touch [member mainMenu] which we don't use here.
+    if gameData.menu or interface != null:
+        super.LoadPreferences()
+        return
+    # gameData.menu is false but [member interface] isn't wired yet — run
+    # base prefs wiring that doesn't depend on [member interface], then
+    # skip the unsafe block at Settings.gd:217.
+    _load_prefs_without_interface()
+
+
+## Mirrors base [method Settings.LoadPreferences] but omits the
+## [code]!gameData.menu[/code] block at [code]Scripts/Settings.gd:216-220[/code]
+## so a null [member interface] doesn't crash. Everything after that block
+## is safe to run.
+func _load_prefs_without_interface() -> void:
+    if preferences == null:
+        return
+    if masterSlider != null:
+        masterSlider.value = preferences.masterVolume
+    AudioServer.set_bus_volume_db(masterBus, linear_to_db(preferences.masterVolume))
+    AudioServer.set_bus_mute(masterBus, preferences.masterVolume < 0.01)
+    if ambientSlider != null:
+        ambientSlider.value = preferences.ambientVolume
+    AudioServer.set_bus_volume_db(ambientBus, linear_to_db(preferences.ambientVolume))
+    AudioServer.set_bus_mute(ambientBus, preferences.ambientVolume < 0.01)
+    if musicSlider != null:
+        musicSlider.value = preferences.musicVolume
+    AudioServer.set_bus_volume_db(musicBus, linear_to_db(preferences.musicVolume))
+    AudioServer.set_bus_mute(musicBus, preferences.musicVolume < 0.01)
 
 
 ## Tracks the currently-shown tab content panel so we can hide/show on click.
@@ -69,15 +164,22 @@ var _activeTab: String = ""
 ## already exists, returns immediately. Skipped on the main menu so that
 ## Settings stays vanilla there; only the in-game pause version uses tabs.
 func _restructure_into_tabs() -> void:
-    if get_node_or_null("CoopTabs") != null:
+    if get_node_or_null(PATH_COOP_TABS) != null:
         return
     if gameData != null && gameData.menu:
         return  # main menu — keep vanilla Settings layout
 
-    var origBox: Node = get_node_or_null("Settings")
+    var origBox: Node = get_node_or_null(PATH_SETTINGS)
     if origBox == null:
         push_warning("[settings_patch] Settings BoxContainer not found, aborting")
         return
+
+    # NOTE: reparent/add_child below triggers a cascade of "Lambda capture at
+    # index 0 was freed" errors from base-game / modloader inline lambdas
+    # connected to tree-mutation signals. Attempted to prune them up front
+    # but there's no public API to inspect lambda captures, and scorched-
+    # earth disconnect broke C++ internal signal handlers. Filter via log
+    # grep (per .wolf/debugging_guide.md) — noise only, not functional.
 
     var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
 
@@ -188,9 +290,9 @@ func _build_exit_bar(origBox: Node, outer: Control) -> void:
     var exitSection: Node = _find_section(origBox, "Exit")
     if exitSection == null:
         return
-    var exitGrid: Node = exitSection.get_node_or_null("Settings")
-    var menuBtn: Node = exitGrid.get_node_or_null("Menu") if exitGrid != null else null
-    var quitBtn: Node = exitGrid.get_node_or_null("Quit") if exitGrid != null else null
+    var exitGrid: Node = exitSection.get_node_or_null(PATH_SETTINGS)
+    var menuBtn: Node = exitGrid.get_node_or_null(PATH_MENU_BTN) if exitGrid != null else null
+    var quitBtn: Node = exitGrid.get_node_or_null(PATH_QUIT_BTN) if exitGrid != null else null
     if menuBtn == null && quitBtn == null:
         return
 
@@ -232,11 +334,12 @@ func _show_tab(groupName: String) -> void:
 ## Finds a named section anywhere inside the original Settings BoxContainer.
 ## Sections live as direct children of Settings or Settings/Row_NN.
 func _find_section(box: Node, sectionName: String) -> Node:
-    var direct: Node = box.get_node_or_null(sectionName)
+    var path: NodePath = NodePath(sectionName)
+    var direct: Node = box.get_node_or_null(path)
     if direct != null:
         return direct
     for child: Node in box.get_children():
-        var nested: Node = child.get_node_or_null(sectionName)
+        var nested: Node = child.get_node_or_null(path)
         if nested != null:
             return nested
     return null
@@ -270,10 +373,10 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
         # Inputs scene contains: Header, Panel (key bindings), Modes
         # (toggles), Reset (button). We split: Panel + Header + Reset go left,
         # Modes goes right with Mouse.
-        var header: Node = settings_inputs.get_node_or_null("Header")
-        var inputsPanel: Node = settings_inputs.get_node_or_null("Panel")
-        var modes: Node = settings_inputs.get_node_or_null("Modes")
-        var resetBtn: Node = settings_inputs.get_node_or_null("Reset")
+        var header: Node = settings_inputs.get_node_or_null(PATH_HEADER)
+        var inputsPanel: Node = settings_inputs.get_node_or_null(PATH_PANEL)
+        var modes: Node = settings_inputs.get_node_or_null(PATH_MODES)
+        var resetBtn: Node = settings_inputs.get_node_or_null(PATH_RESET)
 
         if header != null:
             header.reparent(leftCol)
@@ -290,7 +393,7 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
             (inputsPanel as Control).size_flags_vertical = Control.SIZE_EXPAND_FILL
             # The MarginContainer inside also has layout_mode=0 — make it
             # follow its parent (the Panel) so it fills properly too.
-            var margin: Node = inputsPanel.get_node_or_null("Margin")
+            var margin: Node = inputsPanel.get_node_or_null(PATH_MARGIN)
             if margin != null:
                 (margin as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
         if resetBtn != null:
@@ -804,19 +907,19 @@ func _on_exit_return_pressed() -> void:
 
 
 func _hide_coop_tabs() -> void:
-    var tabs: Node = get_node_or_null("CoopTabs")
+    var tabs: Node = get_node_or_null(PATH_COOP_TABS)
     if tabs != null:
         (tabs as Control).hide()
-    var exitBar: Node = get_node_or_null("ExitBar")
+    var exitBar: Node = get_node_or_null(PATH_EXIT_BAR)
     if exitBar != null:
         (exitBar as Control).hide()
 
 
 func _show_coop_tabs() -> void:
-    var tabs: Node = get_node_or_null("CoopTabs")
+    var tabs: Node = get_node_or_null(PATH_COOP_TABS)
     if tabs != null:
         (tabs as Control).show()
-    var exitBar: Node = get_node_or_null("ExitBar")
+    var exitBar: Node = get_node_or_null(PATH_EXIT_BAR)
     if exitBar != null:
         (exitBar as Control).show()
 

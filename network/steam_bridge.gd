@@ -108,6 +108,20 @@ func _process(delta: float) -> void:
     read_responses()
 
 
+## Aborts an in-flight connect loop early. Called when the user commits to an
+## IP-host session (no Steam path needed), so we stop polling the helper TCP
+## and spamming retries for the full [code]CONNECT_TIMEOUT[/code] window.
+## Idempotent — safe to call when already connected or never started.
+func abort_connect() -> void:
+    if !connecting:
+        return
+    connecting = false
+    connectTimer = 0.0
+    if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+        tcp.disconnect_from_host()
+    _log("Steam helper connect aborted (IP host path)")
+
+
 ## Attempts TCP connection to the helper with retries.
 func poll_connect(delta: float) -> void:
     connectTimer += delta

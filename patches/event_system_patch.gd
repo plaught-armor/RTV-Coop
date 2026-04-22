@@ -14,6 +14,9 @@
 extends "res://Scripts/EventSystem.gd"
 
 
+const PATH_WELL_BOTTOM: NodePath = ^"Bottom"
+
+
 var _cm: Node
 
 
@@ -154,7 +157,7 @@ func _spawn_cat(wellIndex: int) -> void:
     if wellIndex >= wells.size():
         return
     var randomWell: Node3D = wells[wellIndex]
-    var wellBottom: Node3D = randomWell.get_node_or_null("Bottom")
+    var wellBottom: Node3D = randomWell.get_node_or_null(PATH_WELL_BOTTOM)
     if wellBottom == null:
         return
     var catInstance: Node3D = cat.instantiate()

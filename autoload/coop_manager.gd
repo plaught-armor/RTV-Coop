@@ -66,6 +66,11 @@ var vehicleState: Node = null
 var steamBridge: Node = null
 ## Cached reference to /root/Loader autoload.
 var loader: Node = null
+## Cached reference to [code]get_tree().current_scene[/code], refreshed in
+## [method on_scene_changed]. Consumers (patches, UI, presentation) should
+## prefer this over walking [method Node.get_tree] / [member SceneTree.current_scene]
+## per call. Checked with [method @GDScript.is_instance_valid] before use.
+var currentScene: Node = null
 ## Reference to the co-op UI panel.
 var coopUI: Control = null
 var _pendingHostUseSteam: bool = true
@@ -128,6 +133,7 @@ func _ready() -> void:
 
     register_patches()
     loader = get_node_or_null(PATH_LOADER_ABS)
+    currentScene = get_tree().current_scene
 
     _spawn_network_children()
     _spawn_coop_ui()
@@ -185,12 +191,14 @@ func _spawn_coop_ui() -> void:
     uiLayer.name = "CoopUILayer"
     uiLayer.layer = 100
     add_child(uiLayer)
-    coopUI = load("res://mod/ui/coop_ui.gd").new()
+    var CoopUIScript: Script = preload("res://mod/ui/coop_ui.gd")
+    var CoopHUDScript: Script = preload("res://mod/ui/coop_hud.gd")
+    coopUI = CoopUIScript.new()
     coopUI.name = "CoopUI"
     uiLayer.add_child(coopUI)
     coopUI.init_manager(self)
 
-    var coopHUD: VBoxContainer = load("res://mod/ui/coop_hud.gd").new()
+    var coopHUD: VBoxContainer = CoopHUDScript.new()
     coopHUD.name = "CoopHUD"
     uiLayer.add_child(coopHUD)
     coopHUD.init_manager(self)
@@ -230,7 +238,7 @@ func _update_mp_status() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
         return
-    var submenu: Node = scene.get_node_or_null("CoopMPSubmenu")
+    var submenu: Node = scene.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu == null:
         return
     var hostBtn: Button = submenu.find_child("HostBtn", true, false) as Button
@@ -272,6 +280,9 @@ func register_patches() -> void:
     ]
     for pair: PackedStringArray in patches:
         var patch: Script = load(pair[0])
+        if patch == null:
+            push_error("[register_patches] failed to load %s" % pair[0])
+            continue
         patch.reload()
         patch.take_over_path(pair[1])
     _log("Patches registered (%d)" % patches.size())
@@ -305,6 +316,10 @@ func start_hosting(port: int = DEFAULT_PORT, useSteam: bool = true) -> bool:
     if useSteam && steamBridge.is_ready():
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
+    elif !useSteam && is_instance_valid(steamBridge):
+        # User committed to IP host — no point waiting out the helper connect
+        # loop. Bail so [code]SteamBridge._process[/code] stops polling.
+        steamBridge.abort_connect()
 
     _wasInCoop = true
     _log("Hosting on port %d (id: %d, steam: %s)" % [port, localPeerId, str(useSteam)])
@@ -343,6 +358,10 @@ func join_game(address: String, port: int = DEFAULT_PORT, directConnect: bool = 
         serverPeer.set_timeout(0, 30000, 60000)
     multiplayer.multiplayer_peer = peer
     isHost = false
+    if directConnect && is_instance_valid(steamBridge):
+        # Direct-connect skips the Steam lobby path; drop the helper connect
+        # loop so it doesn't keep spinning until CONNECT_TIMEOUT.
+        steamBridge.abort_connect()
     _log("Connecting to %s:%d" % [address, port])
 
 
@@ -666,6 +685,9 @@ func ensure_all_spawned() -> void:
 
 func on_scene_changed() -> void:
     print("[TX] on_scene_changed begin")
+    # Refresh shared scene cache first so downstream refresh_scene_cache()
+    # calls and any signal handlers observe the new scene consistently.
+    currentScene = get_tree().current_scene
     var wasOnMenu: bool = _wasOnMenu
     _wasOnMenu = _is_on_menu()
     _autoLoadInProgress = false
@@ -1907,7 +1929,7 @@ func _apply_handoff_state(snap: Dictionary) -> void:
         return
     var doors: Dictionary = snap.get(&"doors", {})
     for doorPath: String in doors:
-        var door: Node = scene.get_node_or_null(doorPath)
+        var door: Node = scene.get_node_or_null(NodePath(doorPath))
         if !is_instance_valid(door) || !(door is Door):
             continue
         var state: Dictionary = doors[doorPath]
@@ -1917,7 +1939,7 @@ func _apply_handoff_state(snap: Dictionary) -> void:
             door.animationTime = 4.0
     var switches: Dictionary = snap.get(&"switches", {})
     for switchPath: String in switches:
-        var sw: Node = scene.get_node_or_null(switchPath)
+        var sw: Node = scene.get_node_or_null(NodePath(switchPath))
         if !is_instance_valid(sw) || !sw.has_method(&"Activate"):
             continue
         var active: bool = switches[switchPath]

@@ -16,6 +16,7 @@
 extends "res://Scripts/AI.gd"
 
 const _Perf: GDScript = preload("res://mod/network/perf.gd")
+const PATH_AI: NodePath = ^"AI"
 
 
 var _cm: Node
@@ -52,6 +53,16 @@ func _ready() -> void:
     if puppetMode:
         set_physics_process(false)
         set_process(false)
+    # Resolve CoopManager once. Pool-spawned AI doesn't go through
+    # init_manager() before entering the tree, so look it up here instead of
+    # scanning /root every _physics_process tick.
+    if _cm == null:
+        var root: Node = get_tree().root if get_tree() != null else null
+        if root != null:
+            for child: Node in root.get_children():
+                if child.has_meta(&"is_coop_manager"):
+                    _cm = child
+                    break
 
 
 ## Override Initialize to find map/AISpawner by walking up from self instead of
@@ -77,7 +88,7 @@ func Initialize():
     var mapAncestor: Node = _find_map_ancestor()
     if mapAncestor != null:
         map = mapAncestor
-        var aiNode: Node = mapAncestor.get_node_or_null("AI")
+        var aiNode: Node = mapAncestor.get_node_or_null(PATH_AI)
         if aiNode != null:
             AISpawner = aiNode
         else:
@@ -102,6 +113,9 @@ func Initialize():
     HideGizmos()
 
     await get_tree().create_timer(10.0, false).timeout
+    # AI may be freed during the 10s arm window (map transition, pool reclaim).
+    if !is_instance_valid(self):
+        return
 
     voiceCycle = randf_range(10.0, 60.0)
     sensorActive = true
@@ -112,14 +126,18 @@ func Initialize():
 ## More robust than matching by name since .scn scene roots may vary.
 func _find_map_ancestor() -> Node:
     var node: Node = self
-    while node != null:
-        if node.get_node_or_null("AI") != null:
+    var depth: int = 0
+    while node != null && depth < 64:
+        if node.get_node_or_null(PATH_AI) != null:
             return node
         var parent: Node = node.get_parent()
         # If parent is a SubViewport, this node is the scene root of the headless map.
         if parent is SubViewport:
             return node
         node = parent
+        depth += 1
+    if depth >= 64:
+        push_error("[ai_patch] _find_map_ancestor exceeded 64 hops; giving up")
     return null
 
 # ---------- Physics Process ----------
@@ -130,13 +148,6 @@ func _physics_process(delta: float) -> void:
     # logic entirely (sensor / navmesh / animator / fire detection / movement).
     if puppetMode:
         return
-    if _cm == null:
-        var root: Node = get_tree().root if get_tree() != null else null
-        if root != null:
-            for child: Node in root.get_children():
-                if child.has_meta(&"is_coop_manager"):
-                    _cm = child
-                    break
     if is_instance_valid(_cm) && _cm.is_session_active():
         if !_cm.isHost:
             # Client: AI visuals driven entirely by ai_state.gd snapshots
@@ -301,8 +312,6 @@ func LOSCheck(target: Vector3) -> void:
 
     if LOS.is_colliding():
         var collider: Node = LOS.get_collider()
-        # Original: check "Player" group (host's local player)
-        # Co-op: also check "CoopRemote" group (remote players)
         if collider.is_in_group(&"Player") || collider.is_in_group(&"CoopRemote"):
             lastKnownLocation = playerPosition
             playerVisible = true
@@ -381,8 +390,7 @@ func FireDetection(delta: float) -> void:
         var remote: Node3D = _cm.remoteNodes[peerId]
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
-        var firingVal: Variant = remote.get(&"isFiring")
-        if firingVal == null || !bool(firingVal):
+        if !remote.isFiring:
             continue
         if playerVisible:
             continue
@@ -577,5 +585,3 @@ func Interactor(delta: float) -> void:
             print("[ai_patch] AI opened door %s — broadcast" % doorPath)
 
 # ---------- Helpers ----------
-
-

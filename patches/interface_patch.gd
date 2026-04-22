@@ -4,6 +4,8 @@
 ## item loss if the host rejects the task.
 extends "res://Scripts/Interface.gd"
 
+const PATH_MAP: NodePath = ^"/root/Map"
+
 var _cm: Node
 
 ## Pending task completions awaiting host ACK. Keyed by task name.
@@ -20,7 +22,7 @@ func Drop(target: Node) -> void:
         super.Drop(target)
         return
 
-    var map: Node = get_tree().current_scene.get_node("/root/Map")
+    var map: Node = get_tree().current_scene.get_node(PATH_MAP)
     var file: PackedScene = Database.get(target.slotData.itemData.file)
 
     if !file:

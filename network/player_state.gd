@@ -4,9 +4,35 @@ extends Node
 
 var _cm: Node
 
+const RIG_MANAGER_PATH: NodePath = ^"Core/Camera/Manager"
+const RIG_ATTACHMENTS: StringName = &"attachments"
+const RIG_DATA: StringName = &"data"
+const RIG_FILE: StringName = &"file"
+const PATH_DATABASE: NodePath = ^"Database"
+
+var _cachedRigManager: Node = null
+var _cachedSceneId: int = 0
+
 
 func init_manager(manager: Node) -> void:
     _cm = manager
+
+
+## Resolves the local player's [code]RigManager[/code] node lazily and caches the
+## lookup per scene. Invalidated automatically when the current scene changes
+## or the cached node is freed (scene transitions). Avoids repeated
+## [method Node.get_node_or_null] walks for every attachment/weapon poll.
+func _get_rig_manager() -> Node:
+    var scene: Node = get_tree().current_scene
+    if scene == null:
+        _cachedRigManager = null
+        _cachedSceneId = 0
+        return null
+    var sceneId: int = scene.get_instance_id()
+    if _cachedSceneId != sceneId || !is_instance_valid(_cachedRigManager):
+        _cachedRigManager = scene.get_node_or_null(RIG_MANAGER_PATH)
+        _cachedSceneId = sceneId
+    return _cachedRigManager
 
 
 
@@ -299,7 +325,7 @@ static func _ensure_audio_registry() -> void:
             var v: Variant = lib.get(prop.name)
             if v is Resource && v.resource_path != "":
                 _audioPathById[v.resource_path.hash()] = v.resource_path
-    var db: Node = Engine.get_main_loop().root.get_node_or_null("Database") if Engine.get_main_loop() != null else null
+    var db: Node = Engine.get_main_loop().root.get_node_or_null(PATH_DATABASE) if Engine.get_main_loop() != null else null
     if db != null:
         for child: Node in db.get_children():
             for prop: Dictionary in child.get_property_list():
@@ -599,14 +625,11 @@ func _poll_equipment() -> void:
 ## lookup into its own Attachments node.
 func _read_current_attachments() -> Array[StringName]:
     var out: Array[StringName] = []
-    var scene: Node = get_tree().current_scene
-    if scene == null:
-        return out
-    var rigManager: Node = scene.get_node_or_null("Core/Camera/Manager")
+    var rigManager: Node = _get_rig_manager()
     if rigManager == null:
         return out
     for rig: Node in rigManager.get_children():
-        var attachmentsNode: Node3D = rig.get(&"attachments", null) as Node3D
+        var attachmentsNode: Node3D = rig.get(RIG_ATTACHMENTS) as Node3D
         if attachmentsNode == null:
             continue
         for child: Node in attachmentsNode.get_children():
@@ -663,20 +686,17 @@ func get_current_attachments() -> Array[StringName]:
 ## Walks the local scene to find the active weapon name. Returns "" when no
 ## weapon is drawn (holstered / unarmed / not in a map yet).
 func _read_current_weapon_name() -> String:
-    var scene: Node = get_tree().current_scene
-    if scene == null:
-        return ""
-    var rigManager: Node = scene.get_node_or_null("Core/Camera/Manager")
+    var rigManager: Node = _get_rig_manager()
     if rigManager == null:
         return ""
     # Drawn weapons are added as RigManager children (see base RigManager.gd
     # DrawPrimary/DrawSecondary). WeaponRig exposes its data resource which
     # carries the file stem used across pickup/rig scene paths.
     for child: Node in rigManager.get_children():
-        var data: Resource = child.get(&"data") as Resource
+        var data: Resource = child.get(RIG_DATA) as Resource
         if data == null:
             continue
-        var fileName: Variant = data.get(&"file")
+        var fileName: Variant = data.get(RIG_FILE)
         if fileName is String && !(fileName as String).is_empty():
             return fileName
     return ""

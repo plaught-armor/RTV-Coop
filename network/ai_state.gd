@@ -7,6 +7,9 @@
 ## All lookups use direct array indexing — no dictionary hashing or string keys.
 extends Node
 
+const _AI_CONTAINER_PATHS: Array[NodePath] = [^"A_Pool", ^"B_Pool", ^"Agents"]
+const _AI_POOL_PATHS: Array[NodePath] = [^"A_Pool", ^"B_Pool"]
+
 var _cm: Node
 ## Cached local player refs, refreshed per scene transition.
 var _controller: Node = null
@@ -238,7 +241,7 @@ func register_spawner_pools(spawner: Node) -> void:
 func _collect_tagged_ai_nodes(spawner: Node) -> Dictionary:
     var out: Array[Node] = []
     var maxId: int = -1
-    for container_name: String in ["A_Pool", "B_Pool", "Agents"]:
+    for container_name: NodePath in _AI_CONTAINER_PATHS:
         var container: Node = spawner.get_node_or_null(container_name)
         if container == null:
             continue
@@ -318,7 +321,7 @@ func _assign_sync_ids_from_spawner(spawner: Node) -> Array[Node]:
     var allNodes: Array[Node] = []
     var idx: int = 0
     # Assign IDs to pool children only — deterministic on both host and client
-    for container_name: String in ["A_Pool", "B_Pool"]:
+    for container_name: NodePath in _AI_POOL_PATHS:
         var container: Node = spawner.get_node_or_null(container_name)
         if container == null:
             continue

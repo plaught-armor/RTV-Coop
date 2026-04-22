@@ -12,6 +12,7 @@ var hudVisible: bool = true
 var inGameplay: bool = false
 var lastScenePath: String = ""
 const PING_INTERVAL: float = 1.0
+const PATH_CONTROLLER: NodePath = ^"Core/Controller"
 var peerPings: Dictionary[int, int] = { }
 var labelPool: Array[HBoxContainer] = []
 var hintsLabel: Label = null
@@ -54,10 +55,11 @@ func _process(delta: float) -> void:
         return
 
     # Cache is_in_gameplay on scene change instead of calling get_node_or_null every frame
-    var scenePath: String = get_tree().current_scene.scene_file_path if is_instance_valid(get_tree().current_scene) else ""
+    var scene: Node = get_tree().current_scene
+    var scenePath: String = scene.scene_file_path if is_instance_valid(scene) else ""
     if scenePath != lastScenePath:
         lastScenePath = scenePath
-        inGameplay = is_instance_valid(get_tree().current_scene) && get_tree().current_scene.get_node_or_null("Core/Controller") != null
+        inGameplay = is_instance_valid(scene) && scene.get_node_or_null(PATH_CONTROLLER) != null
 
     if !inGameplay:
         if visible:

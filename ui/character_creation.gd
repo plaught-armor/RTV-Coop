@@ -11,6 +11,11 @@ const IDLE_ANIM: StringName = &"Rifle_Idle"
 const GAME_THEME_PATH: String = "res://UI/Themes/Theme.tres"
 const PREVIEW_RIFLE_NAME: String = "AK-12"
 
+const PATH_WEAPONS: NodePath = ^"Weapons"
+const PATH_SKELETON: NodePath = ^"Armature/Skeleton3D"
+const PATH_MESH: NodePath = ^"Mesh"
+const PATH_ANIMATIONS: NodePath = ^"Animations"
+
 var _cm: Node = null
 var _onConfirm: Callable = Callable()
 var _onCancel: Callable = Callable()
@@ -217,10 +222,10 @@ func _build_preview(parent: Container) -> void:
 ## stance). Falls through silently for AI rigs whose bundle lacks the named
 ## weapon — preview just shows empty hands.
 func _attach_preview_rifle(skel: Skeleton3D) -> void:
-    var weapons: Node = skel.get_node_or_null("Weapons")
+    var weapons: Node = skel.get_node_or_null(PATH_WEAPONS)
     if weapons == null:
         return
-    var baked: Node3D = weapons.get_node_or_null(PREVIEW_RIFLE_NAME) as Node3D
+    var baked: Node3D = weapons.get_node_or_null(NodePath(PREVIEW_RIFLE_NAME)) as Node3D
     if baked != null:
         baked.visible = true
 
@@ -247,7 +252,7 @@ func _instantiate_body_rig(body: String) -> Node3D:
     if rigRoot == null:
         return null
     rigRoot.set_script(null)
-    var bodyContainer: Node3D = rigRoot.get_node_or_null(body) as Node3D
+    var bodyContainer: Node3D = rigRoot.get_node_or_null(NodePath(body)) as Node3D
     if bodyContainer == null:
         rigRoot.queue_free()
         return null
@@ -317,11 +322,11 @@ func _apply_preview(body: String, materialPath: String) -> void:
         _previewViewport.add_child(newBody)
         _previewBody = newBody
         _previewBodyName = body
-        var skel: Skeleton3D = newBody.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
+        var skel: Skeleton3D = newBody.get_node_or_null(PATH_SKELETON) as Skeleton3D
         if skel != null:
-            _previewMesh = skel.get_node_or_null("Mesh") as MeshInstance3D
+            _previewMesh = skel.get_node_or_null(PATH_MESH) as MeshInstance3D
             _attach_preview_rifle(skel)
-        var animPlayer: AnimationPlayer = newBody.get_node_or_null("Animations") as AnimationPlayer
+        var animPlayer: AnimationPlayer = newBody.get_node_or_null(PATH_ANIMATIONS) as AnimationPlayer
         if animPlayer != null && animPlayer.has_animation(IDLE_ANIM):
             animPlayer.play(IDLE_ANIM)
 
