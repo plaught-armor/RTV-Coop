@@ -794,7 +794,7 @@ func _on_friends_received(response: Dictionary) -> void:
     for child: Node in friendList.get_children():
         child.queue_free()
     _avatarSlots.clear()
-    var friends: Array = response.get(&"data", [])
+    var friends: Array = response.get(&"data", []) as Array
     for friend: Dictionary in friends:
         var row: HBoxContainer = _make_friend_row(friend)
         friendList.add_child(row)

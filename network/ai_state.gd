@@ -395,6 +395,11 @@ func pack_ai_batch(agentsNode: Node) -> Array:
     for child: Node in agentsNode.get_children():
         if !child.has_meta(&"ai_sync_id"):
             continue
+        # During scene transitions the agents node may have children that were
+        # reparented out (e.g. death scene swap) — their global_transform read
+        # errors as "Node not in tree". Skip those instead of spamming the log.
+        if !child.is_inside_tree():
+            continue
         ids.append(child.get_meta(&"ai_sync_id"))
         positions.append(child.global_position)
         rotations.append(child.global_rotation.y)
@@ -805,6 +810,8 @@ func send_full_state(peerId: int) -> void:
     var sentCount: int = 0
     for child: Node in _agentsNode.get_children():
         if !child.has_meta(&"ai_sync_id"):
+            continue
+        if !child.is_inside_tree():
             continue
         if child.get(&"dead") == true:
             continue

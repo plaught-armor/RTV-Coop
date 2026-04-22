@@ -1518,7 +1518,7 @@ func _on_recheck_state(response: Dictionary) -> void:
     _recheckPending = false
     if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get(&"data", {})
+    var data: Dictionary = response.get(&"data", {}) as Dictionary
     var hostState: String = data.get(&"value", "")
     if hostState == "in_game" && _is_on_menu():
         _log("Recheck: host is in-game — auto-loading")
@@ -1927,7 +1927,7 @@ func _apply_handoff_state(snap: Dictionary) -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
         return
-    var doors: Dictionary = snap.get(&"doors", {})
+    var doors: Dictionary = snap.get(&"doors", {}) as Dictionary
     for doorPath: String in doors:
         var door: Node = scene.get_node_or_null(NodePath(doorPath))
         if !is_instance_valid(door) || !(door is Door):
@@ -1937,7 +1937,7 @@ func _apply_handoff_state(snap: Dictionary) -> void:
         door.locked = state.get(&"locked", false)
         if door.isOpen:
             door.animationTime = 4.0
-    var switches: Dictionary = snap.get(&"switches", {})
+    var switches: Dictionary = snap.get(&"switches", {}) as Dictionary
     for switchPath: String in switches:
         var sw: Node = scene.get_node_or_null(NodePath(switchPath))
         if !is_instance_valid(sw) || !sw.has_method(&"Activate"):
@@ -1949,7 +1949,7 @@ func _apply_handoff_state(snap: Dictionary) -> void:
             sw.Deactivate()
     # Spawn items from headless snapshot (LootSimulation was skipped, so the
     # scene has no items yet — we transfer the ones generated in the SubViewport).
-    var items: Array = snap.get(&"items", [])
+    var items: Array = snap.get(&"items", []) as Array
     var spawnedCount: int = 0
     for entry: Dictionary in items:
         var itemFile: String = entry.get(&"file", "")

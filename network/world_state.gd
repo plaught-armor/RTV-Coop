@@ -640,9 +640,14 @@ func request_trade(traderPath: String, requestedIndices: PackedInt32Array, offer
     for i: int in range(sortedIndices.size() - 1, -1, -1):
         trader.supply.remove_at(sortedIndices[i])
 
-    # Grant items to client.
+    # Grant items to requester. Host-local call (requesterId == 0) means the
+    # host itself is buying — rpc_id(0) skips self, so apply the grant logic
+    # directly instead of routing through the RPC.
     var grantedSlots: Array[Dictionary] = _slotSerializer.pack_array(requestedItems)
-    sync_trade_granted.rpc_id(requesterId, grantedSlots)
+    if requesterId == 0:
+        _apply_trade_granted(grantedSlots)
+    else:
+        sync_trade_granted.rpc_id(requesterId, grantedSlots)
 
     # Broadcast updated supply to all peers.
     var packedSupply: Array[Dictionary] = _slotSerializer.pack_array(trader.supply)
@@ -665,6 +670,13 @@ func reject_trade() -> void:
 ## Finalizes the trade: removes pending offered items and spawns granted items.
 @rpc("authority", "call_remote", "reliable")
 func sync_trade_granted(grantedSlots: Array[Dictionary]) -> void:
+    _apply_trade_granted(grantedSlots)
+
+
+## Local grant implementation shared by [method sync_trade_granted] (remote
+## client receiving grant) and [method request_trade] (host purchasing on
+## its own machine — rpc_id to self is a no-op).
+func _apply_trade_granted(grantedSlots: Array[Dictionary]) -> void:
     var iface: Node = _interface
     _remove_pending_trade_elements(iface)
     remove_meta(&"_pending_trade_elements")

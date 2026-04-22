@@ -349,7 +349,7 @@ func on_lobby_list_received(response: Dictionary) -> void:
     if !response.get(&"ok", false):
         return
 
-    var lobbies: Array = response.get(&"data", [])
+    var lobbies: Array = response.get(&"data", []) as Array
     for i: int in range(lobbies.size()):
         var lobby: Dictionary = lobbies[i]
         var btn: Button = get_pooled_lobby_button(i)
@@ -377,7 +377,7 @@ func on_lobby_join_pressed(lobbyID: String) -> void:
 func on_lobby_joined(response: Dictionary) -> void:
     if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get(&"data", { })
+    var data: Dictionary = response.get(&"data", { }) as Dictionary
     var hostSteamID: String = data.get(&"host_steam_id", "")
     var lobbyID: String = data.get(&"lobby_id", "")
     if hostSteamID.is_empty():
@@ -402,7 +402,7 @@ func on_lobby_joined(response: Dictionary) -> void:
 func _on_host_state_received(response: Dictionary) -> void:
     if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get(&"data", {})
+    var data: Dictionary = response.get(&"data", {}) as Dictionary
     var hostState: String = data.get(&"value", "")
     _cm._log("Host lobby state: %s" % hostState)
     if hostState == "in_game":
@@ -427,7 +427,7 @@ func on_friends_received(response: Dictionary) -> void:
     if !response.get(&"ok", false):
         return
 
-    var friends: Array = response.get(&"data", [])
+    var friends: Array = response.get(&"data", []) as Array
     for i: int in range(friends.size()):
         _populate_friend_row(friends[i], i)
 
@@ -1379,7 +1379,7 @@ func on_lobby_friends_received(response: Dictionary) -> void:
         return
     for child: Node in _lobbyFriendList.get_children():
         child.queue_free()
-    var friends: Array = response.get(&"data", [])
+    var friends: Array = response.get(&"data", []) as Array
     for friend: Dictionary in friends:
         var friendName: String = friend.get(&"name", "Unknown")
         var state: int = friend.get(&"state", 0)

@@ -155,7 +155,7 @@ func poll_connect(delta: float) -> void:
 
 
 func on_initial_user(response: Dictionary) -> void:
-    var data: Dictionary = response.get(&"data", { })
+    var data: Dictionary = response.get(&"data", { }) as Dictionary
     localSteamName = data.get(&"name", "")
     localSteamID = data.get(&"steam_id", "")
     ownsGame = true # Assume ownership — launched through Steam
@@ -168,7 +168,7 @@ func on_initial_user(response: Dictionary) -> void:
 
 
 func on_ownership_result(response: Dictionary) -> void:
-    var data: Dictionary = response.get(&"data", { })
+    var data: Dictionary = response.get(&"data", { }) as Dictionary
     ownsGame = data.get(&"owns", false)
     if ownsGame:
         _log("Ownership verified")
@@ -391,7 +391,7 @@ func get_avatar_binary(steamID: String, callback: Callable) -> void:
 func on_invite_received(response: Dictionary) -> void:
     if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get(&"data", { })
+    var data: Dictionary = response.get(&"data", { }) as Dictionary
     var lobbyID: String = data.get(&"lobby_id", "")
     if lobbyID.is_empty():
         return
@@ -404,7 +404,7 @@ func on_invite_received(response: Dictionary) -> void:
 func on_launch_invite_checked(response: Dictionary) -> void:
     if !response.get(&"ok", false):
         return
-    var data: Dictionary = response.get(&"data", { })
+    var data: Dictionary = response.get(&"data", { }) as Dictionary
     var lobbyID: String = data.get(&"lobby_id", "")
     if lobbyID.is_empty():
         return

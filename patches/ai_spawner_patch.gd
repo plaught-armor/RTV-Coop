@@ -36,7 +36,11 @@ func _ready() -> void:
     elif zone == Zone.Vostok:
         agent = military
 
-    CreatePools()
+    # CreatePools is a coroutine (awaits process_frame per agent) — must await
+    # so the pool is fully populated before tagging sync IDs. Without the await,
+    # _assign_sync_ids sees partial children, later spawns pick untagged agents,
+    # and _init_and_broadcast logs "agent has no sync_id meta!".
+    await CreatePools()
     _log("Pools created: A_Pool=%d, B_Pool=%d" % [APool.get_child_count(), BPool.get_child_count()])
 
     # Tag pool children with deterministic sync IDs BEFORE any spawns.
@@ -44,6 +48,13 @@ func _ready() -> void:
     # reparent agents out of the pool, changing child counts between host and client.
     # Metas persist across reparent(), so indices stay consistent.
     _assign_sync_ids()
+
+    # Register ourselves with ai_state now that every pool child carries meta.
+    # coop_manager._register_ai_pools may have already deferred-called this on
+    # an empty pool (slotCount=0); the second call here rewires correctly
+    # (register_spawner_pools is idempotent and re-scans meta on each call).
+    if is_instance_valid(_cm.aiState):
+        _cm.aiState.register_spawner_pools(self)
 
     if _cm.isHost:
         # Host runs initial spawns via super — no broadcast needed here because

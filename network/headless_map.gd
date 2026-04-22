@@ -577,9 +577,9 @@ const _RESTORE_CHUNK: int = 64
 func restore(snap: Dictionary) -> void:
     if mapScene == null:
         return
-    var doors: Dictionary = snap.get("doors", {})
-    var switches: Dictionary = snap.get("switches", {})
-    var aiSnaps: Array = snap.get("ai", [])
+    var doors: Dictionary = snap.get("doors", {}) as Dictionary
+    var switches: Dictionary = snap.get("switches", {}) as Dictionary
+    var aiSnaps: Array = snap.get("ai", []) as Array
 
     await _restore_doors(doors)
     if !is_instance_valid(mapScene):
@@ -656,7 +656,7 @@ func _restore_ai(aiSnaps: Array) -> int:
     var restored: int = 0
     var i: int = 0
     for aiSnap: Dictionary in aiSnaps:
-        var bucket: Array = poolByType.get(aiSnap.get("type", 0), [])
+        var bucket: Array = poolByType.get(aiSnap.get("type", 0), []) as Array
         if !bucket.is_empty():
             var matched: Node = bucket.pop_back()
             matched.global_position = aiSnap.get("pos", Vector3.ZERO)
