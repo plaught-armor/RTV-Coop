@@ -109,6 +109,35 @@ func _ready() -> void:
 
     _restructure_into_tabs.call_deferred()
 
+    # Force a friends-list fetch the moment the pause menu becomes visible.
+    # Without this, the list populates on the next 30-frame tick (~0.5s) plus
+    # the IPC round-trip — long enough for the player to dismiss the menu
+    # before the first response arrives, making the list appear empty until
+    # the second open.
+    if !visibility_changed.is_connected(_on_settings_visibility_changed):
+        visibility_changed.connect(_on_settings_visibility_changed)
+
+
+func _on_settings_visibility_changed() -> void:
+    if !visible:
+        return
+    # Paint from the steam_bridge friends cache first so a list populated by
+    # the main-menu lobby shows instantly. The async fetch below then replaces
+    # it with fresh state (online/in-game flags may have changed).
+    _paint_friends_from_cache()
+    _lastFriendRefreshMs = 0
+    _maybe_refresh_friends()
+
+
+func _paint_friends_from_cache() -> void:
+    if !is_instance_valid(_cm) || !is_instance_valid(_cm.steamBridge):
+        return
+    var raw: Variant = _cm.steamBridge.friendsCache
+    var cached: Array = raw as Array
+    if cached.is_empty():
+        return
+    _on_friends_received({&"ok": true, &"data": cached})
+
 
 ## Overrides base [method Settings.LoadPreferences] only to guard the
 ## [code]!gameData.menu[/code] branch that calls [member interface] methods.

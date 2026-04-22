@@ -41,6 +41,12 @@ var ownsGame: bool = false
 
 ## Pending async callbacks keyed by request ID (int).
 var pendingCallbacks: Dictionary[int, Callable] = {}
+
+## Last successful get_friends response. Retained across scene changes so the
+## in-game Settings Multiplayer tab can paint the list immediately from the
+## main-menu lobby's earlier fetch instead of waiting for a fresh IPC round-trip.
+var friendsCache: Array = []
+var friendsCacheMs: int = 0
 ## Monotonic request ID counter.
 var nextReqId: int = 1
 
@@ -346,7 +352,19 @@ func leave_lobby() -> void:
 
 
 func get_friends(callback: Callable) -> void:
-    send_command("get_friends", { }, callback)
+    send_command("get_friends", { }, _cache_friends_response.bind(callback))
+
+
+## Intercepts [method get_friends] responses, stores the latest list in
+## [member friendsCache], then forwards to the original caller. Bound args
+## arrive after the IPC-supplied response, so [param callback] comes last.
+func _cache_friends_response(response: Dictionary, callback: Callable) -> void:
+    if response.get(&"ok", false):
+        var data: Variant = response.get(&"data", [])
+        friendsCache = data as Array
+        friendsCacheMs = Time.get_ticks_msec()
+    if callback.is_valid():
+        callback.call(response)
 
 
 func invite_friend(steamID: String, callback: Callable) -> void:
