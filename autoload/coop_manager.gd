@@ -548,7 +548,8 @@ func get_peer_avatar(peerId: int) -> ImageTexture:
     return avatarCache[steamID]
 
 func spawn_remote_player(peerId: int) -> void:
-    if peerId in remoteNodes:
+    var existingIdx: int = peer_idx(peerId)
+    if existingIdx >= 0 && is_instance_valid(remoteNodes[existingIdx]):
         return
     if !is_peer_on_same_map(peerId):
         return

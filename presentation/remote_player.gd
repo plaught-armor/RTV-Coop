@@ -2,6 +2,14 @@
 extends Node3D
 
 
+# AISpawner.gd preloads AI_Bandit/Guard/Military/Punisher.tscn at class-parse time,
+# caching PackedScenes with the ORIGINAL AI.gd script ref before take_over_path
+# runs. Puppet rigs spawned from these cached scenes need an explicit set_script
+# to pick up ai_patch.gd (puppetMode var, Initialize override).
+const _AIPatchScript: Script = preload("res://mod/patches/ai_patch.gd")
+const _AIOriginalPath: String = "res://Scripts/AI.gd"
+
+
 # Fallback grips for weapons no AI scene placed (HK416/MK18/MP7/etc).
 const FALLBACK_RIFLE_GRIP: Transform3D = Transform3D(
     Vector3(-0.168531, 0.983905, 0.0593909),
@@ -146,6 +154,12 @@ func _spawn_puppet_rig(body: String) -> bool:
     if ai == null:
         return false
 
+    # Force patched script if scene was cached with original AI.gd before
+    # take_over_path ran (AISpawner.gd preloads AI body scenes at parse time).
+    var currentScript: Script = ai.get_script()
+    if currentScript == null || currentScript.resource_path == _AIOriginalPath:
+        ai.set_script(_AIPatchScript)
+
     # Mark as puppet BEFORE add_child so AI._ready / Initialize see the flag
     # and skip their normal setup paths.
     ai.set(&"puppetMode", true)
@@ -162,10 +176,11 @@ func _spawn_puppet_rig(body: String) -> bool:
     for g: StringName in ai.get_groups():
         ai.remove_from_group(g)
 
-    # Strip nodes we'll never use on a puppet. SCENE_TRASH lives at the rig
-    # root (sensors, navigation agent, debug gizmos). Skeleton-level junk
-    # (container, eyes, backpacks, hitbox attachments) gets stripped after
-    # the AI script's @onready refs resolve.
+    add_child(ai)
+    aiInstance = ai
+
+    # Strip AFTER add_child so AI script's @onready vars resolve first; stripping
+    # earlier raises "Node not found" on Agent/Detector/Raycasts/Poles/Gizmo.
     for trash: String in SCENE_TRASH:
         var n: Node = ai.get_node_or_null(NodePath(trash))
         if n != null:
@@ -176,10 +191,6 @@ func _spawn_puppet_rig(body: String) -> bool:
         rootCollision.get_parent().remove_child(rootCollision)
         rootCollision.queue_free()
 
-    add_child(ai)
-    aiInstance = ai
-
-    # AI script's @onready vars are populated by now (after add_child).
     # ai_patch.gd._ready already flipped set_physics_process(false) +
     # set_process(false) since puppetMode was set before add_child fired.
     skeleton = ai.get(&"skeleton") as Skeleton3D
