@@ -43,10 +43,10 @@ func _ready() -> void:
 func Initialize():
     await get_tree().physics_frame
 
+    # Puppet rigs have already freed Agent/Detector/Raycasts/Poles/Gizmo/
+    # Container/Backpacks/HB_* in remote_player.gd._spawn_puppet_rig, so
+    # Deactivate*/HideGizmos here would iterate freed instances and crash.
     if puppetMode:
-        DeactivateEquipment()
-        DeactivateContainer()
-        HideGizmos()
         return
 
     navigationMap = get_world_3d().get_navigation_map()
