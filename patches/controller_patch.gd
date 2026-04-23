@@ -1,13 +1,4 @@
-## Patch for [code]Controller.gd[/code] — extends the original script via [code]take_over_path[/code].
-##
-## Overrides:
-## [br]- [method Movement]: appends network position broadcast hook
-## [br]- [method _input]: collapses 6-branch sensitivity tree to a single code path
-## [br]- [method SurfaceDetection]: direct assignment replaces elif chain
-## [br]- [method ResolveFootstep]: match on surface replaces 3x duplicated elif chains
-## [br]- [method Inertia]: collapses duplicate walking/running branches
-##
-## Original behaviour is 100% preserved. The networking hook is a no-op when not connected.
+## Patch for Controller.gd — adds network broadcast hooks and flattens Movement/input helpers.
 extends "res://Scripts/Controller.gd"
 
 var _cm: Node
@@ -60,15 +51,10 @@ func play_pooled(audioEvent: AudioEvent) -> void:
         player.pitch_scale = 1.0
     player.play()
 
-# ---------- Input ----------
-
-
 func _input(event: InputEvent) -> void:
     if !is_instance_valid(_cm):
         return
     if _cm.gd.freeze || _cm.gd.isCaching || _cm.gd.vehicle:
-        return
-    if _cm.panelOpen:
         return
     if !(event is InputEventMouseMotion):
         return
@@ -88,9 +74,6 @@ func _input(event: InputEvent) -> void:
     head.rotate_x(deg_to_rad(ySign * event.relative.y * factor))
     head.rotation.x = clamp(head.rotation.x, deg_to_rad(-90), deg_to_rad(90))
 
-# ---------- Movement ----------
-
-
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
@@ -100,17 +83,14 @@ func Movement(delta: float) -> void:
     _cm.playerState.broadcast_position(
         global_transform.origin,
         Vector3(rotation.y, head.rotation.x, 0.0),
-        _cm.PlayerStateScript.encode_flags(_cm.gd),
+        _cm.playerState.encode_flags(_cm.gd),
     )
 
     _cm.playerState.broadcast_vitals()
 
-    # Detect fire event rising edge and broadcast to peers
     if _cm.gd.isFiring && !wasFiring:
         _broadcast_fire_event()
     wasFiring = _cm.gd.isFiring
-
-# ---------- Inertia ----------
 
 
 func Inertia(delta: float) -> void:
@@ -129,9 +109,6 @@ func Inertia(delta: float) -> void:
     else:
         inertia = lerpf(inertia, 1.0, delta * 2.0)
 
-# ---------- Surface Detection ----------
-
-
 func SurfaceDetection(delta: float) -> void:
     if !is_instance_valid(_cm):
         super.SurfaceDetection(delta)
@@ -149,9 +126,6 @@ func SurfaceDetection(delta: float) -> void:
 
     _cm.gd.leanLBlocked = left.is_colliding()
     _cm.gd.leanRBlocked = right.is_colliding()
-
-# ---------- Footstep Audio ----------
-
 
 func ResolveFootstep(isLanding: bool) -> AudioEvent:
     if !is_instance_valid(_cm):
@@ -226,11 +200,6 @@ func PlayMovementCloth() -> void:
 func PlayMovementGear() -> void:
     play_pooled(audioLibrary.movementGear)
 
-# ---------- Fire Event Broadcast ----------
-
-
-## Detects the active weapon's fire audio and broadcasts to peers.
-## Called on the rising edge of [code]gameData.isFiring[/code].
 const PATH_RIG_MANAGER: NodePath = ^"../Camera/Manager"
 
 
@@ -255,8 +224,6 @@ func _broadcast_fire_event() -> void:
     _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor, hit.point, hit.normal, hit.surface)
 
 
-## Returns {fire, tail} audio resource paths for the current weapon mode,
-## taking suppressor state and indoor/outdoor context into account.
 func _resolve_fire_audio(weaponData: Resource, hasSuppressor: bool) -> Dictionary:
     var fireAudio: String = ""
     var tailAudio: String = ""
@@ -282,8 +249,6 @@ func _resolve_fire_audio(weaponData: Resource, hasSuppressor: bool) -> Dictionar
     return {"fire": fireAudio, "tail": tailAudio}
 
 
-## Casts a ray from the camera 200m forward and returns impact {point, normal, surface}.
-## Returns zero-ed values + empty surface if nothing is hit.
 func _trace_bullet_impact() -> Dictionary:
     var out: Dictionary = {"point": Vector3.ZERO, "normal": Vector3.ZERO, "surface": ""}
     var cam: Camera3D = get_viewport().get_camera_3d()

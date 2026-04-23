@@ -1,13 +1,4 @@
-## Patch for [code]Explosion.gd[/code] — co-op awareness for grenade splash damage.
-##
-## Overrides:
-## [br]- [method Explode]: adds co-op hit layer to explosion area mask
-## [br]- [method CheckOverlap]: also detects remote player bodies
-## [br]- [method CheckLOS]: recognizes "CoopRemote" group and routes damage via RPC.
-##   Player damage is host-only during co-op to prevent double-damage from local
-##   explosion + host RPC.
-##
-## Original behaviour is 100% preserved when not in a co-op session.
+## Patch for Explosion.gd — co-op splash damage (host-authoritative, remote player detection).
 extends "res://Scripts/Explosion.gd"
 
 var _cm: Node
@@ -62,10 +53,7 @@ func CheckLOS(target) -> void:
 
     var collider: Node = LOS.get_collider()
 
-    # Host-only for both branches — host's AI state sync propagates to clients,
-    # and Player damage is already host-authoritative. Without the AI guard,
-    # clients would apply local AI damage that the next AIState snapshot then
-    # overwrites, producing a visible desync on each grenade.
+    # Host-only: client-side AI damage would be overwritten by next AIState snapshot (desync).
     if !_cm.isHost:
         return
 
@@ -75,7 +63,6 @@ func CheckLOS(target) -> void:
         target.get_child(0).ExplosionDamage()
 
 
-## LOS check for remote players. Host only — sends damage via RPC.
 func _check_los_remote(target: Node3D) -> void:
     if !_cm.isHost:
         return

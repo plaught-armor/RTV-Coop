@@ -1,61 +1,35 @@
-## Patch for [code]AI.gd[/code] — multi-player detection and network hooks.
-##
-## Overrides:
-## [br]- [method _physics_process]: skip all AI logic on clients (driven by ai_state.gd)
-## [br]- [method Parameters]: scan all players (host + remotes), target nearest
-## [br]- [method Sensor]: LOS check against targeted player's position
-## [br]- [method LOSCheck]: recognize remote player colliders ("CoopRemote" group)
-## [br]- [method Hearing]: detect any player's movement, not just gameData
-## [br]- [method FireDetection]: check firing state from any player
-## [br]- [method Raycast]: handle hits on remote players via damage RPC
-## [br]- [method Fire]: broadcast fire event to clients
-## [br]- [method Death]: broadcast death event to clients
-##
-## On clients, the AI scene exists but is fully driven by [code]ai_state.gd[/code] snapshots.
-## Original behaviour is 100% preserved when not in a co-op session.
+## Patch for AI.gd — multi-player targeting, host-auth logic, remote damage routing.
 extends "res://Scripts/AI.gd"
 
-const _Perf: GDScript = preload("res://mod/network/perf.gd")
 const PATH_AI: NodePath = ^"AI"
 
 
 var _cm: Node
 
-## Which player this AI is currently targeting. -1 = host's local player.
+# -1 = host's local player; otherwise a remote peer ID.
 var targetPeerId: int = -1
 
-## Set true when this AI instance is borrowed as a remote-player rig
-## ([RemotePlayer]). Skips all AI logic — sensors, navigation, animator
-## driving — so the rig is purely visual and driven by network state. Same
-## flag the competitor RTVCoop mod uses on their puppet copies.
+# True when borrowed as a remote-player puppet rig; skips all AI logic.
 var puppetMode: bool = false
 
 
-## Collision layer 20 (bit 19) — matches remote_player.gd COOP_HIT_LAYER.
+# Matches remote_player.gd COOP_HIT_LAYER (bit 19).
 const COOP_HIT_LAYER: int = 1 << 19
 
 
 func init_manager(manager: Node) -> void:
     _cm = manager
-    # Add co-op hit layer to AI raycasts so they detect remote player HitBodies
     if fire != null:
         fire.collision_mask |= COOP_HIT_LAYER
     if LOS != null:
         LOS.collision_mask |= COOP_HIT_LAYER
 
 
-## Override _ready to preserve base game's deferred Initialize call. Puppet
-## rigs flip process off here — cleaner than letting remote_player flip it
-## after add_child, and guarantees no stale AI tick lands before the flag is
-## honored.
 func _ready() -> void:
     super._ready()
     if puppetMode:
         set_physics_process(false)
         set_process(false)
-    # Resolve CoopManager once. Pool-spawned AI doesn't go through
-    # init_manager() before entering the tree, so look it up here instead of
-    # scanning /root every _physics_process tick.
     if _cm == null:
         var root: Node = get_tree().root if get_tree() != null else null
         if root != null:
@@ -65,17 +39,10 @@ func _ready() -> void:
                     break
 
 
-## Override Initialize to find map/AISpawner by walking up from self instead of
-## using absolute /root/Map path. The original absolute path breaks when Village
-## or other maps are instantiated inside a headless SubViewport (for cross-map
-## AI simulation). When the node isn't inside a SubViewport, walking up still
-## finds the scene root correctly so solo behaviour is preserved.
+# Walks up instead of /root/Map so AI in headless SubViewports finds its map too.
 func Initialize():
     await get_tree().physics_frame
 
-    # Puppet rigs need just enough setup to render — equipment + container
-    # disabled, gizmos hidden — but skip the navmap / spawner lookup and the
-    # 10s sensor-arming timer since this instance never thinks for itself.
     if puppetMode:
         DeactivateEquipment()
         DeactivateContainer()
@@ -83,8 +50,6 @@ func Initialize():
         return
 
     navigationMap = get_world_3d().get_navigation_map()
-    # Find the map node by walking up the ancestor chain — works both for
-    # the real scene (map at /root/Map) and for headless SubViewports.
     var mapAncestor: Node = _find_map_ancestor()
     if mapAncestor != null:
         map = mapAncestor
@@ -113,7 +78,6 @@ func Initialize():
     HideGizmos()
 
     await get_tree().create_timer(10.0, false).timeout
-    # AI may be freed during the 10s arm window (map transition, pool reclaim).
     if !is_instance_valid(self):
         return
 
@@ -121,9 +85,7 @@ func Initialize():
     sensorActive = true
 
 
-## Walks up from self to find the map node. Identifies it by having an "AI" child
-## (which every gameplay map has) or by being the scene root below a SubViewport.
-## More robust than matching by name since .scn scene roots may vary.
+# Identifies map by AI child or SubViewport parent (robust to renamed scene roots).
 func _find_map_ancestor() -> Node:
     var node: Node = self
     var depth: int = 0
@@ -131,7 +93,6 @@ func _find_map_ancestor() -> Node:
         if node.get_node_or_null(PATH_AI) != null:
             return node
         var parent: Node = node.get_parent()
-        # If parent is a SubViewport, this node is the scene root of the headless map.
         if parent is SubViewport:
             return node
         node = parent
@@ -140,20 +101,14 @@ func _find_map_ancestor() -> Node:
         push_error("[ai_patch] _find_map_ancestor exceeded 64 hops; giving up")
     return null
 
-# ---------- Physics Process ----------
-
 
 func _physics_process(delta: float) -> void:
-    # Puppet rigs are visual-only — driven by RemotePlayer state. Skip AI
-    # logic entirely (sensor / navmesh / animator / fire detection / movement).
     if puppetMode:
         return
     if is_instance_valid(_cm) && _cm.is_session_active():
         if !_cm.isHost:
-            # Client: AI visuals driven entirely by ai_state.gd snapshots
             return
-        # Host: remove the gameData.isDead guard so AI stays active
-        # when the host player dies but other players are still alive
+        # Skip gameData.isDead so AI stays active for surviving remotes after host dies.
         if pause || dead:
             return
         if sensorActive && !gameData.isFlying && !gameData.isCaching:
@@ -173,11 +128,9 @@ func _physics_process(delta: float) -> void:
     super._physics_process(delta)
 
 
-## Cached per physics frame — every active AI calls this each tick, but the
-## result is identical across all AIs for a given frame. Static cache avoids
-## N AI × M peer iteration when one walk per frame suffices.
-static var _allDeadCachedFrame: int = -1
-static var _allDeadCachedResult: bool = false
+# Per-frame cache: result identical across all AI in one tick.
+var _allDeadCachedFrame: int = -1
+var _allDeadCachedResult: bool = false
 
 
 func _all_players_dead() -> bool:
@@ -188,33 +141,27 @@ func _all_players_dead() -> bool:
     if !gameData.isDead:
         _allDeadCachedResult = false
         return false
-    for peerId: int in _cm.remoteNodes:
-        var remote: Node3D = _cm.remoteNodes[peerId]
+    for remote: Node3D in _cm.remoteNodes:
         if is_instance_valid(remote) && !remote.get_meta(&"is_dead", false):
             _allDeadCachedResult = false
             return false
     _allDeadCachedResult = true
     return true
 
-# ---------- Parameters (Nearest Player Targeting) ----------
-
-
 func Parameters(delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Parameters(delta)
         return
-    var _pt: int = _Perf.start()
+    var _pt: int = _cm.perf.start()
 
     LKL = lerp(LKL, lastKnownLocation, delta * LKLSpeed)
 
-    # Find nearest player across host + all remotes
     var bestPos: Vector3 = gameData.playerPosition
     var bestDist: float = global_position.distance_to(bestPos)
     var bestVector: Vector3 = gameData.playerVector
     targetPeerId = -1
 
-    for peerId: int in _cm.remoteNodes:
-        var remote: Node3D = _cm.remoteNodes[peerId]
+    for remote: Node3D in _cm.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         var pos: Vector3 = remote.global_position
@@ -222,7 +169,7 @@ func Parameters(delta: float) -> void:
         if dist < bestDist:
             bestDist = dist
             bestPos = pos
-            targetPeerId = peerId
+            targetPeerId = remote.get_meta(&"peer_id", -1)
             var rotY: float = remote.targetRotationY
             bestVector = Vector3(-sin(rotY), 0, -cos(rotY))
 
@@ -230,10 +177,8 @@ func Parameters(delta: float) -> void:
     playerDistance3D = bestDist
     playerDistance2D = Vector2(global_position.x, global_position.z).distance_to(
         Vector2(bestPos.x, bestPos.z))
-    # Use the targeted player's facing vector for fire detection
     fireVector = (global_position - bestPos).normalized().dot(bestVector)
 
-    # Adaptive sensor cycle (same thresholds as original)
     if playerDistance3D < 10 && playerVisible:
         sensorCycle = 0.05
         LKLSpeed = 4.0
@@ -243,20 +188,16 @@ func Parameters(delta: float) -> void:
     elif playerDistance3D > 50:
         sensorCycle = 0.5
         LKLSpeed = 1.0
-    _Perf.stop("ai.Parameters", _pt)
-
-# ---------- Sensor ----------
-
+    _cm.perf.stop("ai.Parameters", _pt)
 
 func Sensor(delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Sensor(delta)
         return
-    var _pt: int = _Perf.start()
+    var _pt: int = _cm.perf.start()
     sensorTimer += delta
     if sensorTimer > sensorCycle:
         if playerDistance3D <= 200.0:
-            # Use targeted player's camera/eye position for LOS
             var targetCamPos: Vector3 = _get_target_camera_position()
             var directionToPlayer: Vector3 = (eyes.global_position - targetCamPos).normalized()
             var viewDirection: Vector3 = -eyes.global_transform.basis.z.normalized()
@@ -273,33 +214,25 @@ func Sensor(delta: float) -> void:
             Hearing()
 
         sensorTimer = 0.0
-    _Perf.stop("ai.Sensor", _pt)
+    _cm.perf.stop("ai.Sensor", _pt)
 
 
-## Returns the camera/eye position of the currently targeted player.
-## Host local player uses [code]gameData.cameraPosition[/code].
-## Remote players approximate eye height at +1.6m.
+# Host local player uses gameData.cameraPosition; remotes approximate eye height at +1.6m.
 func _get_target_camera_position() -> Vector3:
     if targetPeerId < 0:
         return gameData.cameraPosition
-    var remote: Node3D = null
-    if _cm.remoteNodes.has(targetPeerId):
-        remote = _cm.remoteNodes[targetPeerId]
+    var remote: Node3D = _cm.get_remote_player_node(targetPeerId)
     if !is_instance_valid(remote):
         return gameData.cameraPosition
     return remote.global_position + Vector3(0, 1.6, 0)
 
-# ---------- LOSCheck ----------
-
-
 func LOSCheck(target: Vector3) -> void:
-    var _pt: int = _Perf.start()
+    var _pt: int = _cm.perf.start()
     if !is_instance_valid(_cm) || !_cm.is_session_active():
-        _Perf.stop("ai.LOSCheck", _pt)
+        _cm.perf.stop("ai.LOSCheck", _pt)
         super.LOSCheck(target)
         return
 
-    # Set LOS range based on conditions (same logic as original)
     if gameData.TOD == 4 && !gameData.flashlight && !boss:
         LOS.target_position = Vector3(0, 0, 25 + extraVisibility)
     elif gameData.fog && !boss:
@@ -320,21 +253,17 @@ func LOSCheck(target: Vector3) -> void:
                 Decision()
             elif currentState == State.Ambush:
                 ChangeState("Combat")
-            _Perf.stop("ai.LOSCheck", _pt)
+            _cm.perf.stop("ai.LOSCheck", _pt)
             return
 
     playerVisible = false
-    _Perf.stop("ai.LOSCheck", _pt)
-
-# ---------- Hearing ----------
-
+    _cm.perf.stop("ai.LOSCheck", _pt)
 
 func Hearing() -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.Hearing()
         return
 
-    # Check host's local player (original logic)
     if (playerDistance3D < 20 && gameData.isRunning) || (playerDistance3D < 5 && gameData.isWalking):
         if currentState != State.Ambush:
             lastKnownLocation = playerPosition
@@ -342,8 +271,7 @@ func Hearing() -> void:
             Decision()
         return
 
-    for peerId: int in _cm.remoteNodes:
-        var remote: Node3D = _cm.remoteNodes[peerId]
+    for remote: Node3D in _cm.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         var dist: float = global_position.distance_to(remote.global_position)
@@ -357,16 +285,12 @@ func Hearing() -> void:
                 Decision()
             return
 
-# ---------- FireDetection ----------
-
-
 func FireDetection(delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.FireDetection(delta)
         return
-    var _pt: int = _Perf.start()
+    var _pt: int = _cm.perf.start()
 
-    # Host's local player firing
     if gameData.isFiring && !playerVisible:
         var hostDist: float = global_position.distance_to(gameData.playerPosition)
         var hostFireVec: float = (global_position - gameData.playerPosition).normalized().dot(gameData.playerVector)
@@ -386,8 +310,7 @@ func FireDetection(delta: float) -> void:
             fireDetected = true
             extraVisibility = 50.0
 
-    for peerId: int in _cm.remoteNodes:
-        var remote: Node3D = _cm.remoteNodes[peerId]
+    for remote: Node3D in _cm.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         if !remote.isFiring:
@@ -403,17 +326,13 @@ func FireDetection(delta: float) -> void:
             fireDetected = true
             extraVisibility = 50.0
 
-    # Fire detection timer (same as original)
     if fireDetected:
         fireDetectionTimer += delta
         if fireDetectionTimer > fireDetectionTime:
             extraVisibility = 0.0
             fireDetectionTimer = 0.0
             fireDetected = false
-    _Perf.stop("ai.FireDetection", _pt)
-
-# ---------- Raycast (Hit Remote Players) ----------
-
+    _cm.perf.stop("ai.FireDetection", _pt)
 
 func Raycast() -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
@@ -427,7 +346,6 @@ func Raycast() -> void:
         var hitCollider: Node = fire.get_collider()
 
         if hitCollider.is_in_group(&"CoopRemote"):
-            # Hit a remote player — find their peer ID and send damage RPC
             var remoteRoot: Node3D = _cm.find_remote_root(hitCollider)
             if remoteRoot != null:
                 var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
@@ -436,7 +354,6 @@ func Raycast() -> void:
                     _cm.aiState.send_ai_damage_to_peer(peerId, dmg, weaponData.penetration)
 
         elif hitCollider.is_in_group(&"Player"):
-            # Hit host's local player (original behavior)
             var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
             hitCollider.get_child(0).WeaponDamage(dmg, weaponData.penetration)
 
@@ -451,9 +368,6 @@ func Raycast() -> void:
         if !is_instance_valid(self):
             return
         PlayFlyby()
-
-# ---------- Fire (Broadcast Event) ----------
-
 
 func Fire(delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
@@ -490,7 +404,6 @@ func Fire(delta: float) -> void:
         flash.Activate()
         FireFrequency()
 
-        # CO-OP: broadcast fire event to clients
         if has_meta(&"ai_sync_id"):
             var syncId: int = get_meta(&"ai_sync_id")
             _cm.aiState.broadcast_ai_fire(syncId)
@@ -501,27 +414,18 @@ func Fire(delta: float) -> void:
                 return
             PlayCrack()
 
-# ---------- WeaponDamage (Client → Host Routing) ----------
-
-
-## On host: applies damage normally and broadcasts death if killed.
-## On client: routes damage to host via RPC instead of applying locally.
+## Host applies damage locally; client routes to host via RPC.
 func WeaponDamage(hitbox: String, damage: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         super.WeaponDamage(hitbox, damage)
         return
     if _cm.isHost:
-        # Host applies damage locally (original behavior)
         super.WeaponDamage(hitbox, damage)
         return
-    # Client: send damage request to host
     if !has_meta(&"ai_sync_id"):
         return
     var syncId: int = get_meta(&"ai_sync_id")
     _cm.aiState.request_ai_damage_from_client.rpc_id(1, syncId, hitbox, damage)
-
-# ---------- Audio Broadcasts ----------
-
 
 const _AIStateScript: GDScript = preload("res://mod/network/ai_state.gd")
 
@@ -549,9 +453,6 @@ func _broadcast_voice(voiceType: int) -> void:
     _cm.aiState.broadcast_ai_voice(get_meta(&"ai_sync_id"), voiceType)
 
 
-# ---------- Death (Broadcast Event) ----------
-
-
 func Death(direction: Vector3, force: float) -> void:
     if is_instance_valid(_cm) && _cm.is_session_active() && _cm.isHost:
         if has_meta(&"ai_sync_id"):
@@ -560,11 +461,9 @@ func Death(direction: Vector3, force: float) -> void:
     super.Death(direction, force)
 
 
-## Override Interactor to broadcast AI-triggered door opens (AI only runs on host).
-## Base AI.Interactor opens doors via forward raycast. Since interactor_patch no longer
-## intercepts AI calls, the broadcast must happen here on the host.
+## Broadcasts AI-triggered door opens; AI only runs on host so this is the sync point.
 func Interactor(delta: float) -> void:
-    # Snapshot door state BEFORE super runs so we can detect a fresh open.
+    # Snapshot before super so fresh-open detection has something to compare.
     var doorBefore: Node = null
     if is_instance_valid(forward) && forward.is_colliding():
         var hit: Node = forward.get_collider()
@@ -584,4 +483,3 @@ func Interactor(delta: float) -> void:
         if _cm.DEBUG:
             print("[ai_patch] AI opened door %s — broadcast" % doorPath)
 
-# ---------- Helpers ----------

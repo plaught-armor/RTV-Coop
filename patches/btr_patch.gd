@@ -1,11 +1,4 @@
-## Patch for [code]BTR.gd[/code] — makes the BTR host-authoritative in co-op
-## sessions. Host runs the full vehicle simulation (states, sensor, fire,
-## suspension physics, turret AI) unchanged. Clients freeze the RigidBody3D,
-## skip every gameplay method, and lerp transform + turret angle from host
-## snapshots in [code]vehicle_state.gd[/code].
-##
-## [method Fire] is suppressed on clients — host's turret hits apply damage on
-## the host side only, matching the helicopter patch's approach.
+## Patch for BTR.gd — host-authoritative; clients freeze and lerp host snapshots.
 extends "res://Scripts/BTR.gd"
 
 var _cm: Node = null
@@ -30,8 +23,6 @@ func _physics_process(delta: float) -> void:
     if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
         super._physics_process(delta)
         return
-    # Client path: cosmetic only (tire spin, suspension visuals, audio).
-    # Driving, turret AI, sensor, and fire are host-owned.
     if !freeze:
         freeze = true
     Tires(delta)
@@ -64,4 +55,3 @@ func Fire(delta: float) -> void:
     if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
         super.Fire(delta)
         return
-    # Client: host-auth — turret fire effects + damage are host-side only.

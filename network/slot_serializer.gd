@@ -1,23 +1,15 @@
-## Serializes [SlotData] to/from [Dictionary] for network transmission.
-## Uses [code]itemData.resource_path[/code] to identify items across peers.
-## Both peers have the same game resources, so paths resolve identically.
+## Packs/unpacks SlotData over RPC using resource_path as the cross-peer item key.
 extends RefCounted
 
-## Allowed resource path prefixes for [method load] calls. Rejects arbitrary paths.
-## Returned as a fresh array each call to avoid const PackedArray mutation bug (#88753).
-static var ALLOWED_PREFIXES: PackedStringArray = PackedStringArray(["res://Items/", "res://Loot/"])
+# var (not const): const PackedArray mutation bug (Godot #88753).
+var ALLOWED_PREFIXES: PackedStringArray = PackedStringArray(["res://Items/", "res://Loot/"])
 
-## Cache of validated [ItemData] resources keyed by resource path. RPC inventory
-## sync hits this path many times per unpack — a full inventory resolves 10-50
-## items plus nested attachments, each previously doing a fresh [method load].
-## Godot's ResourceCache is still involved but this skips the path-validation
-## and typecheck on every call. Populated lazily on first resolve.
-static var _itemCache: Dictionary[String, Resource] = {}
+# Skips path-validation + typecheck on repeated unpacks (inventories hit 10-50 items/call).
+var _itemCache: Dictionary[String, Resource] = {}
 
 
-## Resolves an item path to its [ItemData] resource with validation. Returns
-## null if the path is disallowed or the resource isn't an [ItemData].
-static func _resolve_item(path: String) -> Resource:
+## Returns null if path is disallowed or resource isn't an ItemData.
+func _resolve_item(path: String) -> Resource:
     var cached: Resource = null
     if _itemCache.has(path):
         cached = _itemCache[path]
@@ -32,9 +24,8 @@ static func _resolve_item(path: String) -> Resource:
     return res
 
 
-## Converts a [SlotData] to a [Dictionary] suitable for RPC transmission.
 ## Returns empty dict for null/invalid slots (preserved as-is in arrays).
-static func pack(slot: SlotData) -> Dictionary:
+func pack(slot: SlotData) -> Dictionary:
     if slot == null || slot.itemData == null:
         return { }
     var data: Dictionary = {
@@ -48,13 +39,12 @@ static func pack(slot: SlotData) -> Dictionary:
         &"casing": slot.casing,
         &"state": slot.state,
     }
-    # Nested attachments (Array[ItemData] → PackedStringArray, preserve nulls as "")
+    # Array[ItemData] -> PackedStringArray; preserve null entries as "".
     var nestedPaths: PackedStringArray = []
     for attachment: ItemData in slot.nested:
         nestedPaths.append(attachment.resource_path if attachment != null else "")
     data[&"nested"] = nestedPaths
 
-    # Recursive storage (Array[SlotData] → Array[Dictionary])
     if slot.storage.size() > 0:
         var packedStorage: Array[Dictionary] = []
         for stored: SlotData in slot.storage:
@@ -64,9 +54,8 @@ static func pack(slot: SlotData) -> Dictionary:
     return data
 
 
-## Reconstructs a [SlotData] from a packed [Dictionary].
 ## Returns null for empty/invalid dicts.
-static func unpack(data: Dictionary) -> SlotData:
+func unpack(data: Dictionary) -> SlotData:
     if data.is_empty():
         return null
     var itemPath: String = data.get(&"item_path", "")
@@ -85,7 +74,7 @@ static func unpack(data: Dictionary) -> SlotData:
     slot.casing = data.get(&"casing", false)
     slot.state = data.get(&"state", "")
 
-    # Nested attachments (preserve null entries for slot index stability)
+    # Null entries preserved to keep slot indices stable.
     var nestedPaths: PackedStringArray = data.get(&"nested", PackedStringArray())
     for path: String in nestedPaths:
         if path.is_empty():
@@ -93,7 +82,6 @@ static func unpack(data: Dictionary) -> SlotData:
         else:
             slot.nested.append(_resolve_item(path))
 
-    # Recursive storage
     var packedStorage: Array = data.get(&"storage", [])
     for storedData: Dictionary in packedStorage:
         slot.storage.append(unpack(storedData))
@@ -101,24 +89,21 @@ static func unpack(data: Dictionary) -> SlotData:
     return slot
 
 
-## Packs an array of [SlotData]. Null entries become empty dicts (preserved).
-static func pack_array(slots: Array[SlotData]) -> Array[Dictionary]:
+func pack_array(slots: Array[SlotData]) -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     for slot: SlotData in slots:
         result.append(pack(slot))
     return result
 
 
-## Unpacks an array of [Dictionary]. Empty dicts become null (preserved to keep indices stable).
-static func unpack_array(dataArray: Array[Dictionary]) -> Array[SlotData]:
+func unpack_array(dataArray: Array[Dictionary]) -> Array[SlotData]:
     var result: Array[SlotData] = []
     for data: Dictionary in dataArray:
         result.append(unpack(data))
     return result
 
 
-## Returns true if the path starts with an allowed prefix.
-static func is_allowed_path(path: String) -> bool:
+func is_allowed_path(path: String) -> bool:
     if path.is_empty():
         return false
     for prefix: String in ALLOWED_PREFIXES:

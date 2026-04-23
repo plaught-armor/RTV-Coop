@@ -1,6 +1,4 @@
-## Patch for [code]Pickup.gd[/code] — host-authoritative pickup interactions.
-## Reimplements [method Interact] to broadcast item removal via sync_id.
-## In single-player, falls through to the original.
+## Patch for Pickup.gd — host-authoritative pickup broadcasting via sync_id meta.
 extends "res://Scripts/Pickup.gd"
 
 var _cm: Node
@@ -22,7 +20,6 @@ func Interact():
     if interface.AutoStack(slotData, interface.inventoryGrid):
         interface.UpdateStats(false)
         PlayPickup()
-        # Broadcast removal if this item has a sync_id (dropped item)
         if has_meta(&"sync_id"):
             var syncId: String = get_meta(&"sync_id")
             if _cm.isHost:

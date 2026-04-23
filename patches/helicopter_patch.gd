@@ -1,26 +1,12 @@
-## Patch for [code]Helicopter.gd[/code] — makes the helicopter host-authoritative
-## in co-op sessions. Host runs the full state machine (Patrol / Flyby / Attack
-## + sensor + searchlight) unchanged via [code]super[/code]. Clients skip every
-## bit of gameplay logic and lerp the visual toward snapshots from
-## [code]vehicle_state.gd[/code].
-##
-## [method FireRockets] is suppressed on clients — host's rockets spawn in the
-## host's world; replicating the spawn point adds bandwidth for what the notes
-## call "cosmetic divergence".
+## Patch for Helicopter.gd — host-authoritative; clients lerp snapshots from vehicle_state.gd.
 extends "res://Scripts/Helicopter.gd"
 
 var _cm: Node = null
-## Cached scene-relative path for snapshot lookup. Resolved on first client tick.
 var _relPath: String = ""
-## Interpolation strength per second. Higher = snappier + more jitter; lower =
-## smoother + more visible latency. Matches the empirical tune used on remote
-## players.
 const LERP_SPEED: float = 8.0
 
 
-## Resolves a reference to the autoload lazily — [code]take_over_path[/code]
-## replaces the script before autoloads finish wiring, so a preload would
-## return [code]null[/code] on first instantiation.
+# Lazy lookup: take_over_path replaces script before autoloads wire, preload returns null.
 func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
         return true
@@ -38,8 +24,6 @@ func _physics_process(delta: float) -> void:
     if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
         super._physics_process(delta)
         return
-    # Client path: cosmetic rotor spin + despawn safety + snapshot lerp.
-    # No state machine, no sensor, no searchlight roll — host owns those.
     RotorBlades(delta)
     DistanceClear()
     _apply_host_snapshot(delta)
@@ -65,4 +49,3 @@ func FireRockets() -> void:
     if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
         super.FireRockets()
         return
-    # Client: host-auth — rockets spawn on host only. Visual divergence accepted.

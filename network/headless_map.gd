@@ -1,9 +1,7 @@
-## Manages a headless SubViewport for a map where clients are present but the host
-## is not. AI runs in the SubViewport's own physics world. A cloned GameData proxy
-## isolates AI detection from the host's real GameData.
+## Headless SubViewport for a map with clients but no host; proxy GameData isolates AI detection.
 extends Node
 
-## Emitted once the threaded scene load + finalize completes.
+
 signal setup_finished(success: bool)
 
 const PATH_CORE: NodePath = ^"Core"
@@ -19,32 +17,26 @@ var mapScene: Node = null
 var proxyGameData: Resource = null
 var clientPeers: Array[int] = []
 var syncedAI: Dictionary[int, Node] = {}
-## Cached AISpawner + pool refs. Resolved in _finalize_setup, cleared in teardown.
 var _aiSpawner: Node = null
 var _aiAPool: Node = null
 var _aiBPool: Node = null
 var _aiAgents: Node = null
-## Threaded-load state.
 var _loadInProgress: bool = false
 var _setupComplete: bool = false
 var _setupCancelled: bool = false
-## Per-peer slot array [pos, camPos, rot, flags] — reused to avoid per-tick alloc.
+# Reused per-peer [pos, camPos, rot, flags] slot to avoid per-tick alloc.
 var clientPositions: Dictionary[int, Array] = {}
 var savedSnapshot: Dictionary = {}
-## AI centroid — invalidated once per physics frame.
 var _centroidCache: Vector3 = Vector3.ZERO
 var _centroidCacheFrame: int = -1
 
 enum AIType { BANDIT, GUARD, MILITARY, PUNISHER }
 
-## Packed door state bitmask for extract_door_states / restore.
 enum DoorFlag { OPEN = 1, LOCKED = 2 }
 
-## Patched scripts keyed by original resource path. Populated once per mod session.
-## NOT thread-safe: assumes single-threaded Godot main loop. If off-thread access
-## is ever introduced (e.g. WorkerThreadPool scanning), guard with a Mutex.
-static var _patchMap: Dictionary = {}
-static var _patchMapReady: bool = false
+# Main-thread only: guard with Mutex if off-thread access is ever introduced.
+var _patchMap: Dictionary = {}
+var _patchMapReady: bool = false
 
 var _realGameData: Resource = preload("res://Resources/GameData.tres")
 
@@ -53,17 +45,13 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
-## Kicks off threaded scene load. Caller must await [signal setup_finished].
+## Caller must await setup_finished.
 func setup(path: String) -> bool:
     mapPath = path
     viewport = _make_headless_viewport(path)
     add_child(viewport)
 
-    # CACHE_MODE_REUSE lets the threaded load coexist with vanilla
-    # change_scene_to_file on the same path — REPLACE_DEEP fights over
-    # cache locks and deadlocks when both target the same .scn/.tscn.
-    # take_over_path already registered patched scripts system-wide, so
-    # reuse picks them up. _reassign_patched_scripts handles edge cases.
+    # CACHE_MODE_REUSE: REPLACE_DEEP deadlocks vs vanilla change_scene_to_file on same path.
     var err: int = ResourceLoader.load_threaded_request(
         path, "PackedScene", true, ResourceLoader.CACHE_MODE_REUSE
     )
@@ -76,7 +64,6 @@ func setup(path: String) -> bool:
     return true
 
 
-## Polls threaded-load status; self-disables on completion.
 func _process(_delta: float) -> void:
     if !_loadInProgress:
         set_process(false)
@@ -93,7 +80,7 @@ func _process(_delta: float) -> void:
     _finalize_setup()
 
 
-## Finalizes setup after the threaded load lands. instantiate() stays main-thread.
+# instantiate() must stay on main thread.
 func _finalize_setup() -> void:
     if _setupCancelled || !is_instance_valid(viewport):
         return
@@ -105,13 +92,13 @@ func _finalize_setup() -> void:
     mapScene = scene.instantiate()
     viewport.add_child(mapScene)
 
-    # Headless doesn't need player/UI (Core) or sky/glow buffers (WorldEnvironment).
+    # Headless skips Core (player/UI) and WorldEnvironment (sky/glow).
     var core: Node = mapScene.get_node_or_null(PATH_CORE)
     if core != null:
         core.queue_free()
     _strip_world_environments(mapScene)
 
-    # Belt-and-suspenders — CACHE_MODE_REPLACE_DEEP misses deeply nested refs.
+    # CACHE_MODE_REPLACE_DEEP misses deeply nested refs; do belt-and-suspenders here.
     _reassign_patched_scripts(mapScene)
 
     _inject_proxy_gamedata()
@@ -122,7 +109,6 @@ func _finalize_setup() -> void:
     setup_finished.emit(true)
 
 
-## Resolves AISpawner and its three pool children. Cleared in teardown.
 func _cache_ai_spawner_refs() -> void:
     if mapScene == null:
         return
@@ -134,9 +120,7 @@ func _cache_ai_spawner_refs() -> void:
     _aiAgents = _aiSpawner.get_node_or_null(PATH_AGENTS)
 
 
-## Builds a SubViewport with rendering/audio/buffers fully disabled.
-## Settings applied BEFORE add_child() — Godot #102016 (own_world_3d after
-## tree entry can crash).
+# Settings applied before add_child() — Godot #102016 (own_world_3d post-entry crashes).
 func _make_headless_viewport(path: String) -> SubViewport:
     var vp: SubViewport = SubViewport.new()
     vp.name = "Headless_%s" % path.get_file().get_basename()
@@ -160,7 +144,7 @@ func _make_headless_viewport(path: String) -> SubViewport:
     return vp
 
 
-## Removes WorldEnvironment nodes — they allocate GPU buffers we never render.
+# WorldEnvironment allocates GPU buffers that headless never renders.
 func _strip_world_environments(root: Node) -> void:
     for child: Node in root.get_children():
         if child is WorldEnvironment:
@@ -169,7 +153,7 @@ func _strip_world_environments(root: Node) -> void:
             _strip_world_environments(child)
 
 
-## Broadcast rate pulled from ai_state so the two stay in lockstep.
+# Rate pulled from ai_state so the two stay in lockstep.
 const _AIStateScript: GDScript = preload("res://mod/network/ai_state.gd")
 
 
@@ -182,7 +166,6 @@ func start() -> void:
     _log("SubViewport started for %s" % mapPath)
 
 
-## Broadcasts headless AI state to clients on this map at ~10Hz.
 func _physics_process(_delta: float) -> void:
     if !_setupComplete || clientPeers.is_empty():
         return
@@ -204,16 +187,15 @@ func _physics_process(_delta: float) -> void:
         )
 
 
-## Reassigns patched scripts onto baked-in PackedScene references that
-## take_over_path redirected after the scene was cached.
+# Reassigns patched scripts onto baked-in PackedScene refs that take_over_path missed.
 func _reassign_patched_scripts(root: Node) -> void:
     if !_patchMapReady:
         _init_patch_map()
     _walk_and_reassign(root)
 
 
-## Populates _patchMap. Must run after CoopManager.register_patches().
-static func _init_patch_map() -> void:
+## Must run after CoopManager.register_patches().
+func _init_patch_map() -> void:
     if _patchMapReady:
         return
     var paths: PackedStringArray = [
@@ -260,7 +242,6 @@ func _walk_and_inject(node: Node) -> void:
         _walk_and_inject(child)
 
 
-## Injects _cm reference into all patched nodes so RPC broadcasts work.
 func _inject_coop_manager() -> void:
     if mapScene == null || _cm == null:
         return
@@ -306,7 +287,6 @@ func _on_ai_tree_exiting(syncId: int) -> void:
     syncedAI.erase(syncId)
 
 
-## Every AI in the map — pools + active.
 func _get_all_ai_nodes() -> Array[Node]:
     var result: Array[Node] = []
     for holder: Node in [_aiAPool, _aiBPool, _aiAgents]:
@@ -317,15 +297,14 @@ func _get_all_ai_nodes() -> Array[Node]:
     return result
 
 
-## Active (currently-spawned) AI only — the Agents child of the spawner.
-## Active AI only (Agents child) — paused pool AI excluded.
+# Agents child only; excludes paused pool AI.
 func _get_active_ai_nodes() -> Array[Node]:
     if !is_instance_valid(_aiAgents):
         return []
     return _aiAgents.get_children()
 
 
-## Index of the type char in [code]res://AI/<Type>/...[/code]. B/G/M/P → AIType.
+# Index of the type char in res://AI/<Type>/... — B/G/M/P -> AIType.
 const _AI_PATH_TYPE_IDX: int = 9
 
 
@@ -340,7 +319,6 @@ func _get_ai_type(node: Node) -> AIType:
         _:
             return AIType.BANDIT
 
-# ---------- Client Management ----------
 
 
 func add_client(peerId: int) -> void:
@@ -356,7 +334,6 @@ func remove_client(peerId: int) -> void:
     clientPositions.erase(peerId)
     _log("Client %d removed from headless %s" % [peerId, mapPath])
 
-# ---------- Position Injection ----------
 
 
 ## Fixed slot indices for the reused clientPositions Array.
@@ -438,10 +415,8 @@ func _get_ai_centroid() -> Vector3:
     _centroidCacheFrame = frame
     return _centroidCache
 
-# ---------- AI State Extraction ----------
 
 
-## Canonical per-AI state dict, shared by extract_ai_state + snapshot.
 func _build_ai_state_dict(syncId: int, ai: Node) -> Dictionary:
     var curState: Variant = ai.get(_P_CURRENT_STATE)
     var speed: Variant = ai.get(_P_MOVEMENT_SPEED)
@@ -489,7 +464,6 @@ func get_new_spawns() -> Array[Dictionary]:
         })
     return spawns
 
-# ---------- World State ----------
 
 
 func extract_door_states() -> Dictionary[NodePath, int]:
@@ -526,7 +500,6 @@ func extract_switch_states() -> Dictionary[NodePath, bool]:
         switches[mapScene.get_path_to(obj)] = activeVal == true
     return switches
 
-# ---------- Snapshot / Restore ----------
 
 
 func snapshot() -> Dictionary:
@@ -546,7 +519,6 @@ func snapshot() -> Dictionary:
     }
 
 
-## Captures items in the headless scene for transfer on handoff.
 func extract_item_states() -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     if mapScene == null:
@@ -573,7 +545,6 @@ const _RESTORE_CHUNK: int = 64
 
 
 ## Async restore — doors/switches/AI each on their own frame, yielding every
-## _RESTORE_CHUNK iterations within. Callers don't await (headless, invisible).
 func restore(snap: Dictionary) -> void:
     if mapScene == null:
         return
@@ -645,7 +616,6 @@ func _restore_switches(switches: Dictionary) -> void:
                 return
 
 
-## Bucket pool by AI type once — O(S+P) match via pop_back.
 func _restore_ai(aiSnaps: Array) -> int:
     var poolByType: Dictionary = {}
     for ai: Node in _get_all_ai_nodes():

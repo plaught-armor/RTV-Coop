@@ -1,13 +1,4 @@
-## Patches [code]Trader.gd[/code] so task completions are host-authoritative.
-##
-## In solo, [method Trader.CompleteTask] appends to `tasksCompleted`,
-## plays the cue and saves. In co-op every peer runs the same Interface UI
-## locally, so both host and client would append the same task to their own
-## `tasksCompleted`, and the client's save rides to the host on transition
-## with a divergent list.
-##
-## Fix: client requests completion from host; host applies + broadcasts; all
-## peers apply the same list under the same authority.
+## Patch for Trader.gd — host-authoritative task completion (client requests, host broadcasts).
 extends "res://Scripts/Trader.gd"
 
 var _cm: Node
@@ -42,16 +33,12 @@ func CompleteTask(taskData: TaskData) -> void:
             return
         _cm.worldState.sync_trader_task_complete.rpc(scene.get_path_to(self), taskData.name)
         return
-    # Client: stage completion through the host. Host's broadcast flips the
-    # local state back via apply_task_complete().
     if !is_instance_valid(scene):
         return
     _cm.worldState.request_trader_task_complete.rpc_id(1, scene.get_path_to(self), taskData.name)
 
 
-## Called from world_state when the host broadcasts a completion. Mirrors the
-## super.CompleteTask side-effects except for the save (host is authoritative
-## for the on-disk Traders.tres).
+## Mirrors super.CompleteTask minus the save (host owns Traders.tres).
 func apply_task_complete(taskName: String) -> void:
     if tasksCompleted.has(taskName):
         return

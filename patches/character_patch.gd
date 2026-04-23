@@ -1,10 +1,4 @@
-## Patch for [code]Character.gd[/code] — co-op death state broadcasting.
-##
-## Overrides:
-## [br]- [method Death]: broadcasts death event to all peers so remote players
-##   know when a player dies (AI behavior, HUD updates, respawn coordination)
-##
-## Original behaviour is 100% preserved when not in a co-op session.
+## Patch for Character.gd — broadcasts death to peers when session active.
 extends "res://Scripts/Character.gd"
 
 var _cm: Node

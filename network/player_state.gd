@@ -1,5 +1,4 @@
-## Handles player position, rotation, and movement flag synchronisation over ENet.
-## Owned by [code]Node[/code] (added as a child node). All player-related RPCs live here.
+## Player position, rotation, and movement-flag sync over ENet.
 extends Node
 
 var _cm: Node
@@ -18,10 +17,6 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
-## Resolves the local player's [code]RigManager[/code] node lazily and caches the
-## lookup per scene. Invalidated automatically when the current scene changes
-## or the cached node is freed (scene transitions). Avoids repeated
-## [method Node.get_node_or_null] walks for every attachment/weapon poll.
 func _get_rig_manager() -> Node:
     var scene: Node = get_tree().current_scene
     if scene == null:
@@ -36,7 +31,6 @@ func _get_rig_manager() -> Node:
 
 
 
-## Bitfield values for encoding player movement state into a single [code]int[/code].
 enum MoveFlag {
     MOVING = 1,
     WALKING = 2,
@@ -44,15 +38,11 @@ enum MoveFlag {
     CROUCHING = 8,
     GROUNDED = 16,
     FLASHLIGHT = 32,
-    ## Mirrors local [code]gameData.isFiring[/code] continuously so AI's
-    ## FireDetection on the host sees a remote peer firing the same way it
-    ## sees the host firing. Cheaper than a separate sticky-decay flag and
-    ## stays accurate during semi-auto bursts (whole trigger-hold window).
+    # Mirrors isFiring continuously so AI FireDetection sees remotes like the host.
     FIRING = 64,
 }
 
 
-## A single network state snapshot. Typed fields avoid hash lookups.
 class Snapshot extends RefCounted:
     var timestamp: float
     var position: Vector3
@@ -67,8 +57,6 @@ class Snapshot extends RefCounted:
         flags = f
 
 
-## Per-peer ring buffer. Fixed-size, O(1) insert, no shifting.
-## [member head] is the index of the oldest entry. [member count] tracks valid entries.
 class PeerBuffer extends RefCounted:
     var seq: int = 0
     var slots: Array[Snapshot] = []
@@ -84,7 +72,6 @@ class PeerBuffer extends RefCounted:
             slots[i] = Snapshot.new()
 
 
-    ## Mutates the next ring slot in-place — avoids per-RPC allocation.
     func push_fields(timestamp: float, position: Vector3, rotation: Vector3, flags: int) -> void:
         var writeIdx: int = (head + count) % capacity
         var slot: Snapshot = slots[writeIdx]
@@ -98,12 +85,10 @@ class PeerBuffer extends RefCounted:
             head = (head + 1) % capacity
 
 
-    ## Returns the i-th entry (0 = oldest, count-1 = newest).
     func get_at(i: int) -> Snapshot:
         return slots[(head + i) % capacity]
 
 
-    ## Returns the newest entry.
     func newest() -> Snapshot:
         return slots[(head + count - 1) % capacity]
 
@@ -147,14 +132,12 @@ var _lastBroadcastedAttachments: Array[StringName] = []
 ## budget since the RPC is reliable + tiny.
 const EQUIPMENT_CHECK_TICKS: int = 60
 
-# ---------- Broadcast ----------
 
 
 ## Called by the controller patch every physics tick. Throttles to 20 Hz +
 ## skips the RPC when the local player hasn't moved/rotated/changed flags
 ## since the last send. Forces a keepalive every FORCE_KEEPALIVE_TICKS
 ## gated frames so a long-stationary player still refreshes the peer's
-## interp buffer.
 func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -179,7 +162,6 @@ func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
 
     receive_position.rpc(sequenceNumber, position, rot, flags)
 
-# ---------- RPC Receive ----------
 
 
 ## Receives a remote player's position update. Sender is verified via
@@ -206,11 +188,9 @@ func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> 
     buf.seq = seq
     buf.push_fields(Time.get_ticks_msec() / 1000.0, position, rot, flags)
 
-# ---------- Interpolation ----------
 
 
 ## Interpolates buffered snapshots for each remote peer and applies them to
-## the corresponding [code]RemotePlayer[/code] node every physics tick.
 func _physics_process(_delta: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -265,7 +245,6 @@ func _physics_process(_delta: float) -> void:
             to.flags,
         )
 
-# ---------- Utility ----------
 
 
 ## Surface enum — index in this array is the int sent over the wire. Must
@@ -279,8 +258,7 @@ const SURFACES: Array[String] = [
 
 
 ## Nested match on first char, then second only when first is ambiguous
-## (C/G/W). Skips substr() alloc on every call.
-static func _surface_id(s: String) -> int:
+func _surface_id(s: String) -> int:
     if s.is_empty():
         return 0
     match s[0]:
@@ -301,7 +279,7 @@ static func _surface_id(s: String) -> int:
     return 0
 
 
-static func _surface_name(id: int) -> String:
+func _surface_name(id: int) -> String:
     if id < 0 || id >= SURFACES.size():
         return "Generic"
     return SURFACES[id]
@@ -311,11 +289,11 @@ static func _surface_name(id: int) -> String:
 ## [AudioLibrary] + every weapon's fire/tail clips. Both peers preload the
 ## same source resources, so [member _audioPathById] is identical across
 ## peers and we can ship int IDs over the wire instead of res:// strings.
-static var _audioPathById: Dictionary[int, String] = {}
-static var _audioRegistryReady: bool = false
+var _audioPathById: Dictionary[int, String] = {}
+var _audioRegistryReady: bool = false
 
 
-static func _ensure_audio_registry() -> void:
+func _ensure_audio_registry() -> void:
     if _audioRegistryReady:
         return
     _audioRegistryReady = true
@@ -334,7 +312,7 @@ static func _ensure_audio_registry() -> void:
                     _audioPathById[v.resource_path.hash()] = v.resource_path
 
 
-static func _audio_id(path: String) -> int:
+func _audio_id(path: String) -> int:
     if path.is_empty():
         return 0
     var h: int = path.hash()
@@ -343,7 +321,7 @@ static func _audio_id(path: String) -> int:
     return h
 
 
-static func _audio_path(id: int) -> String:
+func _audio_path(id: int) -> String:
     if id == 0:
         return ""
     _ensure_audio_registry()
@@ -394,7 +372,6 @@ func broadcast_vitals() -> void:
     receive_vitals.rpc(roundi(gd.health))
 
 
-## Receives a remote player's health. Updates the remote player node for display.
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_vitals(health: int) -> void:
     var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
@@ -403,14 +380,12 @@ func receive_vitals(health: int) -> void:
     remoteNode.set_meta(&"health", health)
 
 
-## Broadcasts local player death to all remote peers.
 func broadcast_death() -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
     receive_death.rpc()
 
 
-## Receives a remote player's death event. Updates the remote player node.
 @rpc("any_peer", "call_remote", "reliable")
 func receive_death() -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
@@ -424,14 +399,12 @@ func receive_death() -> void:
 
 ## Broadcasts a knife attack audio event to all remote peers.
 ## [param isSlash]: true for slash, false for stab.
-## [param attackId]: combo attack index (1-4 slash, 5-8 stab).
 func broadcast_knife_attack(isSlash: bool, _attackId: int) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
     receive_knife_attack.rpc(isSlash)
 
 
-## Receives a remote player's knife attack — plays spatial audio.
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_knife_attack(isSlash: bool) -> void:
     if !is_instance_valid(_cm):
@@ -442,7 +415,6 @@ func receive_knife_attack(isSlash: bool) -> void:
     remoteNode.play_knife_attack(isSlash)
 
 
-## Broadcasts a knife hit impact to all remote peers.
 func broadcast_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -460,7 +432,6 @@ func receive_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurfaceId: int,
 
 
 ## Broadcasts a grenade throw to all remote peers. Called by grenade_rig_patch
-## after ThrowHighExecute or ThrowLowExecute.
 func broadcast_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -500,7 +471,6 @@ func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: 
 ## Broadcasts the local player's currently-held weapon name to every peer.
 ## [param weaponName] is the base-game file stem (e.g. [code]"AKM"[/code]);
 ## empty string means unarmed. Called from [method _physics_process] when the
-## polled weapon changes — no hook into base-game RigManager is needed.
 func broadcast_equipment(weaponName: String) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -508,7 +478,6 @@ func broadcast_equipment(weaponName: String) -> void:
 
 
 ## Targeted variant used when a new peer spawns. Keeps the new peer in sync
-## without re-broadcasting our equipment to everyone already in the session.
 func send_equipment_to(peerId: int, weaponName: String) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -527,7 +496,7 @@ func receive_equipment(weaponName: String) -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cachedEquipment[peerId] = weaponName
+        _cm.cachedEquipment[_cm.alloc_peer_slot(peerId)] = weaponName
         return
     if remoteNode.has_method(&"set_active_weapon"):
         remoteNode.set_active_weapon(weaponName)
@@ -535,7 +504,6 @@ func receive_equipment(weaponName: String) -> void:
 
 ## Sends our chosen appearance to [param peerId]. Used by
 ## [code]coop_manager.spawn_remote_player[/code] so a newly-spawned peer can
-## swap its placeholder body to the sender's actual selection.
 func send_appearance_to(peerId: int, body: String, materialPath: String) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -543,7 +511,7 @@ func send_appearance_to(peerId: int, body: String, materialPath: String) -> void
 
 
 ## Receives another peer's appearance choice. Runs it through the allowlist in
-## [AppearanceScript] before touching [RemotePlayer]. When the matching remote
+## [appearance] before touching [RemotePlayer]. When the matching remote
 ## node hasn't spawned yet (sync_peer_map race) the entry is cached so
 ## [method coop_manager.spawn_remote_player] can apply it after instantiation.
 @rpc("any_peer", "call_remote", "reliable")
@@ -551,17 +519,16 @@ func receive_appearance(body: String, materialPath: String) -> void:
     if !is_instance_valid(_cm):
         return
     var peerId: int = multiplayer.get_remote_sender_id()
-    var sanitized: Dictionary = _cm.AppearanceScript.sanitize({"body": body, "material": materialPath})
+    var sanitized: Dictionary = _cm.appearance.sanitize({"body": body, "material": materialPath})
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cachedAppearances[peerId] = sanitized
+        _cm.cachedAppearances[_cm.alloc_peer_slot(peerId)] = sanitized
         return
     if remoteNode.has_method(&"set_appearance"):
         remoteNode.set_appearance(sanitized.body, sanitized.material)
 
 
-## Encodes [param data] movement booleans into a [enum MoveFlag] bitfield.
-static func encode_flags(data: GameData) -> int:
+func encode_flags(data: GameData) -> int:
     var flags: int = 0
     if data.isMoving:
         flags |= MoveFlag.MOVING
@@ -580,14 +547,12 @@ static func encode_flags(data: GameData) -> int:
     return flags
 
 
-## Removes all buffered state for [param peerId].
 func clear_peer(peerId: int) -> void:
     peerBuffers.erase(peerId)
 
 
 ## Returns the weapon name last broadcast to peers, or the currently-drawn
 ## weapon if polling hasn't run yet. Used by [code]coop_manager[/code] when a
-## new peer spawns so it receives our equipment immediately (late-join sync).
 func get_current_weapon_name() -> String:
     if !_lastBroadcastedWeapon.is_empty():
         return _lastBroadcastedWeapon
@@ -598,7 +563,6 @@ func get_current_weapon_name() -> String:
 ## Uses a stem like [code]"AKM"[/code] (matches the weapon's dir + pickup
 ## scene name under [code]res://Items/Weapons/[/code]); empty string = unarmed.
 ## No direct hook into [code]RigManager[/code] — checking its children each tick
-## avoids a take_over_path patch and survives weapon swaps we don't author.
 func _poll_equipment() -> void:
     var current: String = _read_current_weapon_name()
     var weaponChanged: bool = current != _lastBroadcastedWeapon
@@ -622,7 +586,6 @@ func _poll_equipment() -> void:
 ## Laser, and the Mount helper when [code]useMount && !optic.hasMount[/code]).
 ## Returns the [StringName]s directly so no [String] round-trip is needed on
 ## send, receive, or the per-peer [method RemotePlayer._apply_attachments]
-## lookup into its own Attachments node.
 func _read_current_attachments() -> Array[StringName]:
     var out: Array[StringName] = []
     var rigManager: Node = _get_rig_manager()
@@ -640,7 +603,6 @@ func _read_current_attachments() -> Array[StringName]:
 
 
 ## Broadcasts the current attachment [StringName]s to all peers. Empty list =
-## weapon has no attachments / no weapon drawn.
 func broadcast_attachments(names: Array[StringName]) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -648,7 +610,6 @@ func broadcast_attachments(names: Array[StringName]) -> void:
 
 
 ## Targeted variant used when a new peer spawns. Mirrors [method send_equipment_to]
-## so late-joiners see our current optic/muzzle/laser without waiting for a swap.
 func send_attachments_to(peerId: int, names: Array[StringName]) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
         return
@@ -668,7 +629,7 @@ func receive_attachments(names: Array[StringName]) -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cachedAttachments[peerId] = names
+        _cm.cachedAttachments[_cm.alloc_peer_slot(peerId)] = names
         return
     if remoteNode.has_method(&"set_active_attachments"):
         remoteNode.set_active_attachments(names)
@@ -676,7 +637,6 @@ func receive_attachments(names: Array[StringName]) -> void:
 
 ## Returns the attachment list last broadcast to peers. Used by
 ## [code]coop_manager[/code] on new-peer spawn so the late-joiner sees our
-## current optic/muzzle/laser without waiting for the next attachment poll.
 func get_current_attachments() -> Array[StringName]:
     if !_lastBroadcastedAttachments.is_empty():
         return _lastBroadcastedAttachments
@@ -684,7 +644,6 @@ func get_current_attachments() -> Array[StringName]:
 
 
 ## Walks the local scene to find the active weapon name. Returns "" when no
-## weapon is drawn (holstered / unarmed / not in a map yet).
 func _read_current_weapon_name() -> String:
     var rigManager: Node = _get_rig_manager()
     if rigManager == null:

@@ -1,96 +1,55 @@
-## Main mod autoload for the Road to Vostok co-op mod.
-## Manages peer lifecycle, script patching, remote player spawning,
-## Steam integration, and scene change detection. Persists across scene transitions.
-## All connections go through Steam (lobbies + P2P tunnel). ENet direct-connect
-## is available behind [member DEBUG] for local development only.
+## Main mod autoload: peer lifecycle, patch injection, remote spawn, Steam, scene changes.
 extends Node
 
-## Default ENet server port (used internally by the P2P tunnel).
 const DEFAULT_PORT: int = 9050
-## Maximum number of clients that can connect to the host.
 const MAX_CLIENTS: int = 3
-## Debug mode — enabled automatically when running from the editor.
 var DEBUG: bool = OS.has_feature("editor")
-## Whether the co-op panel is open (blocks mouse input on the controller).
-var panelOpen: bool = false
-## The local peer's multiplayer ID. 0 when not connected.
 var localPeerId: int = 0
-## Whether this instance is the host (server).
 var isHost: bool = false
-## Whether a multiplayer session is active (host or client).
 var isActive: bool = false
-## Connected peer IDs. Source of truth for who is in the session.
-var connectedPeers: PackedInt32Array = []
-## Spawned remote player nodes, keyed by peer ID. Only contains live nodes.
-var remoteNodes: Dictionary[int, Node3D] = { }
-## Appearance entries received from peers before their [RemotePlayer] node
-## existed. Drained when [method spawn_remote_player] instantiates the peer.
-var cachedAppearances: Dictionary[int, Dictionary] = { }
-## Weapon-name entries received from peers before their [RemotePlayer] node
-## existed. Drained the same way as [member cachedAppearances].
-var cachedEquipment: Dictionary[int, String] = { }
-## Attachment [StringName] lists from peers whose [RemotePlayer] wasn't up yet
-## at RPC receive time. Drained on spawn. Names are the authored
-## [code]Attachments[/code] child [member Node.name] values read from the
-## sender's own [WeaponRig], so no String conversion is needed.
-var cachedAttachments: Dictionary[int, Array] = { }
-## Maps multiplayer peer ID -> display name (Steam persona or fallback).
-var peerNames: Dictionary[int, String] = { }
-## Maps multiplayer peer ID -> Steam ID string.
-var peerSteamIDs: Dictionary[int, String] = { }
-## Cached avatar textures keyed by Steam ID string.
+# Parallel arrays indexed by peerIdx; -1 in peerGodotIds is a tombstone.
+var peerGodotIds: PackedInt32Array = []
+var peerNames: PackedStringArray = []
+var peerSteamIDs: PackedStringArray = []
+var peerMaps: PackedStringArray = []
+var remoteNodes: Array[Node3D] = []
+var cachedAppearances: Array[Dictionary] = []
+var cachedEquipment: PackedStringArray = []
+var cachedAttachments: Array[Array] = []
+var peerIdxByGodotId: Dictionary[int, int] = {}
 var avatarCache: Dictionary[String, ImageTexture] = { }
-## Maps multiplayer peer ID -> scene file path of the map they are on.
-var peerMaps: Dictionary[int, String] = { }
-## Headless map simulations keyed by map scene path. Host only.
 var headlessMaps: Dictionary[String, Node] = {}
-## Persisted snapshots of headless maps after teardown.
 var mapSnapshots: Dictionary[String, Dictionary] = {}
-## Host-owned session settings broadcast to every peer. Used by patches that
-## want a single tunable knob across the whole session (e.g. simulation day
-## rate, friendly fire). Update via [method set_setting] on the host.
-var settings: Dictionary = {
+# Host-owned session settings broadcast to every peer (update via set_setting).
+var settings: Dictionary[String, float] = {
     "day_rate_multiplier": 1.0,
     "night_rate_multiplier": 1.0,
 }
-## Reference to the [code]PlayerState[/code] child node handling position sync.
 var playerState: Node = null
-## Reference to the [code]WorldState[/code] child node handling world sync.
 var worldState: Node = null
-## Reference to the [code]AIState[/code] child node handling AI replication.
 var aiState: Node = null
-## Reference to the [code]VehicleState[/code] child node handling Helicopter/BTR
-## transform sync. Host broadcasts, clients lerp via patched _physics_process.
 var vehicleState: Node = null
-## Reference to the [code]SteamBridge[/code] child node for Steam helper IPC.
 var steamBridge: Node = null
-## Cached reference to /root/Loader autoload.
 var loader: Node = null
-## Cached reference to [code]get_tree().current_scene[/code], refreshed in
-## [method on_scene_changed]. Consumers (patches, UI, presentation) should
-## prefer this over walking [method Node.get_tree] / [member SceneTree.current_scene]
-## per call. Checked with [method @GDScript.is_instance_valid] before use.
-var currentScene: Node = null
-## Reference to the co-op UI panel.
 var coopUI: Control = null
 var _pendingHostUseSteam: bool = true
 
-## Consolidated preloads — children access these via [code]_cm.PropertyName[/code].
 var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
 var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
-var SlotSerializerScript: Script = preload("res://mod/network/slot_serializer.gd")
+var slotSerializer: RefCounted = preload("res://mod/network/slot_serializer.gd").new()
 var HeadlessMapScript: Script = preload("res://mod/network/headless_map.gd")
-## Cached before take_over_path — avoids circular extends after path redirect.
+# Cached before take_over_path to avoid circular extends after path redirect.
 var PickupPatchScript: Script = preload("res://mod/patches/pickup_patch.gd")
-var AppearanceScript: Script = preload("res://mod/network/appearance.gd")
+var appearance: RefCounted = preload("res://mod/network/appearance.gd").new()
+var perf: RefCounted = preload("res://mod/network/perf.gd").new()
+var logCollector: RefCounted = preload("res://mod/autoload/log_collector.gd").new()
+var saveMirror: RefCounted = preload("res://mod/autoload/save_mirror.gd").new()
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
-## Timer for deferred register_scene_items after scene change.
 var itemRegistrationTimer: SceneTreeTimer = null
-## Active co-op world ID. Empty when not hosting/joined.
 var worldId: String = ""
-## Check scene every 60 physics frames (~0.5s at 120Hz).
+# 60 physics frames ~= 0.5s at 120Hz.
 const SCENE_CHECK_FRAMES: int = 60
 
 const PATH_CONTROLLER: NodePath = ^"Core/Controller"
@@ -107,22 +66,13 @@ const PATH_MENU_MODES: NodePath = ^"Modes"
 const PATH_MENU_SUBMENU: NodePath = ^"CoopMPSubmenu"
 const PATH_MENU_BTN_NEW: NodePath = ^"Main/Buttons/New"
 const PATH_MENU_BTN_LOAD: NodePath = ^"Main/Buttons/Load"
-## Set when lobby state says host is in-game; consumed in on_connected_to_server.
 var pendingAutoJoin: bool = false
-## Set while we were in any coop session (host or client). Used to suppress
-## mirror_user_to_solo on the subsequent menu return — client user:// may
-## hold stale .tres files written by vanilla save paths during transitions,
-## and we don't want those promoted into the solo save.
+# Suppress mirror_user_to_solo on menu return; client user:// may hold stale writes.
 var _wasInCoop: bool = false
-## Lobby ID of the currently joined lobby (for reading lobby metadata).
 var currentLobbyID: String = ""
-## Tracks previous scene to detect menu→game transitions.
 var _wasOnMenu: bool = true
-## Prevents double _auto_load_game calls during async scene loading.
 var _autoLoadInProgress: bool = false
-## Set while waiting on async lobby state recheck.
 var _recheckPending: bool = false
-## Timeout for async lobby state recheck callback (seconds).
 const _RECHECK_TIMEOUT_SEC: float = 5.0
 
 
@@ -133,7 +83,7 @@ func _ready() -> void:
 
     register_patches()
     loader = get_node_or_null(PATH_LOADER_ABS)
-    currentScene = get_tree().current_scene
+    saveMirror.init_manager(self)
 
     _spawn_network_children()
     _spawn_coop_ui()
@@ -148,9 +98,6 @@ func _ready() -> void:
     _log("Initialized (debug: %s)" % str(DEBUG))
 
 
-## Instantiates the four network-layer children (PlayerState, WorldState,
-## AIState, SteamBridge) and kicks off the Steam helper launch immediately so
-## its TCP handshake overlaps with UI setup.
 func _spawn_network_children() -> void:
     var PlayerStateScript_: Script = preload("res://mod/network/player_state.gd")
     var WorldStateScript: Script = preload("res://mod/network/world_state.gd")
@@ -185,7 +132,6 @@ func _spawn_network_children() -> void:
     steamBridge.launch()
 
 
-## Creates the CanvasLayer that hosts CoopUI and CoopHUD above game UI.
 func _spawn_coop_ui() -> void:
     var uiLayer: CanvasLayer = CanvasLayer.new()
     uiLayer.name = "CoopUILayer"
@@ -204,7 +150,6 @@ func _spawn_coop_ui() -> void:
     coopHUD.init_manager(self)
 
 
-## Wires up the MultiplayerAPI signals this autoload listens to.
 func _connect_multiplayer_signals() -> void:
     multiplayer.peer_connected.connect(on_peer_connected)
     multiplayer.peer_disconnected.connect(on_peer_disconnected)
@@ -214,17 +159,16 @@ func _connect_multiplayer_signals() -> void:
 
 
 func _physics_process(_delta: float) -> void:
-    # Poll Steam readiness every 30 frames (~0.25s) so the MP submenu's status
-    # label and button-disabled state reflect current helper state.
     if Engine.get_physics_frames() % 30 == 0:
         _update_mp_status()
 
     if Engine.get_physics_frames() % SCENE_CHECK_FRAMES != 0:
         return
 
-    if !is_instance_valid(get_tree().current_scene):
+    var scene: Node = get_tree().current_scene
+    if !is_instance_valid(scene):
         return
-    var currentPath: String = get_tree().current_scene.scene_file_path
+    var currentPath: String = scene.scene_file_path
     if currentPath != lastScenePath:
         lastScenePath = currentPath
         call_deferred("on_scene_changed")
@@ -232,8 +176,6 @@ func _physics_process(_delta: float) -> void:
         ensure_all_spawned()
 
 
-## Updates the MP submenu's Steam status label and button enable state.
-## No-op if the submenu hasn't been built yet or we're not on the main menu.
 func _update_mp_status() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -250,50 +192,13 @@ func _update_mp_status() -> void:
         browseBtn.disabled = !bridge_ready
 
 
-## Applies [code]take_over_path[/code] patches to game scripts.
 func register_patches() -> void:
-    var patches: Array[PackedStringArray] = [
-        ["res://mod/patches/controller_patch.gd", "res://Scripts/Controller.gd"],
-        ["res://mod/patches/interactor_patch.gd", "res://Scripts/Interactor.gd"],
-        ["res://mod/patches/transition_patch.gd", "res://Scripts/Transition.gd"],
-        ["res://mod/patches/pickup_patch.gd", "res://Scripts/Pickup.gd"],
-        ["res://mod/patches/interface_patch.gd", "res://Scripts/Interface.gd"],
-        ["res://mod/patches/loot_simulation_patch.gd", "res://Scripts/LootSimulation.gd"],
-        ["res://mod/patches/ai_spawner_patch.gd", "res://Scripts/AISpawner.gd"],
-        ["res://mod/patches/ai_patch.gd", "res://Scripts/AI.gd"],
-        ["res://mod/patches/grenade_rig_patch.gd", "res://Scripts/GrenadeRig.gd"],
-        ["res://mod/patches/knife_rig_patch.gd", "res://Scripts/KnifeRig.gd"],
-        ["res://mod/patches/explosion_patch.gd", "res://Scripts/Explosion.gd"],
-        ["res://mod/patches/character_patch.gd", "res://Scripts/Character.gd"],
-        ["res://mod/patches/mine_patch.gd", "res://Scripts/Mine.gd"],
-        ["res://mod/patches/loader_patch.gd", "res://Scripts/Loader.gd"],
-        ["res://mod/patches/settings_patch.gd", "res://Scripts/Settings.gd"],
-        ["res://mod/patches/layouts_patch.gd", "res://Scripts/Layouts.gd"],
-        ["res://mod/patches/furniture_patch.gd", "res://Scripts/Furniture.gd"],
-        ["res://mod/patches/fish_pool_patch.gd", "res://Scripts/FishPool.gd"],
-        ["res://mod/patches/event_system_patch.gd", "res://Scripts/EventSystem.gd"],
-        ["res://mod/patches/trader_patch.gd", "res://Scripts/Trader.gd"],
-        ["res://mod/patches/simulation_patch.gd", "res://Scripts/Simulation.gd"],
-        ["res://mod/patches/decor_mode_patch.gd", "res://Scripts/DecorMode.gd"],
-        ["res://mod/patches/helicopter_patch.gd", "res://Scripts/Helicopter.gd"],
-        ["res://mod/patches/btr_patch.gd", "res://Scripts/BTR.gd"],
-    ]
-    for pair: PackedStringArray in patches:
-        var patch: Script = load(pair[0])
-        if patch == null:
-            push_error("[register_patches] failed to load %s" % pair[0])
-            continue
-        patch.reload()
-        patch.take_over_path(pair[1])
-    _log("Patches registered (%d)" % patches.size())
+    var registry: RefCounted = preload("res://mod/autoload/patch_registry.gd").new()
+    var count: int = registry.register_all()
+    _log("Patches registered (%d)" % count)
 
 
-# ---------- Peer Lifecycle ----------
-
-
-## Creates an ENet server and a Steam P2P listen socket + lobby.
-## Starts the ENet server. Peers can connect immediately. World/save setup
-## is deferred until [method finalize_host] after the host picks a world.
+## Starts ENet server + optional Steam lobby; world/save setup deferred until finalize_host.
 func start_hosting(port: int = DEFAULT_PORT, useSteam: bool = true) -> bool:
     if is_session_active():
         _log("Already connected, disconnect first")
@@ -310,36 +215,31 @@ func start_hosting(port: int = DEFAULT_PORT, useSteam: bool = true) -> bool:
     localPeerId = multiplayer.get_unique_id()
     isHost = true
     isActive = true
-    peerNames[localPeerId] = steamBridge.localSteamName if steamBridge.is_ready() else "Host"
-    peerMaps[localPeerId] = get_current_map()
+    var localIdx: int = alloc_peer_slot(localPeerId)
+    peerNames[localIdx] = steamBridge.localSteamName if steamBridge.is_ready() else "Host"
+    peerMaps[localIdx] = get_current_map()
 
     if useSteam && steamBridge.is_ready():
         steamBridge.start_p2p_host(on_p2p_host_ready, port)
         steamBridge.create_lobby(MAX_CLIENTS + 1, on_lobby_created)
     elif !useSteam && is_instance_valid(steamBridge):
-        # User committed to IP host — no point waiting out the helper connect
-        # loop. Bail so [code]SteamBridge._process[/code] stops polling.
         steamBridge.abort_connect()
 
-    _wasInCoop = true
     _log("Hosting on port %d (id: %d, steam: %s)" % [port, localPeerId, str(useSteam)])
     return true
 
 
-## Sets up world save paths and item tracking after the host picks a world.
 func finalize_host() -> void:
     worldState.start_item_tracking()
     _setup_save_paths()
     _update_rich_presence()
 
 
-## Legacy wrapper — starts hosting and finalizes in one call.
 func host_game(port: int = DEFAULT_PORT, useSteam: bool = true) -> void:
     if start_hosting(port, useSteam):
         finalize_host()
 
 
-## Connects to a host at [param address]:[param port] as a client.
 func join_game(address: String, port: int = DEFAULT_PORT, directConnect: bool = false) -> void:
     if is_session_active():
         _log("Already connected, disconnect first")
@@ -352,47 +252,45 @@ func join_game(address: String, port: int = DEFAULT_PORT, directConnect: bool = 
     if error != OK:
         _log("Failed to connect: %s" % error)
         return
-    # Set generous timeout before assigning peer — handshake needs time over P2P relay
+    # Generous timeout needed for handshake over P2P relay.
     var serverPeer: ENetPacketPeer = peer.get_peer(1)
     if serverPeer != null:
         serverPeer.set_timeout(0, 30000, 60000)
     multiplayer.multiplayer_peer = peer
     isHost = false
     if directConnect && is_instance_valid(steamBridge):
-        # Direct-connect skips the Steam lobby path; drop the helper connect
-        # loop so it doesn't keep spinning until CONNECT_TIMEOUT.
         steamBridge.abort_connect()
     _log("Connecting to %s:%d" % [address, port])
 
 
-## Tears down the multiplayer session and cleans up all remote players.
 func disconnect_session() -> void:
     if !is_session_active():
         return
 
-    # Stop subsystems FIRST so no in-flight RPCs or tracking writes fire
-    # after we start cleaning up file state.
+    # Stop subsystems before touching file state to kill in-flight RPCs.
     worldState.stop_item_tracking()
 
-    # Mirror final state to the world dir BEFORE nulling the peer — any late
-    # save events from the current frame still have valid state. Host-only
-    # since only the host has authoritative saves in user://.
+    # Mirror before nulling peer so late frame saves still have valid state (host only).
     var wasHost: bool = isHost
     if wasHost && !worldId.is_empty():
         mirror_user_to_world()
 
-    # Now tear down networking state.
-    for peerId: int in connectedPeers:
-        playerState.clear_peer(peerId)
-    for peerId: int in remoteNodes:
-        var node: Node3D = remoteNodes[peerId]
-        if is_instance_valid(node):
-            node.queue_free()
-    remoteNodes.clear()
-    connectedPeers.clear()
-    peerNames.clear()
-    peerSteamIDs.clear()
-    peerMaps.clear()
+    for i: int in peerGodotIds.size():
+        var pid: int = peerGodotIds[i]
+        if pid == -1:
+            continue
+        playerState.clear_peer(pid)
+        if is_instance_valid(remoteNodes[i]):
+            remoteNodes[i].queue_free()
+    peerGodotIds.resize(0)
+    peerNames.resize(0)
+    peerSteamIDs.resize(0)
+    peerMaps.resize(0)
+    remoteNodes.resize(0)
+    cachedAppearances.resize(0)
+    cachedEquipment.resize(0)
+    cachedAttachments.resize(0)
+    peerIdxByGodotId.clear()
     for mapPath: String in headlessMaps:
         var hmap: Node = headlessMaps[mapPath]
         hmap.teardown()
@@ -406,10 +304,10 @@ func disconnect_session() -> void:
     pendingAutoJoin = false
     currentLobbyID = ""
     _autoLoadInProgress = false
+    # Latches next menu-return path so _maybe_customize_menu skips mirror_user_to_solo.
+    _wasInCoop = true
 
-    # Wipe user:// for BOTH host and client — clients may have stale .tres
-    # files written by vanilla save paths during transitions, which would
-    # otherwise promote into solo on next menu return.
+    # Wipe for host AND client: client user:// may hold stale transition writes.
     wipe_user_saves()
     clear_active_world()
     _reset_save_paths()
@@ -417,74 +315,121 @@ func disconnect_session() -> void:
     steamBridge.clear_rich_presence()
     _log("Disconnected (was host: %s)" % str(wasHost))
 
-# ---------- Signal Handlers ----------
+func alloc_peer_slot(godotId: int) -> int:
+    if peerIdxByGodotId.has(godotId):
+        return peerIdxByGodotId[godotId]
+    for i: int in peerGodotIds.size():
+        if peerGodotIds[i] == -1:
+            peerGodotIds[i] = godotId
+            peerNames[i] = ""
+            peerSteamIDs[i] = ""
+            peerMaps[i] = ""
+            remoteNodes[i] = null
+            cachedAppearances[i] = {}
+            cachedEquipment[i] = ""
+            cachedAttachments[i] = []
+            peerIdxByGodotId[godotId] = i
+            return i
+    var idx: int = peerGodotIds.size()
+    peerGodotIds.append(godotId)
+    peerNames.append("")
+    peerSteamIDs.append("")
+    peerMaps.append("")
+    remoteNodes.append(null)
+    cachedAppearances.append({})
+    cachedEquipment.append("")
+    cachedAttachments.append([])
+    peerIdxByGodotId[godotId] = idx
+    return idx
 
 
-func on_peer_connected(peerId: int) -> void:
-    _log("Peer connected: %d" % peerId)
-    connectedPeers.append(peerId)
+func free_peer_slot(idx: int) -> void:
+    if idx < 0 || idx >= peerGodotIds.size() || peerGodotIds[idx] == -1:
+        return
+    var godotId: int = peerGodotIds[idx]
+    peerGodotIds[idx] = -1
+    peerNames[idx] = ""
+    peerSteamIDs[idx] = ""
+    peerMaps[idx] = ""
+    if is_instance_valid(remoteNodes[idx]):
+        remoteNodes[idx].queue_free()
+    remoteNodes[idx] = null
+    cachedAppearances[idx] = {}
+    cachedEquipment[idx] = ""
+    cachedAttachments[idx] = []
+    peerIdxByGodotId.erase(godotId)
+
+
+func peer_idx(godotId: int) -> int:
+    return peerIdxByGodotId.get(godotId, -1)
+
+
+func active_peer_idxs() -> PackedInt32Array:
+    var out: PackedInt32Array = []
+    for i: int in peerGodotIds.size():
+        if peerGodotIds[i] != -1:
+            out.append(i)
+    return out
+
+
+func active_peer_count() -> int:
+    var n: int = 0
+    for id: int in peerGodotIds:
+        if id != -1:
+            n += 1
+    return n
+
+
+func on_peer_connected(godotId: int) -> void:
+    _log("Peer connected: %d" % godotId)
+    alloc_peer_slot(godotId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
-    sync_name.rpc_id(peerId, get_local_name(), localSteamID)
-    set_peer_timeout(peerId)
+    sync_name.rpc_id(godotId, get_local_name(), localSteamID)
+    set_peer_timeout(godotId)
     _update_rich_presence()
     _update_lobby_data()
-    # Send our current map so peer knows where we are
     var currentMap: String = get_current_map()
     if !currentMap.is_empty():
-        sync_peer_map.rpc_id(peerId, currentMap)
-    # Don't spawn remote player yet — wait for sync_peer_map from peer
-    # to confirm they're on the same map
+        sync_peer_map.rpc_id(godotId, currentMap)
+    # Remote spawn waits for peer's sync_peer_map to confirm same-map.
 
 
-func on_peer_disconnected(peerId: int) -> void:
-    _log("Peer disconnected: %d" % peerId)
-    var idx: int = connectedPeers.find(peerId)
-    if idx >= 0:
-        connectedPeers.remove_at(idx)
-    playerState.clear_peer(peerId)
-    peerNames.erase(peerId)
-    peerSteamIDs.erase(peerId)
-    cachedAppearances.erase(peerId)
-    cachedEquipment.erase(peerId)
-    cachedAttachments.erase(peerId)
-    var peerMap: String = ""
-    if peerMaps.has(peerId):
-        peerMap = peerMaps[peerId]
-    peerMaps.erase(peerId)
-    # Remove from headless map if applicable
+func on_peer_disconnected(godotId: int) -> void:
+    _log("Peer disconnected: %d" % godotId)
+    var idx: int = peer_idx(godotId)
+    if idx < 0:
+        return
+    playerState.clear_peer(godotId)
+    var peerMap: String = peerMaps[idx]
     if isHost && !peerMap.is_empty() && peerMap in headlessMaps:
         var hmap: Node = headlessMaps[peerMap]
-        hmap.remove_client(peerId)
+        hmap.remove_client(godotId)
         if hmap.clientPeers.is_empty():
             mapSnapshots[peerMap] = hmap.snapshot()
             hmap.teardown()
             hmap.queue_free()
             headlessMaps.erase(peerMap)
+    free_peer_slot(idx)
     _update_rich_presence()
     _update_lobby_data()
-    if peerId in remoteNodes:
-        var node: Node3D = remoteNodes[peerId]
-        if is_instance_valid(node):
-            node.queue_free()
-        remoteNodes.erase(peerId)
 
 
 func on_connected_to_server() -> void:
     localPeerId = multiplayer.get_unique_id()
     isActive = true
-    peerNames[localPeerId] = get_local_name()
+    var localIdx: int = alloc_peer_slot(localPeerId)
+    peerNames[localIdx] = get_local_name()
     var currentMap: String = get_current_map()
-    peerMaps[localPeerId] = currentMap
-    set_peer_timeout(1) # Server is always peer ID 1
+    peerMaps[localIdx] = currentMap
+    set_peer_timeout(1)
     worldState.start_item_tracking()
     _update_rich_presence()
-    _wasInCoop = true
     _log("Connected to server (id: %d)" % localPeerId)
     var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
     sync_name.rpc(get_local_name(), localSteamID)
     if !currentMap.is_empty():
         sync_peer_map.rpc(currentMap)
-    # Request world ID from host — _auto_load_game is deferred until response arrives
+    # _auto_load_game defers until world ID arrives.
     _request_world_id.rpc_id(1)
 
 
@@ -497,9 +442,6 @@ func on_connection_failed() -> void:
 func on_server_disconnected() -> void:
     _log("Server disconnected")
     disconnect_session()
-
-# ---------- Steam Callbacks ----------
-
 
 func on_lobby_created(response: Dictionary) -> void:
     if !response.get(&"ok", false):
@@ -528,40 +470,32 @@ func on_p2p_tunnel_ready(response: Dictionary) -> void:
     _log("P2P tunnel ready on 127.0.0.1:%d — connecting ENet" % tunnelPort)
     join_game("127.0.0.1", tunnelPort)
 
-# ---------- Name Sync ----------
-
-
-## Returns the local player's display name.
 func get_local_name() -> String:
     if steamBridge.is_ready():
         return steamBridge.localSteamName
     return "Player_%d" % localPeerId
 
 
-## Returns the display name for [param peerId], or a fallback.
 func get_peer_name(peerId: int) -> String:
-    if peerNames.has(peerId):
-        return peerNames[peerId]
+    var idx: int = peer_idx(peerId)
+    if idx >= 0:
+        return peerNames[idx]
     return "Player_%d" % peerId
 
 
-## RPC: receives a peer's display name and Steam ID.
 @rpc("any_peer", "call_remote", "reliable")
 func sync_name(peerName: String, steamID: String = "") -> void:
     var senderId: int = multiplayer.get_remote_sender_id()
+    var idx: int = alloc_peer_slot(senderId)
     var sanitized: String = sanitize_name(peerName)
-    peerNames[senderId] = sanitized
+    peerNames[idx] = sanitized
     if !steamID.is_empty():
-        peerSteamIDs[senderId] = steamID
+        peerSteamIDs[idx] = steamID
         fetch_avatar(steamID)
-        # Send stored character to joining client if we have one
         if isHost && !worldId.is_empty():
             send_character_to_client(senderId, steamID)
-    # Update display name on existing remote player node
-    if senderId in remoteNodes:
-        var remote: Node3D = remoteNodes[senderId]
-        if is_instance_valid(remote):
-            remote.displayName = sanitized
+    if is_instance_valid(remoteNodes[idx]):
+        remoteNodes[idx].displayName = sanitized
     _log("Peer %d name: %s (steam: %s)" % [senderId, sanitized, steamID])
 
 
@@ -575,8 +509,6 @@ func sanitize_name(rawName: String) -> String:
     return clean if !clean.is_empty() else "Unknown"
 
 
-## Fetches and caches a Steam avatar by Steam ID. Skips if already cached.
-## Uses binary transfer (raw RGBA bytes) to avoid base64 overhead.
 func fetch_avatar(steamID: String) -> void:
     if steamID.is_empty() || steamID in avatarCache:
         return
@@ -592,19 +524,16 @@ func on_avatar_binary_received(steamID: String, w: int, h: int, rgba: PackedByte
     avatarCache[steamID] = ImageTexture.create_from_image(img)
 
 
-## Returns the cached avatar texture for a peer, or null.
 func get_peer_avatar(peerId: int) -> ImageTexture:
-    var steamID: String = ""
-    if peerSteamIDs.has(peerId):
-        steamID = peerSteamIDs[peerId]
+    var idx: int = peer_idx(peerId)
+    if idx < 0:
+        return null
+    var steamID: String = peerSteamIDs[idx]
     if steamID.is_empty():
         return null
     if !avatarCache.has(steamID):
         return null
     return avatarCache[steamID]
-
-# ---------- Remote Player Management ----------
-
 
 func spawn_remote_player(peerId: int) -> void:
     if peerId in remoteNodes:
@@ -619,44 +548,36 @@ func spawn_remote_player(peerId: int) -> void:
 
     playerState.clear_peer(peerId)
 
+    var idx: int = alloc_peer_slot(peerId)
     var remote: Node3D = remotePlayerScene.instantiate()
     remote.name = "RemotePlayer_%d" % peerId
     remote.set_meta(&"peer_id", peerId)
     remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
     remote.init_manager(self)
-    # Set display name from peer registry
     var peerDisplayName: String = get_peer_name(peerId)
     remote.displayName = peerDisplayName
-    remoteNodes[peerId] = remote
+    remoteNodes[idx] = remote
     _log("Spawned remote player for peer %d (%s)" % [peerId, peerDisplayName])
 
-    # Exchange appearance: apply any cached remote entry, then hand the peer our
-    # local choice so they can swap their placeholder model on their end.
-    _drain_peer_cache(cachedAppearances, peerId, _apply_cached_appearance.bind(remote))
+    var cachedAppearance: Dictionary = cachedAppearances[idx]
+    if !cachedAppearance.is_empty():
+        _apply_cached_appearance(cachedAppearance, remote)
+        cachedAppearances[idx] = {}
     var myAppearance: Dictionary = load_local_appearance()
     playerState.send_appearance_to(peerId, myAppearance.body, myAppearance.material)
 
-    # Attachments before equipment so the weapon-change apply picks up the
-    # stored list in one pass. set_active_attachments stores the list but is a
-    # no-op until an activeWeapon exists; set_active_weapon then runs
-    # _apply_attachments() internally using the stored list.
-    _drain_peer_cache(cachedAttachments, peerId, remote.set_active_attachments)
-    _drain_peer_cache(cachedEquipment, peerId, remote.set_active_weapon)
+    # Attachments must apply before equipment so set_active_weapon picks them up.
+    var cachedAtt: Array = cachedAttachments[idx]
+    if !cachedAtt.is_empty():
+        remote.set_active_attachments(cachedAtt)
+        cachedAttachments[idx] = []
+    var cachedEq: String = cachedEquipment[idx]
+    if !cachedEq.is_empty():
+        remote.set_active_weapon(cachedEq)
+        cachedEquipment[idx] = ""
     playerState.send_equipment_to(peerId, playerState.get_current_weapon_name())
     playerState.send_attachments_to(peerId, playerState.get_current_attachments())
-
-
-## Generic peer-keyed cache drain. [param apply] receives the cached value as
-## its sole dispatched argument (additional context can be bound via
-## [method Callable.bind], which appends to the call args). Keeps the
-## appearance/equipment/attachments spawn handshake symmetric and avoids
-## repeating the has/read/erase triplet in three places.
-func _drain_peer_cache(cache: Dictionary, peerId: int, apply: Callable) -> void:
-    if !cache.has(peerId):
-        return
-    apply.call(cache[peerId])
-    cache.erase(peerId)
 
 
 func _apply_cached_appearance(cached: Dictionary, remote: Node3D) -> void:
@@ -666,36 +587,35 @@ func _apply_cached_appearance(cached: Dictionary, remote: Node3D) -> void:
 
 
 func on_remote_node_exiting(peerId: int) -> void:
-    remoteNodes.erase(peerId)
+    var idx: int = peer_idx(peerId)
+    if idx >= 0:
+        remoteNodes[idx] = null
 
 
 func get_remote_player_node(peerId: int) -> Node3D:
-    if !remoteNodes.has(peerId):
+    var idx: int = peer_idx(peerId)
+    if idx < 0:
         return null
-    return remoteNodes[peerId]
+    return remoteNodes[idx]
 
 
 func ensure_all_spawned() -> void:
-    for peerId: int in connectedPeers:
-        if peerId not in remoteNodes:
-            spawn_remote_player(peerId)
-
-# ---------- Scene Change Handling ----------
-
+    for i: int in peerGodotIds.size():
+        var pid: int = peerGodotIds[i]
+        if pid == -1 || pid == localPeerId:
+            continue
+        if !is_instance_valid(remoteNodes[i]):
+            spawn_remote_player(pid)
 
 func on_scene_changed() -> void:
     print("[TX] on_scene_changed begin")
-    # Refresh shared scene cache first so downstream refresh_scene_cache()
-    # calls and any signal handlers observe the new scene consistently.
-    currentScene = get_tree().current_scene
     var wasOnMenu: bool = _wasOnMenu
     _wasOnMenu = _is_on_menu()
     _autoLoadInProgress = false
+    # Menu-to-game transition skips the back-button free path.
+    if is_instance_valid(coopUI) && coopUI.has_method(&"free_all_dialogs"):
+        coopUI.free_all_dialogs()
     inject_manager()
-    # Refresh network-layer scene caches — both world_state and ai_state
-    # hold refs to current_scene / Core/Controller / UI Interface / etc.
-    # Repopulate once per transition; RPC handlers read typed vars
-    # instead of walking get_tree().current_scene on every call.
     if worldState != null:
         worldState.refresh_scene_cache()
     if aiState != null:
@@ -706,9 +626,10 @@ func on_scene_changed() -> void:
         return
 
     var currentMap: String = get_current_map()
-    peerMaps[localPeerId] = currentMap
+    var localIdx: int = peer_idx(localPeerId)
+    if localIdx >= 0:
+        peerMaps[localIdx] = currentMap
 
-    # Host transitioned from menu to in-game — tell waiting clients to load
     if isHost && wasOnMenu && !_wasOnMenu:
         sync_game_start.rpc(_get_current_map_name())
 
@@ -730,21 +651,16 @@ func on_scene_changed() -> void:
     print("[TX] on_scene_changed end")
 
 
-## Despawns remote player nodes whose owning peers are on a different map.
-## Two-phase (collect, then erase) to avoid mutating remoteNodes during iteration.
 func _despawn_off_map_peers() -> void:
-    var toErase: Array[int] = []
-    for peerId: int in remoteNodes:
-        if !is_peer_on_same_map(peerId):
-            toErase.append(peerId)
-    for peerId: int in toErase:
-        var node: Node3D = remoteNodes[peerId]
-        if is_instance_valid(node):
-            node.queue_free()
-        remoteNodes.erase(peerId)
+    for i: int in peerGodotIds.size():
+        var pid: int = peerGodotIds[i]
+        if pid == -1 || pid == localPeerId:
+            continue
+        if is_instance_valid(remoteNodes[i]) && !is_peer_on_same_map(pid):
+            remoteNodes[i].queue_free()
+            remoteNodes[i] = null
 
 
-## Clears world_state item-tracking collections so the fresh scene starts empty.
 func _reset_world_state_item_tracking() -> void:
     if !worldState.trackingItems:
         return
@@ -755,9 +671,7 @@ func _reset_world_state_item_tracking() -> void:
     worldState.syncIdCounter = 0
 
 
-## Host-only: applies any queued headless-map handoff snapshot and schedules
-## a 2s-delayed item registration pass (Unfreeze physics needs time to settle
-## before captured positions are stable).
+## Host-only. 2s delay lets Unfreeze physics settle before captured positions are stable.
 func _finalize_host_scene_transition(currentMap: String) -> void:
     var handoffSnap: Dictionary = _teardown_headless_map(currentMap)
     if !handoffSnap.is_empty():
@@ -768,7 +682,6 @@ func _finalize_host_scene_transition(currentMap: String) -> void:
     itemRegistrationTimer.timeout.connect(worldState.register_scene_items)
 
 
-## Client tells host they've finished loading the new scene.
 @rpc("any_peer", "call_remote", "reliable")
 func notify_scene_loaded() -> void:
     if !isHost:
@@ -780,8 +693,6 @@ func notify_scene_loaded() -> void:
         aiState.send_full_state(peerId)
 
 
-## Injects [code]_cm[/code] into all patched nodes in the current scene.
-## Called after every scene change so patches don't need [code]get_node_or_null[/code].
 func inject_manager() -> void:
     var scene: Node = get_tree().current_scene
     if DEBUG:
@@ -796,13 +707,11 @@ func inject_manager() -> void:
     _maybe_customize_menu(scene)
 
 
-## Injects into fixed-path player-local nodes: Controller, Interactor, Character, Interface, Settings.
 func _inject_controller_tree(scene: Node) -> void:
     var controller: Node = scene.get_node_or_null(PATH_CONTROLLER)
     if controller != null && controller.has_method(&"init_manager"):
         controller.init_manager(self)
 
-    # Interactor — single choke point for Door/Switch/Bed/Fire/LootContainer/Trader dispatch
     var interactor: Node = scene.get_node_or_null(PATH_INTERACTOR)
     if interactor == null:
         for node: Node in scene.find_children("*", "RayCast3D", true, false):
@@ -827,7 +736,6 @@ func _inject_controller_tree(scene: Node) -> void:
         ui_settings.init_manager(self)
 
 
-## Injects into Interactable (Doors, LootContainers) and Trader group nodes.
 func _inject_interactables_and_traders() -> void:
     for node: Node in get_tree().get_nodes_in_group(&"Interactable"):
         var obj: Node = node.owner if node.owner != null else node
@@ -839,7 +747,6 @@ func _inject_interactables_and_traders() -> void:
             node.init_manager(self)
 
 
-## Injects into Item (Pickup) and Transition group nodes.
 func _inject_items_and_transitions() -> void:
     for node: Node in get_tree().get_nodes_in_group(&"Item"):
         if node.has_method(&"init_manager"):
@@ -851,7 +758,6 @@ func _inject_items_and_transitions() -> void:
             obj.init_manager(self)
 
 
-## Injects into AISpawner (scene "AI" node) and every active AI agent.
 func _inject_ai(scene: Node) -> void:
     var spawner: Node = scene.get_node_or_null(PATH_AI)
     if spawner != null && spawner.has_method(&"init_manager"):
@@ -862,24 +768,17 @@ func _inject_ai(scene: Node) -> void:
             node.init_manager(self)
 
 
-## Main menu path: applies co-op customization, mirrors solo saves if returning
-## from solo play (ModLoader defers init past Menu.tscn load, so patching
-## Menu.gd doesn't work — we modify the running instance instead).
+# ModLoader runs past Menu.tscn load, so we modify the live instance instead of patching.
 func _maybe_customize_menu(scene: Node) -> void:
     var scenePath: String = scene.scene_file_path if is_instance_valid(scene) else ""
     if scenePath != "res://Scenes/Menu.tscn":
         return
     _customize_menu(scene)
-    # Skip if a coop session is active (disconnect_session handles that) or if
-    # we just came back from coop (user:// may hold stale client saves that
-    # would pollute the solo save).
     if !is_session_active() && !_wasInCoop:
         mirror_user_to_solo()
     _wasInCoop = false
 
 
-## Modifies the running Menu instance in-place: renames New→Singleplayer,
-## Load→Multiplayer, rebinds their signals, and creates submenu panels.
 func _customize_menu(menu: Node) -> void:
     if menu.has_meta(&"coop_customized"):
         return
@@ -895,7 +794,6 @@ func _customize_menu(menu: Node) -> void:
     loadButton.text = "Multiplayer"
     loadButton.disabled = false
 
-    # Disconnect original signals
     var newSignalCallable: Callable = Callable(menu, "_on_new_pressed")
     var loadSignalCallable: Callable = Callable(menu, "_on_load_pressed")
     if newButton.pressed.is_connected(newSignalCallable):
@@ -903,11 +801,9 @@ func _customize_menu(menu: Node) -> void:
     if loadButton.pressed.is_connected(loadSignalCallable):
         loadButton.pressed.disconnect(loadSignalCallable)
 
-    # Connect new handlers bound to the menu node
     newButton.pressed.connect(_on_singleplayer_pressed.bind(menu))
     loadButton.pressed.connect(_on_multiplayer_pressed.bind(menu))
 
-    # Build the Multiplayer submenu once
     _build_mp_submenu(menu)
     _log("[menu] customized: Singleplayer/Multiplayer active")
 
@@ -915,15 +811,10 @@ func _customize_menu(menu: Node) -> void:
 func _on_singleplayer_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    # Should be impossible (button only exists on the main menu and a live
-    # session means you're in-game), but guard anyway — wipe_user_saves()
-    # would destroy the active session's state.
+    # Guard against wipe_user_saves() destroying active session state.
     if is_session_active():
         _log("[menu] Singleplayer pressed during active session — ignored")
         return
-    # Restore the solo save into user:// so vanilla Continue/New Game flows see
-    # the player's solo state. Wipe first to clear any leftover from a prior
-    # coop session that didn't clean up properly.
     wipe_user_saves()
     mirror_solo_to_user()
     var main: Node = menu.get_node_or_null(PATH_MENU_MAIN)
@@ -945,9 +836,6 @@ func _on_multiplayer_pressed(menu: Node) -> void:
         submenu.show()
 
 
-## Builds the Multiplayer submenu using the same full-screen single-VBox layout
-## as the other coop dialogs (Host World / Browse Lobbies / New World) so all
-## menus look stylistically consistent.
 func _build_mp_submenu(menu: Node) -> void:
     if menu.get_node_or_null(PATH_MENU_SUBMENU) != null:
         return
@@ -992,7 +880,6 @@ func _build_mp_submenu(menu: Node) -> void:
     btnGrid.add_theme_constant_override("separation", 8)
     outer.add_child(btnGrid)
 
-    # Left column: host buttons
     var hostCol: VBoxContainer = VBoxContainer.new()
     hostCol.add_theme_constant_override("separation", 4)
     hostCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1008,7 +895,6 @@ func _build_mp_submenu(menu: Node) -> void:
     hostIpBtn.pressed.connect(_on_mp_host_ip_pressed.bind(menu))
     hostCol.add_child(hostIpBtn)
 
-    # Right column: join buttons
     var joinCol: VBoxContainer = VBoxContainer.new()
     joinCol.add_theme_constant_override("separation", 4)
     joinCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1024,7 +910,6 @@ func _build_mp_submenu(menu: Node) -> void:
     joinBtn.pressed.connect(_on_mp_show_direct_join.bind(menu))
     joinCol.add_child(joinBtn)
 
-    # Push footer to the bottom
     var footerSpacer: Control = Control.new()
     footerSpacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
     outer.add_child(footerSpacer)
@@ -1047,7 +932,6 @@ func _mp_submenu_button(btnText: String) -> Button:
     return btn
 
 
-## Row button — expands to fill its share of the HBox equally.
 func _mp_row_button(btnText: String) -> Button:
     var btn: Button = Button.new()
     btn.text = btnText
@@ -1114,8 +998,6 @@ func _on_mp_back_pressed(menu: Node) -> void:
         main.show()
 
 
-## Registers AI spawner pools with aiState for the current scene.
-## Called deferred after scene load so the spawner's _ready() has completed.
 func _register_ai_pools() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -1124,17 +1006,13 @@ func _register_ai_pools() -> void:
     if spawner != null:
         aiState.register_spawner_pools(spawner)
 
-# ---------- Rich Presence / Lobby Data ----------
-
-
-## Updates Steam Rich Presence to show current co-op status on the friends list.
 func _update_rich_presence() -> void:
     if !steamBridge.is_ready():
         return
     if !isActive:
         steamBridge.clear_rich_presence()
         return
-    var playerCount: int = connectedPeers.size() + 1
+    var playerCount: int = active_peer_count()
     var mapName: String = _get_current_map_name()
     var status: String = "Co-op (%d players)" % playerCount
     if !mapName.is_empty():
@@ -1143,11 +1021,10 @@ func _update_rich_presence() -> void:
     steamBridge.set_rich_presence("status", status)
 
 
-## Updates lobby metadata (map name, player count) visible in the lobby browser.
 func _update_lobby_data() -> void:
     if !steamBridge.is_ready() || !isHost:
         return
-    var playerCount: int = connectedPeers.size() + 1
+    var playerCount: int = active_peer_count()
     var mapName: String = _get_current_map_name()
     steamBridge.set_lobby_data("map", mapName)
     steamBridge.set_lobby_data("players", str(playerCount))
@@ -1155,311 +1032,58 @@ func _update_lobby_data() -> void:
     steamBridge.set_lobby_data("state", state)
 
 
-## Extracts a display-friendly map name from the current scene path.
 func _get_current_map_name() -> String:
     if !is_instance_valid(get_tree().current_scene):
         return ""
     var path: String = get_tree().current_scene.scene_file_path
     if path.is_empty():
         return ""
-    # "res://Scenes/Village.tscn" -> "Village"
     return path.get_file().get_basename()
 
-# ---------- Per-World Save Mirroring ----------
-# Vanilla Loader hard-codes user:// for save paths and we can't safely swap its
-# script at runtime (breaks @onready references). Instead we mirror saves
-# between user:// (Loader's working dir) and user://coop/<world_id>/ (persistent
-# per-world storage). The world dir is loaded into user:// before play and
-# user:// is written back into the world dir after every save event.
 
-const COOP_WORLDS_DIR: String = "user://coop/"
-const SOLO_SAVES_DIR: String = "user://solo/"
-## File names that are world-level (shared by all players in the world).
-const COOP_WORLD_SAVES: PackedStringArray = [
-    "World.tres", "Cabin.tres", "Attic.tres", "Classroom.tres",
-    "Tent.tres", "Bunker.tres", "Traders.tres",
-]
-## File name that is per-player and lives under players/<steam_id>/.
-const COOP_PLAYER_SAVE: String = "Character.tres"
-## Plain-text file at user:// root that holds the currently-active world ID.
-## Persists across launches so a crash mid-session resumes the same world,
-## and so save events know which world dir to mirror into.
-const COOP_ACTIVE_WORLD_FILE: String = "user://coop_active.txt"
-
-
-## Writes the active world ID to disk so subsequent save events (and the next
-## launch in case of a crash) know which world dir to mirror into.
+# Thin wrappers over save_mirror.gd preserve the _cm.X() API used by callers.
 func set_active_world(activeWorldId: String) -> void:
-    worldId = activeWorldId
-    var f: FileAccess = FileAccess.open(COOP_ACTIVE_WORLD_FILE, FileAccess.WRITE)
-    if f != null:
-        f.store_string(activeWorldId)
-        f.close()
+    saveMirror.set_active_world(activeWorldId)
 
 
-## Returns the active world ID from disk (empty if no active world).
 func get_active_world() -> String:
-    if !FileAccess.file_exists(COOP_ACTIVE_WORLD_FILE):
-        return ""
-    var f: FileAccess = FileAccess.open(COOP_ACTIVE_WORLD_FILE, FileAccess.READ)
-    if f == null:
-        return ""
-    var contents: String = f.get_as_text().strip_edges()
-    f.close()
-    return contents
+    return saveMirror.get_active_world()
 
 
-## Clears the active world marker. Called on clean disconnect/return to menu.
 func clear_active_world() -> void:
-    worldId = ""
-    if FileAccess.file_exists(COOP_ACTIVE_WORLD_FILE):
-        DirAccess.remove_absolute(ProjectSettings.globalize_path(COOP_ACTIVE_WORLD_FILE))
+    saveMirror.clear_active_world()
 
 
-## Copies each user://*.tres into the world dir after a save event. The host
-## calls this from transition_patch after super.Interact() commits saves.
-## Fire-and-forget: I/O is dispatched to [WorkerThreadPool] so the transition
-## scene load isn't stalled by 5-50MB of save-file copying. Directory creation
-## stays on the main thread (fast, and avoids DirAccess races with the worker).
 func mirror_user_to_world() -> void:
-    if worldId.is_empty() || !isHost:
-        return
-    var worldDir: String = COOP_WORLDS_DIR + worldId + "/"
-    DirAccess.make_dir_recursive_absolute(worldDir)
-    var jobs: Array = []
-    for saveName: String in COOP_WORLD_SAVES:
-        var src: String = "user://" + saveName
-        if FileAccess.file_exists(src):
-            jobs.append([src, worldDir + saveName])
-    # Per-player character lands in players/<steam_id>/Character.tres
-    var steamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
-    if FileAccess.file_exists("user://" + COOP_PLAYER_SAVE):
-        var playerDir: String = worldDir + "players/" + steamId + "/"
-        DirAccess.make_dir_recursive_absolute(playerDir)
-        jobs.append(["user://" + COOP_PLAYER_SAVE, playerDir + COOP_PLAYER_SAVE])
-    if !jobs.is_empty():
-        WorkerThreadPool.add_task(_run_copy_jobs.bind(jobs), false, "coop:mirror_user_to_world")
+    saveMirror.mirror_user_to_world()
 
 
-## Copies the world dir into user:// before the host loads a world. Vanilla
-## Loader then reads from user:// as if it were the regular save.
 func mirror_world_to_user(forWorldId: String) -> void:
-    var worldDir: String = COOP_WORLDS_DIR + forWorldId + "/"
-    if !DirAccess.dir_exists_absolute(worldDir):
-        return
-    for saveName: String in COOP_WORLD_SAVES:
-        var src: String = worldDir + saveName
-        if FileAccess.file_exists(src):
-            _copy_file(src, "user://" + saveName)
-    var steamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
-    var playerSrc: String = worldDir + "players/" + steamId + "/" + COOP_PLAYER_SAVE
-    if FileAccess.file_exists(playerSrc):
-        _copy_file(playerSrc, "user://" + COOP_PLAYER_SAVE)
+    saveMirror.mirror_world_to_user(forWorldId)
 
 
-## One-time migration on mod startup: if vanilla saves exist at user:// root and
-## the solo dir doesn't exist yet, move them into user://solo/. Protects the
-## player's pre-mod single-player progress from being wiped by coop sessions.
 func migrate_solo_saves_if_needed() -> void:
-    if DirAccess.dir_exists_absolute(SOLO_SAVES_DIR):
-        return
-    if !FileAccess.file_exists("user://World.tres"):
-        return
-    DirAccess.make_dir_recursive_absolute(SOLO_SAVES_DIR)
-    var dir: DirAccess = DirAccess.open("user://")
-    if dir == null:
-        return
-    dir.list_dir_begin()
-    var entry: String = dir.get_next()
-    var migrated: int = 0
-    while entry != "":
-        if entry.ends_with(".tres") && entry != "Validator.tres" && entry != "Preferences.tres":
-            _copy_file("user://" + entry, SOLO_SAVES_DIR + entry)
-            DirAccess.remove_absolute(ProjectSettings.globalize_path("user://" + entry))
-            migrated += 1
-        entry = dir.get_next()
-    dir.list_dir_end()
-    _log("Migrated %d solo save files to %s" % [migrated, SOLO_SAVES_DIR])
+    var migrated: int = saveMirror.migrate_solo_saves_if_needed()
+    if migrated > 0:
+        _log("Migrated %d solo save files to %s" % [migrated, saveMirror.SOLO_SAVES_DIR])
 
 
-## Copies user://*.tres into the solo dir. Called from transition_patch when
-## the player saves outside of a coop session, and from on_scene_changed when
-## returning to the menu.
 func mirror_user_to_solo() -> void:
-    if !FileAccess.file_exists("user://World.tres"):
-        return  # nothing to mirror
-    DirAccess.make_dir_recursive_absolute(SOLO_SAVES_DIR)
-    # Enumerate on main thread (quick), dispatch byte copies to worker pool.
-    var dir: DirAccess = DirAccess.open("user://")
-    if dir == null:
-        return
-    var jobs: Array = []
-    dir.list_dir_begin()
-    var entry: String = dir.get_next()
-    while entry != "":
-        if entry.ends_with(".tres") && entry != "Validator.tres" && entry != "Preferences.tres":
-            jobs.append(["user://" + entry, SOLO_SAVES_DIR + entry])
-        entry = dir.get_next()
-    dir.list_dir_end()
-    if !jobs.is_empty():
-        WorkerThreadPool.add_task(_run_copy_jobs.bind(jobs), false, "coop:mirror_user_to_solo")
+    saveMirror.mirror_user_to_solo()
 
 
-## Copies the solo dir into user:// so vanilla Loader picks them up. Called
-## when the player clicks Singleplayer from the main menu.
 func mirror_solo_to_user() -> void:
-    if !DirAccess.dir_exists_absolute(SOLO_SAVES_DIR):
-        return
-    var dir: DirAccess = DirAccess.open(SOLO_SAVES_DIR)
-    if dir == null:
-        return
-    dir.list_dir_begin()
-    var entry: String = dir.get_next()
-    while entry != "":
-        if entry.ends_with(".tres"):
-            _copy_file(SOLO_SAVES_DIR + entry, "user://" + entry)
-        entry = dir.get_next()
-    dir.list_dir_end()
+    saveMirror.mirror_solo_to_user()
 
 
-## Removes all .tres files from user:// (except Validator/Preferences) so a new
-## world starts clean. Mirrors the wipe Loader.NewGame's FormatSave does.
 func wipe_user_saves() -> void:
-    var dir: DirAccess = DirAccess.open("user://")
-    if dir == null:
-        return
-    dir.list_dir_begin()
-    var entry: String = dir.get_next()
-    while entry != "":
-        if entry.ends_with(".tres") && entry != "Validator.tres" && entry != "Preferences.tres":
-            DirAccess.remove_absolute("user://" + entry)
-        entry = dir.get_next()
-    dir.list_dir_end()
+    saveMirror.wipe_user_saves()
 
 
-func _copy_file(src: String, dst: String) -> void:
-    var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
-    # get_file_as_bytes returns empty on read failure — don't truncate dst
-    # to zero bytes and silently corrupt the save.
-    if bytes.is_empty():
-        return
-    var f: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
-    if f != null:
-        f.store_buffer(bytes)
-        f.close()
-
-
-## Batch copy helper executed by [WorkerThreadPool]. Each entry in [param jobs]
-## is a [src, dst] pair. Runs on a worker thread — must not touch the scene
-## tree or any Node state. FileAccess is safe across threads as long as each
-## thread uses its own handle (one per job here).
-static func _run_copy_jobs(jobs: Array) -> void:
-    for pair: Array in jobs:
-        var src: String = pair[0]
-        var dst: String = pair[1]
-        var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
-        if bytes.is_empty():
-            continue
-        var f: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
-        if f != null:
-            f.store_buffer(bytes)
-            f.close()
-
-
-# ---------- Log Collection ----------
-
-
-## Emitted once the async log snapshot finishes. [param absDir] is the absolute
-## snapshot directory that was opened in the file manager.
-signal logs_collected(absDir: String, fileCount: int)
-
-
-## Collects godot.log and steam_helper.log into a timestamped folder under
-## user://rtv-coop-logs/ and opens that folder in the system file manager.
-## Cross-platform: user:// abstracts the path (Proton prefix on Linux, AppData
-## on Windows), and OS.shell_open dispatches to the native file manager.
-##
-## Fire-and-forget: file I/O runs on [WorkerThreadPool] (snapshots can be tens
-## of MB — used to freeze the UI for hundreds of ms on a button press). The
-## directory enumeration runs on main thread (fast) so we can snapshot file
-## names atomically before the worker starts. [signal logs_collected] fires
-## once the snapshot is written and opened.
 func collect_logs() -> void:
-    var stamp: String = Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
-    var snapDir: String = "user://rtv-coop-logs/%s/" % stamp
-    DirAccess.make_dir_recursive_absolute(snapDir)
-
-    var sources: PackedStringArray = [
-        "user://logs/godot.log",
-        "user://logs/steam_helper.log",
-    ]
-    # Include recent session rollovers (godot writes godot<timestamp>.log for
-    # restarts) — pick the last three by name (timestamp-sortable).
-    var logsDir: DirAccess = DirAccess.open("user://logs/")
-    if logsDir != null:
-        var candidates: Array[String] = []
-        logsDir.list_dir_begin()
-        var entry: String = logsDir.get_next()
-        while entry != "":
-            if entry.ends_with(".log") && entry != "godot.log" && entry != "steam_helper.log":
-                candidates.append(entry)
-            entry = logsDir.get_next()
-        logsDir.list_dir_end()
-        candidates.sort()
-        for i: int in range(max(0, candidates.size() - 3), candidates.size()):
-            sources.append("user://logs/" + candidates[i])
-
-    var info: Dictionary = {
-        "stamp": stamp,
-        "os": OS.get_name(),
-        "godot": Engine.get_version_info().string,
-    }
-    WorkerThreadPool.add_task(
-        _run_log_snapshot.bind(snapDir, sources, info), false, "coop:collect_logs"
-    )
+    logCollector.collect()
 
 
-## Worker-thread body for [method collect_logs]. Writes every source file plus
-## an info.txt into [param snapDir], then defers a callback to the main thread
-## so [method OS.shell_open] fires from the scene tree (safe dispatch).
-func _run_log_snapshot(snapDir: String, sources: PackedStringArray, info: Dictionary) -> void:
-    var copied: int = 0
-    for src: String in sources:
-        if !FileAccess.file_exists(src):
-            continue
-        var dst: String = snapDir + src.get_file()
-        var bytes: PackedByteArray = FileAccess.get_file_as_bytes(src)
-        if bytes.is_empty():
-            continue
-        var outFile: FileAccess = FileAccess.open(dst, FileAccess.WRITE)
-        if outFile != null:
-            outFile.store_buffer(bytes)
-            outFile.close()
-            copied += 1
-    var infoFile: FileAccess = FileAccess.open(snapDir + "info.txt", FileAccess.WRITE)
-    if infoFile != null:
-        infoFile.store_line("RTV Co-op Mod log snapshot")
-        infoFile.store_line("Timestamp: %s" % info.get(&"stamp", ""))
-        infoFile.store_line("OS: %s" % info.get(&"os", ""))
-        infoFile.store_line("Godot: %s" % info.get(&"godot", ""))
-        infoFile.store_line("Files: %d" % copied)
-        infoFile.close()
-    _on_log_snapshot_done.call_deferred(snapDir, copied)
-
-
-## Main-thread callback for log snapshot completion — opens the folder in the
-## native file manager and emits [signal logs_collected].
-func _on_log_snapshot_done(snapDir: String, copied: int) -> void:
-    var absDir: String = ProjectSettings.globalize_path(snapDir)
-    _log("[logs] snapshot: %s (%d files)" % [absDir, copied])
-    OS.shell_open(absDir)
-    logs_collected.emit(absDir, copied)
-
-
-# ---------- Auto-Join ----------
-
-
-## Returns true if the current scene is the main menu (or no scene loaded).
 func _is_on_menu() -> bool:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -1468,8 +1092,6 @@ func _is_on_menu() -> bool:
     return path.is_empty() || path == "res://Scenes/Menu.tscn"
 
 
-## Programmatically starts the game for a client joining via invite.
-## Loads the last shelter if a save exists, otherwise creates a new game.
 func _auto_load_game() -> void:
     if isHost:
         return
@@ -1501,8 +1123,7 @@ func _auto_load_game() -> void:
         loader.LoadScene("Cabin")
 
 
-## Re-reads lobby state after ENet connects, in case host transitioned
-## from menu to in-game during P2P tunnel setup.
+## Re-reads lobby state after ENet connects; host may have transitioned during tunnel setup.
 func _recheck_host_state() -> void:
     if !steamBridge.is_ready():
         return
@@ -1510,7 +1131,6 @@ func _recheck_host_state() -> void:
         return
     _recheckPending = true
     steamBridge.get_lobby_data(currentLobbyID, "state", _on_recheck_state)
-    # Fallback — if callback never fires, clear the pending flag.
     get_tree().create_timer(_RECHECK_TIMEOUT_SEC).timeout.connect(_on_recheck_timeout)
 
 
@@ -1532,18 +1152,13 @@ func _on_recheck_timeout() -> void:
     _log("Recheck timed out — staying on menu")
 
 
-## Host tells all clients that the game is starting (menu → in-game transition).
 @rpc("authority", "call_remote", "reliable")
 func sync_game_start(sceneName: String) -> void:
     _log("Host started game (%s) — auto-loading" % sceneName)
     _client_start_load()
 
 
-# ---------- World Save Management ----------
-
-
-## Sets up save paths for the co-op world. Host only.
-## Uses [member worldId] which is set by the world picker UI before hosting.
+## Host only. worldId must be set by the world picker UI first.
 func _setup_save_paths() -> void:
     if worldId.is_empty():
         worldId = "world_%d" % Time.get_unix_time_from_system()
@@ -1551,9 +1166,7 @@ func _setup_save_paths() -> void:
     _apply_save_paths("user://coop/%s/" % worldId, "user://coop/%s/players/%s/" % [worldId, localSteamId])
 
 
-## Writes savePath/playerSavePath to Loader and ensures dirs exist.
-## Uses the patched [code]savePath[/code] var when available, falls back to
-## node metadata so callers still work if the loader_patch isn't applied.
+## Uses patched savePath var when present; falls back to meta if loader_patch didn't apply.
 func _apply_save_paths(sp: String, pp: String) -> void:
     if !is_instance_valid(loader):
         return
@@ -1584,32 +1197,24 @@ func _get_player_save_path() -> String:
     return loader.get_meta(&"playerSavePath", "user://")
 
 
-## Returns the active player's appearance from disk, or defaults if missing or
-## the save path isn't set yet. Never returns null — callers can render safely.
 func load_local_appearance() -> Dictionary:
     var dir: String = _get_player_save_path()
-    var entry: Variant = AppearanceScript.load_from(dir)
+    var entry: Variant = appearance.load_from(dir)
     if entry == null:
-        return AppearanceScript.get_defaults()
+        return appearance.get_defaults()
     return entry
 
 
-## Returns true if an [code]appearance.json[/code] already exists for this
-## player in the current co-op world. Used to decide whether to prompt the
-## character-creation UI on session start.
 func has_local_appearance() -> bool:
     var dir: String = _get_player_save_path()
-    return FileAccess.file_exists(AppearanceScript.file_path(dir))
+    return FileAccess.file_exists(appearance.file_path(dir))
 
 
-## Persists [param entry] to the current player save dir. Returns true on success.
-## Rejects invalid paths (non-AI prefix, traversal) via [AppearanceScript.is_valid].
 func save_local_appearance(entry: Dictionary) -> bool:
     var dir: String = _get_player_save_path()
-    return AppearanceScript.save_to(dir, entry)
+    return appearance.save_to(dir, entry)
 
 
-## Returns true if [param component] is safe for use in a file path (no traversal).
 func _sanitize_path_component(component: String) -> bool:
     if component.is_empty():
         return false
@@ -1618,19 +1223,17 @@ func _sanitize_path_component(component: String) -> bool:
     return true
 
 
-## Resets save paths to default (solo mode).
 func _reset_save_paths() -> void:
     worldId = ""
     _apply_save_paths("user://", "user://")
 
 
-## Client requests the world ID from the host.
 @rpc("any_peer", "call_remote", "reliable")
 func _request_world_id() -> void:
     if !isHost:
         return
     var peerId: int = multiplayer.get_remote_sender_id()
-    # Include difficulty/season so client can match if they need a fresh save.
+    # Send difficulty/season so client matches on fresh save.
     var diff: int = 1
     var season: int = 1
     var worldPath: String = _get_save_path() + "World.tres"
@@ -1646,7 +1249,6 @@ func _request_world_id() -> void:
     _receive_world_id.rpc_id(peerId, worldId, diff, season)
 
 
-## Client receives the world ID and sets up save paths, then triggers auto-load.
 @rpc("authority", "call_remote", "reliable")
 func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int) -> void:
     if !_sanitize_path_component(hostWorldId):
@@ -1655,31 +1257,25 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
     worldId = hostWorldId
     var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else str(localPeerId)
     _apply_save_paths("user://coop/%s/" % worldId, "user://coop/%s/players/%s/" % [worldId, localSteamId])
-    # Store host's difficulty/season so _auto_load_game uses them if fresh save needed.
     set_meta(&"new_world_difficulty", hostDifficulty)
     set_meta(&"new_world_season", hostSeason)
     _log("Client new_world meta: diff=%d season=%d" % [hostDifficulty, hostSeason])
-    # Now safe to auto-load since save paths are configured
     if pendingAutoJoin:
         pendingAutoJoin = false
         _client_start_load.call_deferred()
     elif _is_on_menu():
-        # Direct connect has no Steam lobby — skip recheck and load immediately
+        # Direct-connect has no lobby; skip recheck.
         if currentLobbyID.is_empty():
             _client_start_load.call_deferred()
         else:
             _recheck_host_state()
 
 
-## Client entry point that gates scene load behind the character-creation picker.
-## Always shows the picker so the client confirms appearance before entering the
-## host's world — even with a stale appearance.json from a prior session, the
-## player should still see "Confirm" before being teleported into gameplay.
-## Without coopUI (headless / debug boot) we fall back to defaults + auto-load.
+## Gates scene load behind the character-creation picker so client confirms before entry.
 func _client_start_load() -> void:
     if !is_instance_valid(coopUI):
         if !has_local_appearance():
-            save_local_appearance(AppearanceScript.get_defaults())
+            save_local_appearance(appearance.get_defaults())
         _auto_load_game()
         return
     coopUI.show_character_picker(_on_client_picker_confirm, _on_client_picker_cancel)
@@ -1687,19 +1283,15 @@ func _client_start_load() -> void:
 
 func _on_client_picker_confirm(_entry: Dictionary = {}) -> void:
     if !has_local_appearance():
-        save_local_appearance(AppearanceScript.get_defaults())
+        save_local_appearance(appearance.get_defaults())
     _auto_load_game()
 
 
-## Client Back button = give up on the join; tearing down the peer puts us
-## back on the menu rather than leaving a half-connected session behind.
 func _on_client_picker_cancel() -> void:
     _log("Client cancelled character picker — disconnecting")
     disconnect_session()
 
 
-## Client sends their character save file to the host for storage.
-## Called after SaveCharacter() completes.
 func send_character_to_host() -> void:
     if isHost:
         return
@@ -1716,16 +1308,14 @@ func send_character_to_host() -> void:
     _log("Sent character to host (%d bytes)" % fileData.size())
 
 
-## Host receives a client's character save file and writes it to the world directory.
-## Steam ID is looked up from [member peerSteamIDs] — not trusted from RPC args.
+# Steam ID is looked up from peerSteamIDs; not trusted from RPC args.
 @rpc("any_peer", "call_remote", "reliable")
 func _receive_client_character(clientSteamId: String, fileData: PackedByteArray) -> void:
     if !isHost:
         return
     var senderId: int = multiplayer.get_remote_sender_id()
-    var trustedSteamId: String = ""
-    if peerSteamIDs.has(senderId):
-        trustedSteamId = peerSteamIDs[senderId]
+    var senderIdx: int = peer_idx(senderId)
+    var trustedSteamId: String = peerSteamIDs[senderIdx] if senderIdx >= 0 else ""
     if trustedSteamId.is_empty() || fileData.is_empty():
         return
     if fileData.size() > 1048576:
@@ -1742,8 +1332,6 @@ func _receive_client_character(clientSteamId: String, fileData: PackedByteArray)
         _log("Stored character for %s (%d bytes)" % [clientSteamId, fileData.size()])
 
 
-## Host sends a stored character file to a requesting client.
-## Called when a client joins and needs their character for this world.
 func send_character_to_client(peerId: int, clientSteamId: String) -> void:
     if !isHost:
         return
@@ -1756,11 +1344,7 @@ func send_character_to_client(peerId: int, clientSteamId: String) -> void:
     _log("Sent stored character to peer %d (%d bytes)" % [peerId, fileData.size()])
 
 
-## Client receives their character file from the host and writes it locally.
-## Default param value prevents the "expected 1 argument(s), called with 0"
-## RPC dispatch error that fires when an empty PackedByteArray() arrives —
-## Godot's RPC layer collapses empty packed arrays so the receiver's arg
-## count appears to be 0.
+# Default param prevents RPC arg-count error: Godot collapses empty PackedByteArray args.
 @rpc("authority", "call_remote", "reliable")
 func _receive_host_character(fileData: PackedByteArray = PackedByteArray()) -> void:
     if !is_instance_valid(loader):
@@ -1778,10 +1362,6 @@ func _receive_host_character(fileData: PackedByteArray = PackedByteArray()) -> v
         file.close()
         _log("Received character from host (%d bytes)" % fileData.size())
 
-# ---------- Map Tracking ----------
-
-
-## Returns the scene file path of the current map.
 func get_current_map() -> String:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -1789,68 +1369,55 @@ func get_current_map() -> String:
     return scene.scene_file_path
 
 
-## Returns true if [param peerId] is on the same map as the local player.
 func is_peer_on_same_map(peerId: int) -> bool:
     var localMap: String = get_current_map()
     if localMap.is_empty():
         return false
-    if !peerMaps.has(peerId):
+    var idx: int = peer_idx(peerId)
+    if idx < 0:
         return false
-    return peerMaps[peerId] == localMap
+    return peerMaps[idx] == localMap
 
 
-## RPC: peer broadcasts which map they are on.
 @rpc("any_peer", "call_remote", "reliable")
 func sync_peer_map(mapPath: String) -> void:
     var senderId: int = multiplayer.get_remote_sender_id()
-    var oldMap: String = ""
-    if peerMaps.has(senderId):
-        oldMap = peerMaps[senderId]
-    peerMaps[senderId] = mapPath
+    var senderIdx: int = alloc_peer_slot(senderId)
+    var oldMap: String = peerMaps[senderIdx]
+    peerMaps[senderIdx] = mapPath
     var localMap: String = get_current_map()
     _log("Peer %d map: %s" % [senderId, mapPath])
 
     if mapPath == localMap:
-        # Peer arrived on our map — spawn their remote player
         spawn_remote_player.call_deferred(senderId)
         if isHost:
             worldState.send_full_state.call_deferred(senderId)
             aiState.send_full_state.call_deferred(senderId)
             _teardown_headless_map(mapPath)
     elif oldMap == localMap:
-        # Peer left our map — despawn their remote player
-        if senderId in remoteNodes:
-            var node: Node3D = remoteNodes[senderId]
-            if is_instance_valid(node):
-                node.queue_free()
-            remoteNodes.erase(senderId)
+        if is_instance_valid(remoteNodes[senderIdx]):
+            remoteNodes[senderIdx].queue_free()
+        remoteNodes[senderIdx] = null
         playerState.clear_peer(senderId)
 
-    # Host: manage headless maps for peers on maps the host isn't on
     if isHost:
         _update_headless_maps(senderId, oldMap, mapPath)
 
-# ---------- Headless Map Management ----------
 
-
-## Non-gameplay scenes a peer may sit on briefly (Menu before character
-## creation, Death between respawns). No AI/world state to simulate, and Menu
-## audio bleeds through the SubViewport into host's Master bus.
+# Menu audio bleeds through SubViewport into host's Master bus; skip non-gameplay scenes.
 const _HEADLESS_SKIP_SCENES: Array[String] = [
     "res://Scenes/Menu.tscn",
     "res://Scenes/Death.tscn",
 ]
 
 
-static func _is_headless_eligible_map(mapPath: String) -> bool:
+func _is_headless_eligible_map(mapPath: String) -> bool:
     return !(mapPath in _HEADLESS_SKIP_SCENES)
 
 
-## Creates or updates headless maps when a peer changes maps.
 func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
     var localMap: String = get_current_map()
 
-    # Remove peer from old headless map
     if !oldMap.is_empty() && oldMap != localMap && oldMap in headlessMaps:
         var oldHmap: Node = headlessMaps[oldMap]
         oldHmap.remove_client(peerId)
@@ -1861,15 +1428,7 @@ func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
             headlessMaps.erase(oldMap)
             _log("Headless map freed: %s (snapshot saved)" % oldMap)
 
-    # Add peer to new headless map (if host isn't on that map).
-    # setup() kicks off a threaded scene load — restore + start are deferred
-    # to the setup_finished handler so the main thread isn't blocked parsing
-    # a 20-40MB PackedScene. Subsequent peers joining the same map before the
-    # load completes just add to clientPeers; they'll see AI state once the
-    # scene finalizes.
-    # Skip non-gameplay scenes (Menu/Death/CharacterCreation) — they have no
-    # AI/world state worth simulating, and Menu in particular plays music that
-    # would bleed into the host's audio bus through the SubViewport.
+    # Threaded setup(): restore+start deferred to setup_finished so main thread isn't blocked.
     if !newMap.is_empty() && newMap != localMap && _is_headless_eligible_map(newMap):
         if newMap not in headlessMaps:
             var hmap: Node = HeadlessMapScript.new()
@@ -1888,8 +1447,7 @@ func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
         headlessMaps[newMap].add_client(peerId)
 
 
-## Called once the threaded scene load finishes for a headless map. Applies any
-## pending snapshot restore and starts the SubViewport.
+## Applies pending snapshot restore and starts the SubViewport after threaded scene load.
 func _on_headless_setup_finished(success: bool, mapPath: String) -> void:
     if mapPath not in headlessMaps:
         return
@@ -1909,7 +1467,6 @@ func _on_headless_setup_finished(success: bool, mapPath: String) -> void:
     _log("Headless map ready: %s" % mapPath)
 
 
-## Tears down a headless map and returns its snapshot for handoff.
 func _teardown_headless_map(mapPath: String) -> Dictionary:
     if mapPath not in headlessMaps:
         return {}
@@ -1922,7 +1479,6 @@ func _teardown_headless_map(mapPath: String) -> Dictionary:
     return snap
 
 
-## Applies state from a headless SubViewport to the real scene after host arrives.
 func _apply_handoff_state(snap: Dictionary) -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -1947,8 +1503,7 @@ func _apply_handoff_state(snap: Dictionary) -> void:
             sw.Activate()
         elif !active && sw.active:
             sw.Deactivate()
-    # Spawn items from headless snapshot (LootSimulation was skipped, so the
-    # scene has no items yet — we transfer the ones generated in the SubViewport).
+    # LootSimulation was skipped in SubViewport, so transfer items from snapshot.
     var items: Array = snap.get(&"items", []) as Array
     var spawnedCount: int = 0
     for entry: Dictionary in items:
@@ -1965,8 +1520,7 @@ func _apply_handoff_state(snap: Dictionary) -> void:
         var slotData: Resource = entry.get(&"slotData")
         if slotData != null && pickup.get(&"slotData") != null:
             pickup.slotData.Update(slotData)
-        # Freeze at snapshot position so physics doesn't pull items off the
-        # ground or jitter them (matches shelter-load pattern in Loader.gd).
+        # Freeze so physics doesn't jitter snapshot items (matches Loader.gd shelter-load).
         if pickup.has_method(&"Freeze"):
             pickup.Freeze()
         if pickup.has_method(&"UpdateAttachments"):
@@ -1975,19 +1529,16 @@ func _apply_handoff_state(snap: Dictionary) -> void:
     _log("Handoff applied: %d doors, %d switches, %d items" % [doors.size(), switches.size(), spawnedCount])
 
 
-## Forwards a client's position to the appropriate headless map.
 func forward_position_to_headless(peerId: int, pos: Vector3, camPos: Vector3, rot: Vector3, flags: int) -> void:
-    var peerMap: String = ""
-    if peerMaps.has(peerId):
-        peerMap = peerMaps[peerId]
+    var idx: int = peer_idx(peerId)
+    if idx < 0:
+        return
+    var peerMap: String = peerMaps[idx]
     if peerMap.is_empty() || peerMap not in headlessMaps:
         return
     headlessMaps[peerMap].update_client_position(peerId, pos, camPos, rot, flags)
 
-# ---------- Utility ----------
-
-
-## Toggles mouse capture with backtick for debugging (editor only).
+# Backtick toggles mouse capture in editor builds.
 func _input(event: InputEvent) -> void:
     if !DEBUG:
         return
@@ -2010,8 +1561,6 @@ func force_windowed() -> void:
     prefs.Save()
 
 
-## Sets ENet timeout to survive scene loads over P2P tunnel.
-## Scene transitions can block the main thread for 10+ seconds.
 func set_peer_timeout(peerId: int) -> void:
     var peer: MultiplayerPeer = multiplayer.multiplayer_peer
     if !(peer is ENetMultiplayerPeer):
@@ -2029,14 +1578,10 @@ func is_session_active() -> bool:
     return peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED
 
 
-## Reads a session-wide setting. Returns [param fallback] when missing so
-## patches can be written defensively without seeding every key up front.
 func get_setting(key: String, fallback: Variant = null) -> Variant:
     return settings.get(key, fallback)
 
 
-## Host-only: updates a session-wide setting and broadcasts the new value.
-## Clients call this and it falls through to an RPC request to host.
 func set_setting(key: String, value: Variant) -> void:
     if !isHost:
         if worldState != null && worldState.has_method(&"request_setting_change"):
@@ -2047,9 +1592,7 @@ func set_setting(key: String, value: Variant) -> void:
         worldState.broadcast_settings.rpc(settings)
 
 
-## Dispatched by interactor_patch for each Interactable target.
-## Returns true if the target was handled (caller skips local Interact).
-## Returns false if caller should fall through to target.Interact().
+## Returns true if routed through co-op; false means caller should run target.Interact() locally.
 func dispatch_interact(target: Node) -> bool:
     if !is_instance_valid(target) || !is_session_active():
         return false
@@ -2059,9 +1602,6 @@ func dispatch_interact(target: Node) -> bool:
 
     var scriptPath: String = target.get_script().resource_path if target.get_script() != null else ""
 
-    # Bed — host runs locally + broadcasts sleep event so all peers freeze +
-    # play transition audio for the same duration. Simulation time advance
-    # rides on the existing sync_simulation broadcast.
     if scriptPath == "res://Scripts/Bed.gd":
         _route_interact(target, scene, &"host_bed_interact", &"request_bed_interact")
         return true
@@ -2074,7 +1614,7 @@ func dispatch_interact(target: Node) -> bool:
     if target is Trader:
         _route_interact(target, scene, &"host_trader_interact", &"request_trader_open")
         return true
-    # Switch/Fire lack class_name, so dispatch by script path.
+    # Switch/Fire lack class_name; dispatch by script path.
     if scriptPath == "res://Scripts/Switch.gd":
         _route_interact(target, scene, &"host_switch_interact", &"request_switch_interact")
         return true
@@ -2082,12 +1622,9 @@ func dispatch_interact(target: Node) -> bool:
         _route_interact(target, scene, &"host_fire_interact", &"request_fire_interact")
         return true
 
-    # Unhandled type — caller should fall through to target.Interact().
     return false
 
 
-## Host runs the interact locally; client RPCs the host with a scene-relative path.
-## Every Interactable type shares this routing — only the method names differ.
 func _route_interact(target: Node, scene: Node, hostMethod: StringName, requestMethod: StringName) -> void:
     if isHost:
         worldState.call(hostMethod, target)
@@ -2116,7 +1653,6 @@ func get_sharable_addresses() -> Array[String]:
     return out
 
 
-## Walks up from a collider to find the remote player root node (CoopRemote group + peer_id meta).
 func find_remote_root(node: Node) -> Node3D:
     var current: Node = node
     while current != null && is_instance_valid(current):

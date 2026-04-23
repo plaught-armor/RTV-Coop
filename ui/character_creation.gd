@@ -64,7 +64,7 @@ func init(cm: Node, onConfirm: Callable, onCancel: Callable = Callable()) -> voi
 
 
 func _group_options() -> void:
-    for opt: Dictionary in _cm.AppearanceScript.OPTIONS:
+    for opt: Dictionary in _cm.appearance.OPTIONS:
         var body: String = opt.body
         if !_byBody.has(body):
             _byBody[body] = []
@@ -265,7 +265,7 @@ func _instantiate_body_rig(body: String) -> Node3D:
     return bodyContainer
 
 
-static func _clear_owners(node: Node) -> void:
+func _clear_owners(node: Node) -> void:
     node.owner = null
     for child: Node in node.get_children():
         _clear_owners(child)

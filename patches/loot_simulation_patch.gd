@@ -1,7 +1,4 @@
-## Patch for [code]LootSimulation.gd[/code] — host-authoritative loot generation.
-## On host: generates loot normally (super._ready). Items are registered and
-## broadcast by [code]world_state.register_scene_items()[/code] after scene change.
-## On client: suppresses generation entirely. Items arrive from host via RPC.
+## Patch for LootSimulation.gd — host-authoritative loot; clients suppress generation and receive via RPC.
 extends "res://Scripts/LootSimulation.gd"
 
 var _cm: Node
@@ -12,8 +9,7 @@ func init_manager(manager: Node) -> void:
 
 
 func _ready() -> void:
-    # _cm may already be set by inject_manager, but LootSimulation._ready() runs
-    # before inject_manager, so try lazy lookup as fallback.
+    # LootSimulation._ready runs before inject_manager; lazy lookup is the fallback.
     if _cm == null:
         var root: Node = get_tree().root if get_tree() != null else null
         if root != null:
@@ -26,17 +22,13 @@ func _ready() -> void:
         return
 
     if _cm.isHost:
-        # If this map was running headlessly (items already generated there),
-        # skip generation — the handoff in _apply_handoff_state will spawn the
-        # existing items from the headless snapshot.
+        # Skip generation when headless already ran: handoff spawns existing items.
         var scenePath: String = get_tree().current_scene.scene_file_path if is_instance_valid(get_tree().current_scene) else ""
         if !scenePath.is_empty() && scenePath in _cm.headlessMaps:
             if get_child_count() > 0:
                 get_child(0).queue_free()
             return
-        # Fresh map — generate items normally. register_scene_items() handles sync.
         super._ready()
     else:
-        # Client: free placeholder Label3D, skip loot generation
         if get_child_count() > 0:
             get_child(0).queue_free()

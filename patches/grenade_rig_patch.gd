@@ -1,7 +1,4 @@
-## Patch for [code]GrenadeRig.gd[/code] — broadcasts grenade throws for co-op sync.
-## Overrides ThrowHighExecute and ThrowLowExecute to broadcast throw data
-## after the original logic runs. Remote viewers instantiate the same grenade
-## and handle scenes with matching physics parameters.
+## Patch for GrenadeRig.gd — broadcasts throw params so remotes spawn matching grenades.
 extends "res://Scripts/GrenadeRig.gd"
 
 var _cm: Node
@@ -25,8 +22,6 @@ func _ensure_cm() -> bool:
 
 
 func ThrowHighExecute() -> void:
-    _ensure_cm()
-    # Capture throw data before super (throw/handle PackedScene refs)
     var grenadeScene: String = throw.resource_path if throw != null else ""
     var handleScene: String = handle.resource_path if handle != null else ""
     var throwDir: Vector3 = global_transform.basis.z
@@ -37,7 +32,7 @@ func ThrowHighExecute() -> void:
 
     super.ThrowHighExecute()
 
-    if is_instance_valid(_cm) && _cm.is_session_active() && !grenadeScene.is_empty():
+    if _ensure_cm() && _cm.is_session_active() && !grenadeScene.is_empty():
         _cm.playerState.broadcast_grenade_throw(
             grenadeScene, handleScene, throwPos, throwRotY,
             throwDir, throwBasisX, throwForce,
@@ -45,7 +40,6 @@ func ThrowHighExecute() -> void:
 
 
 func ThrowLowExecute() -> void:
-    _ensure_cm()
     var grenadeScene: String = throw.resource_path if throw != null else ""
     var handleScene: String = handle.resource_path if handle != null else ""
     var throwDir: Vector3 = global_transform.basis.z
@@ -56,7 +50,7 @@ func ThrowLowExecute() -> void:
 
     super.ThrowLowExecute()
 
-    if is_instance_valid(_cm) && _cm.is_session_active() && !grenadeScene.is_empty():
+    if _ensure_cm() && _cm.is_session_active() && !grenadeScene.is_empty():
         _cm.playerState.broadcast_grenade_throw(
             grenadeScene, handleScene, throwPos, throwRotY,
             throwDir, throwBasisX, throwForce,

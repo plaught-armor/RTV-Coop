@@ -1,16 +1,7 @@
-## Patch for [code]Mine.gd[/code] — co-op detonation sync.
-##
-## Overrides:
-## [br]- [method Detonate]: host broadcasts detonation to all clients
-## [br]- [method InstantDetonate]: host broadcasts instant detonation to all clients
-##
-## Mine detonation is host-authoritative. Clients receive detonation events
-## and play the VFX/physics locally. Original behaviour preserved when not
-## in a co-op session.
+## Patch for Mine.gd — host-authoritative detonation; clients request via RPC.
 extends "res://Scripts/Mine.gd"
 
 var _cm: Node
-## Scene-relative path, cached at _ready.
 var _cachedPath: String = ""
 
 
@@ -38,7 +29,6 @@ func Detonate() -> void:
             _cm.worldState.broadcast_mine_detonate(_cachedPath, false)
             super.Detonate()
         else:
-            # Client requests host to detonate — don't trigger locally.
             _cm.worldState.request_mine_detonate.rpc_id(1, _cachedPath, false)
         return
     super.Detonate()

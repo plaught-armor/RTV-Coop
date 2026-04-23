@@ -1,16 +1,4 @@
-## Co-op patch for EventSystem.gd
-##
-## Problem: EventSystem uses unseeded RNG (randi_range, pick_random) so each
-## peer rolls different events with different timings. Helicopters, BTRs,
-## airdrops, and crash sites appear in different places (or not at all) on
-## host vs client.
-##
-## Fix: Host runs all event selection and activation logic. Clients skip
-## event rolls entirely and receive spawn commands via world_state RPCs.
-## Each event function is overridden to broadcast its random parameters so
-## clients reproduce the exact same spawn.
-##
-## Original behavior preserved in singleplayer (no CoopManager).
+## Patch for EventSystem.gd — host-auth event rolls; clients receive spawns via world_state RPC.
 extends "res://Scripts/EventSystem.gd"
 
 
@@ -21,11 +9,7 @@ var _cm: Node
 
 
 func _ready() -> void:
-    _ensure_cm()
-    # Host + solo paths run vanilla _ready verbatim — benefits from any future
-    # base-game additions (new @onready vars, new timer, etc.) without us
-    # re-tracking. Client path skips activations because host broadcasts them.
-    if _cm != null && _cm.is_session_active() && !_cm.isHost:
+    if _ensure_cm() && _cm.is_session_active() && !_cm.isHost:
         paths = $Paths
         crashes = $Crashes
         await get_tree().create_timer(5.0, false).timeout
@@ -50,9 +34,6 @@ func _ensure_cm() -> bool:
     return false
 
 
-# ---------- Simple Events (no params) ----------
-
-
 func FighterJet() -> void:
     super.FighterJet()
     if _cm != null && _cm.is_session_active() && _cm.isHost:
@@ -75,9 +56,6 @@ func Transmission() -> void:
     super.Transmission()
     if _cm != null && _cm.is_session_active() && _cm.isHost:
         _cm.worldState.broadcast_event.rpc("Transmission", PackedInt32Array())
-
-
-# ---------- Parameterized Events ----------
 
 
 func Police() -> void:
@@ -115,17 +93,9 @@ func Cat() -> void:
         _cm.worldState.broadcast_event.rpc("Cat", PackedInt32Array([wellIndex]))
 
 
-# ---------- Trader Events (already synced via trader_patch) ----------
-# ActivateTrader / DeactivateTrader: host runs normally via super calls
-# in ActivateTraderEvent. Clients skip ActivateTraderEvent entirely in
-# _ready, so no duplicate activation. Trader state comes from trader_patch.
+# Trader events: host via ActivateTraderEvent super; clients skip and receive via trader_patch.
 
 
-# ---------- Spawn Helpers ----------
-
-
-## Spawns a path-following vehicle (Police or BTR) at a specific path + direction.
-## Extracted from original Police()/BTR() to allow deterministic replay on clients.
 func _spawn_pathed_vehicle(scene: PackedScene, pathIndex: int, pathDirection: int) -> void:
     var randomPath: Node3D = paths.get_child(pathIndex)
     var inversePath: bool
@@ -143,7 +113,6 @@ func _spawn_pathed_vehicle(scene: PackedScene, pathIndex: int, pathDirection: in
     instance.global_transform = initialWaypoint.global_transform
 
 
-## Spawns a crash site at a specific crash node index.
 func _spawn_crash(crashIndex: int) -> void:
     var randomCrash: Node3D = crashes.get_child(crashIndex)
     var crashSite: Node3D = crash.instantiate()
@@ -151,7 +120,6 @@ func _spawn_crash(crashIndex: int) -> void:
     crashSite.global_transform = randomCrash.global_transform
 
 
-## Spawns the cat at a specific well index.
 func _spawn_cat(wellIndex: int) -> void:
     var wells: Array[Node] = get_tree().get_nodes_in_group(&"Well")
     if wellIndex >= wells.size():
@@ -174,7 +142,6 @@ func _spawn_cat(wellIndex: int) -> void:
     rescueInstance.position.y = 3.0
 
 
-## Called by world_state RPC on clients to replay a host event.
 func receive_event(eventName: String, params: PackedInt32Array) -> void:
     match eventName:
         "FighterJet":

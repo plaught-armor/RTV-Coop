@@ -1,12 +1,4 @@
-## Lightweight scope-timer profiler for hot paths. Manual instrumentation via:
-##   var _t: int = Perf.start()
-##   ...code...
-##   Perf.stop("label", _t)
-## Auto-dumps accumulated stats every PERF_DUMP_TICKS (1s @ 60Hz physics).
-## Disable globally by flipping ENABLED to false — wrap calls cost ~10ns when off.
-## class_name removed — ModLoader-loaded scripts don't register globally for
-## consumers; consumers must preload this file:
-##   const Perf = preload("res://mod/network/perf.gd")
+## Scope-timer profiler with auto-dump every PERF_DUMP_TICKS; flip ENABLED to disable.
 extends RefCounted
 
 
@@ -14,19 +6,19 @@ const ENABLED: bool = true
 const PERF_DUMP_TICKS: int = 60
 
 
-static var _totals: Dictionary = {}
-static var _counts: Dictionary = {}
-static var _maxes: Dictionary = {}
-static var _lastDumpFrame: int = -1
+var _totals: Dictionary = {}
+var _counts: Dictionary = {}
+var _maxes: Dictionary = {}
+var _lastDumpFrame: int = -1
 
 
-static func start() -> int:
+func start() -> int:
     if !ENABLED:
         return 0
     return Time.get_ticks_usec()
 
 
-static func stop(label: String, startUsec: int) -> void:
+func stop(label: String, startUsec: int) -> void:
     if !ENABLED:
         return
     var elapsed: int = Time.get_ticks_usec() - startUsec
@@ -37,9 +29,8 @@ static func stop(label: String, startUsec: int) -> void:
         _maxes[label] = elapsed
 
 
-## Call once per physics frame from any tick-driven node. Auto-dumps + resets
-## every PERF_DUMP_TICKS frames.
-static func tick() -> void:
+## Auto-dumps + resets every PERF_DUMP_TICKS frames.
+func tick() -> void:
     if !ENABLED:
         return
     var f: int = Engine.get_physics_frames()
@@ -62,5 +53,5 @@ static func tick() -> void:
     _maxes.clear()
 
 
-static func _sort_keys_by_total_desc(a: Variant, b: Variant) -> bool:
+func _sort_keys_by_total_desc(a: Variant, b: Variant) -> bool:
     return _totals[a] > _totals[b]

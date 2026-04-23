@@ -1,8 +1,4 @@
-## Patch for [code]DecorMode.gd[/code] — null-guard the indicator access.
-## Vanilla iterates Furniture-group nodes and reads [code]child.indicator[/code]
-## without checking it exists, crashing on placed pieces whose Indicator was
-## freed (or pieces whose Furniture script ran without _ready resolving the
-## @onready var). Same logic, just defensive.
+## Patch for DecorMode.gd — null-guards child.indicator access; vanilla crashes when Indicator freed.
 extends "res://Scripts/DecorMode.gd"
 
 
@@ -14,8 +10,7 @@ func FurnitureVisibility(visibility: bool) -> void:
         if !is_instance_valid(furniture) || !is_instance_valid(furniture.owner):
             continue
         for child: Node in furniture.owner.get_children():
-            # Duck-typed: take_over_path breaks `is Furniture` class check,
-            # so probe `indicator` via get() — returns null for non-Furniture.
+            # take_over_path breaks `is Furniture`; duck-type via get() instead.
             var indicator: Variant = child.get(&"indicator")
             if indicator == null or not is_instance_valid(indicator):
                 continue

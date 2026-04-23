@@ -1,20 +1,7 @@
-## Patch for [code]Loader.gd[/code] — per-world save paths for co-op.
-##
-## Adds [member savePath] (world-level: World, Shelters, Traders) and
-## [member playerSavePath] (per-player: Character). In solo play, both
-## default to [code]"user://"[/code] — original behavior preserved.
-##
-## In co-op, [code]coop_manager[/code] sets these on session start:
-## [br]- [code]savePath = "user://coop/<world_id>/"[/code]
-## [br]- [code]playerSavePath = savePath + "players/<steam_id>/"[/code]
-##
-## Client character data is shuttled over RPC as raw bytes —
-## no custom serialization needed.
+## Patch for Loader.gd — per-world savePath (world data) + playerSavePath (character).
 extends "res://Scripts/Loader.gd"
 
-## World-level save directory (World, Shelters, Traders).
 var savePath: String = "user://"
-## Per-player save directory (Character).
 var playerSavePath: String = "user://"
 
 const PATH_INTERFACE: NodePath = ^"/root/Map/Core/UI/Interface"
@@ -29,9 +16,6 @@ func _ensure_save_dir() -> void:
         DirAccess.make_dir_recursive_absolute(savePath)
     if playerSavePath != "user://" && !DirAccess.dir_exists_absolute(playerSavePath):
         DirAccess.make_dir_recursive_absolute(playerSavePath)
-
-
-# ---------- Character ----------
 
 
 func ResetCharacter():
@@ -59,7 +43,6 @@ func SaveCharacter():
 
     ResourceSaver.save(character, playerSavePath + "Character.tres")
     print("SAVE: Character (%s)" % playerSavePath)
-    # Send character to host for world-persistent storage
     var root: Node = get_tree().root if get_tree() != null else null
     if root != null:
         for child: Node in root.get_children():
@@ -68,7 +51,6 @@ func SaveCharacter():
                 break
 
 
-## Copies vitals, statuses, and debuff flags from gameData onto the save.
 func _save_vitals(character: CharacterSave) -> void:
     character.health = gameData.health
     character.energy = gameData.energy
@@ -89,14 +71,12 @@ func _save_vitals(character: CharacterSave) -> void:
     character.headshot = gameData.headshot
 
 
-## Copies cat companion state from gameData.
 func _save_cat(character: CharacterSave) -> void:
     character.cat = gameData.cat
     character.catFound = gameData.catFound
     character.catDead = gameData.catDead
 
 
-## Copies weapon/grenade/gear slot refs from gameData.
 func _save_loadout(character: CharacterSave) -> void:
     character.primary = gameData.primary
     character.secondary = gameData.secondary
@@ -107,7 +87,6 @@ func _save_loadout(character: CharacterSave) -> void:
     character.NVG = gameData.NVG
 
 
-## Serializes inventory, equipment, and catalog grids into character slot arrays.
 func _save_inventory_grids(character: CharacterSave, interface) -> void:
     character.inventory.clear()
     character.equipment.clear()
@@ -149,16 +128,11 @@ func LoadCharacter():
     var flashlight = get_tree().current_scene.get_node(PATH_FLASHLIGHT)
     var NVG = get_tree().current_scene.get_node(PATH_NVG)
 
-    # Wipe any items the Interface already holds. Coop reloads (sleep, Killbox,
-    # headless handoff) can fire LoadCharacter on a scene whose grids weren't
-    # rebuilt from scratch, doubling the inventory. Vanilla relied on a fresh
-    # Interface per scene change; coop can't.
+    # Coop reloads (sleep/Killbox/handoff) can re-enter with stale grids — clear before load.
     _clear_grid_children(interface.inventoryGrid)
     _clear_equipment_slots(interface.equipment)
     _clear_grid_children(interface.catalogGrid)
-    # remove_child unparents synchronously but queue_free runs at frame end —
-    # wait one process tick so the freed nodes stop colliding with LoadGridItem's
-    # layout pass. Same pattern the competitor mod uses.
+    # Wait a frame so queue_free'd children don't collide with LoadGridItem layout.
     await get_tree().process_frame
 
     _load_initial_kit(character, interface)
@@ -174,7 +148,6 @@ func LoadCharacter():
     print("LOAD: Character (%s)" % playerSavePath)
 
 
-## Seeds inventory with items from the selected starting kit on first spawn.
 func _load_initial_kit(character: CharacterSave, interface) -> void:
     if !(character.initialSpawn && character.startingKit):
         return
@@ -186,8 +159,6 @@ func _load_initial_kit(character: CharacterSave, interface) -> void:
         interface.Create(newSlotData, interface.inventoryGrid, false)
 
 
-## Restores inventory, equipment, and catalog grids from the saved character.
-## Caller (LoadCharacter) clears the grids first so reloads don't duplicate.
 func _load_inventory_grids(character: CharacterSave, interface) -> void:
     for slotData in character.inventory:
         interface.LoadGridItem(slotData, interface.inventoryGrid, slotData.gridPosition)
@@ -197,11 +168,8 @@ func _load_inventory_grids(character: CharacterSave, interface) -> void:
         interface.LoadGridItem(slotData, interface.catalogGrid, slotData.gridPosition)
 
 
-## remove_child runs synchronously so the subsequent LoadGridItem calls don't
-## see the old children in the grid. queue_free alone defers deletion to the
-## end of the frame — between clear and load the grid would still hold the
-## stale items, double-counting them in the layout pass.
-static func _clear_grid_children(grid: Node) -> void:
+# remove_child is synchronous so the grid is empty before LoadGridItem layout runs.
+func _clear_grid_children(grid: Node) -> void:
     if grid == null:
         return
     for item: Node in grid.get_children():
@@ -209,7 +177,7 @@ static func _clear_grid_children(grid: Node) -> void:
         item.queue_free()
 
 
-static func _clear_equipment_slots(equipment: Node) -> void:
+func _clear_equipment_slots(equipment: Node) -> void:
     if equipment == null:
         return
     for slot: Node in equipment.get_children():
@@ -218,7 +186,6 @@ static func _clear_equipment_slots(equipment: Node) -> void:
             child.queue_free()
 
 
-## Restores vitals, statuses, and debuff flags onto gameData.
 func _load_vitals(character: CharacterSave) -> void:
     gameData.health = character.health
     gameData.energy = character.energy
@@ -239,14 +206,12 @@ func _load_vitals(character: CharacterSave) -> void:
     gameData.headshot = character.headshot
 
 
-## Restores cat companion state onto gameData.
 func _load_cat(character: CharacterSave) -> void:
     gameData.cat = character.cat
     gameData.catFound = character.catFound
     gameData.catDead = character.catDead
 
 
-## Restores weapon/grenade/gear slot refs onto gameData.
 func _load_loadout(character: CharacterSave) -> void:
     gameData.primary = character.primary
     gameData.secondary = character.secondary
@@ -257,7 +222,6 @@ func _load_loadout(character: CharacterSave) -> void:
     gameData.NVG = character.NVG
 
 
-## Activates the held weapon (or grenade) rig and any auxiliary gear that was equipped.
 func _equip_active_rig(character: CharacterSave, rigManager, flashlight, NVG) -> void:
     if gameData.primary:
         rigManager.LoadPrimary()
@@ -276,9 +240,6 @@ func _equip_active_rig(character: CharacterSave, rigManager, flashlight, NVG) ->
         flashlight.Load()
     if gameData.NVG:
         NVG.Load()
-
-
-# ---------- World ----------
 
 
 func NewGame(difficulty, season):
@@ -369,9 +330,6 @@ func FormatSave():
                 push_warning("FormatSave: failed to remove %s (error %d)" % [file, removal])
         file = directory.get_next()
     directory.list_dir_end()
-
-
-# ---------- Shelter ----------
 
 
 func ValidateShelter() -> String:
@@ -510,9 +468,6 @@ func UnlockShelter(targetShelter):
     ResourceSaver.save(shelter, savePath + targetShelter + ".tres")
     print("Shelter Unlocked: %s (%s)" % [targetShelter, savePath])
     UpdateProgression()
-
-
-# ---------- Trader ----------
 
 
 func SaveTrader(trader: String):

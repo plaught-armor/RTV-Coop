@@ -19,9 +19,14 @@ const CONNECT_TIMEOUT: float = 15.0
 ## Poll interval for TCP connection attempts.
 const CONNECT_RETRY: float = 0.25
 
+## Helper lifecycle states. Previously tracked with two bools (connecting /
+## connected); combined into a single enum so illegal combinations
+## (connecting && connected) are unrepresentable.
+enum State { IDLE, CONNECTING, CONNECTED }
+var state: State = State.IDLE
+
 var helperPID: int = -1
 var tcp: StreamPeerTCP = StreamPeerTCP.new()
-var connected: bool = false
 var readBuffer: PackedByteArray = PackedByteArray()
 ## Read offset into readBuffer — avoids copying on every dispatch cycle.
 ## Buffer is compacted only when readOffset exceeds half the buffer size.
@@ -51,10 +56,8 @@ var friendsCacheMs: int = 0
 var nextReqId: int = 1
 
 var connectTimer: float = 0.0
-var connecting: bool = false
 
 
-## Extracts the helper binary to user://, launches it, and begins TCP connection.
 func launch() -> void:
     if helperPID >= 0:
         return
@@ -91,23 +94,23 @@ func launch() -> void:
         return
     _log("Steam helper launched (PID: %d)" % helperPID)
 
-    connecting = true
+    state = State.CONNECTING
     connectTimer = 0.0
 
 
 func _process(delta: float) -> void:
-    if connecting:
+    if state == State.CONNECTING:
         poll_connect(delta)
-        if !connecting:
-            _log("Connect loop ended (connected: %s)" % str(connected))
+        if state != State.CONNECTING:
+            _log("Connect loop ended (state: %s)" % State.keys()[state])
         return
 
-    if !connected:
+    if state != State.CONNECTED:
         return
 
     tcp.poll()
     if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
-        connected = false
+        state = State.IDLE
         _log("Steam helper TCP disconnected")
         return
 
@@ -117,23 +120,21 @@ func _process(delta: float) -> void:
 ## Aborts an in-flight connect loop early. Called when the user commits to an
 ## IP-host session (no Steam path needed), so we stop polling the helper TCP
 ## and spamming retries for the full [code]CONNECT_TIMEOUT[/code] window.
-## Idempotent — safe to call when already connected or never started.
 func abort_connect() -> void:
-    if !connecting:
+    if state != State.CONNECTING:
         return
-    connecting = false
+    state = State.IDLE
     connectTimer = 0.0
     if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
         tcp.disconnect_from_host()
     _log("Steam helper connect aborted (IP host path)")
 
 
-## Attempts TCP connection to the helper with retries.
 func poll_connect(delta: float) -> void:
     connectTimer += delta
 
     if connectTimer >= CONNECT_TIMEOUT:
-        connecting = false
+        state = State.IDLE
         _log("Steam helper connect timeout")
         return
 
@@ -144,8 +145,7 @@ func poll_connect(delta: float) -> void:
         StreamPeerTCP.STATUS_CONNECTING:
             tcp.poll()
         StreamPeerTCP.STATUS_CONNECTED:
-            connecting = false
-            connected = true
+            state = State.CONNECTED
             _log("Steam helper TCP connected")
             # Immediately fetch user info
             get_user(on_initial_user)
@@ -245,7 +245,6 @@ func _dispatch_binary(payload: PackedByteArray) -> void:
                 cb.call(steamID, w, h, rgba)
 
 
-## Parses a single JSON response line and dispatches it.
 func _dispatch_response(line: String) -> void:
     var response: Variant = JSON.parse_string(line)
     if response == null || !(response is Dictionary):
@@ -270,9 +269,8 @@ func _dispatch_response(line: String) -> void:
 
 ## Sends a JSON command to the helper and registers a callback for the response.
 ## Each command gets a unique [code]req_id[/code] so multiple calls of the same
-## command don't overwrite each other's callbacks.
 func send_command(cmd: String, params: Dictionary, callback: Callable) -> void:
-    if !connected:
+    if state != State.CONNECTED:
         if callback.is_valid():
             callback.call({ "ok": false, "cmd": cmd, "error": "not connected" })
         return
@@ -291,7 +289,6 @@ func send_command(cmd: String, params: Dictionary, callback: Callable) -> void:
 ## Kills any leftover helper processes from a previous RTV run. Matches by
 ## executable name so the kill hits whichever platform's helper is lingering
 ## (native Linux binary or the Proton-wrapped Windows binary visible to
-## pkill/taskkill as [code]steam_helper.exe[/code]).
 func _kill_stale_helpers() -> void:
     match OS.get_name():
         "Linux":
@@ -303,11 +300,10 @@ func _kill_stale_helpers() -> void:
             pass
 
 
-## Shuts down the helper process and TCP connection.
 func shutdown() -> void:
-    if connected:
+    if state == State.CONNECTED:
         tcp.disconnect_from_host()
-        connected = false
+        state = State.IDLE
     if helperPID >= 0:
         OS.kill(helperPID)
         helperPID = -1
@@ -319,11 +315,9 @@ func _exit_tree() -> void:
     shutdown()
 
 
-## Returns true if the helper is connected and user info is cached.
 func is_ready() -> bool:
-    return connected && !localSteamID.is_empty()
+    return state == State.CONNECTED && !localSteamID.is_empty()
 
-# ---------- Command API ----------
 
 
 func get_user(callback: Callable) -> void:
@@ -347,7 +341,7 @@ func join_lobby(lobbyID: String, callback: Callable) -> void:
 
 
 func leave_lobby() -> void:
-    if connected:
+    if state == State.CONNECTED:
         send_command("leave_lobby", { }, Callable())
 
 
@@ -357,7 +351,6 @@ func get_friends(callback: Callable) -> void:
 
 ## Intercepts [method get_friends] responses, stores the latest list in
 ## [member friendsCache], then forwards to the original caller. Bound args
-## arrive after the IPC-supplied response, so [param callback] comes last.
 func _cache_friends_response(response: Dictionary, callback: Callable) -> void:
     if response.get(&"ok", false):
         var data: Variant = response.get(&"data", [])
@@ -382,7 +375,7 @@ func check_launch_invite(callback: Callable) -> void:
 ## Requests a binary avatar transfer. The helper sends raw RGBA bytes via the binary
 ## channel instead of base64 JSON. Callback signature: (steamID, w, h, rgba: PackedByteArray).
 func get_avatar_binary(steamID: String, callback: Callable) -> void:
-    if !connected:
+    if state != State.CONNECTED:
         return
     pendingAvatarCallbacks[steamID] = callback
     send_command("get_avatar_bin", { "steam_id": steamID }, Callable())
@@ -412,23 +405,20 @@ func on_launch_invite_checked(response: Dictionary) -> void:
     _cm.coopUI.on_lobby_join_pressed(lobbyID)
 
 
-## Sets a Steam Rich Presence key/value pair visible on the friends list.
 func set_rich_presence(key: String, value: String) -> void:
-    if !connected:
+    if state != State.CONNECTED:
         return
     send_command("set_rich_presence", { "key": key, "value": value }, Callable())
 
 
-## Clears all Rich Presence keys.
 func clear_rich_presence() -> void:
-    if !connected:
+    if state != State.CONNECTED:
         return
     send_command("clear_rich_presence", {}, Callable())
 
 
-## Sets a key/value on the current lobby (or specified lobby).
 func set_lobby_data(key: String, value: String, lobbyID: String = "") -> void:
-    if !connected:
+    if state != State.CONNECTED:
         return
     var params: Dictionary = { "key": key, "value": value }
     if !lobbyID.is_empty():
@@ -436,13 +426,11 @@ func set_lobby_data(key: String, value: String, lobbyID: String = "") -> void:
     send_command("set_lobby_data", params, Callable())
 
 
-## Gets a key from a lobby. Result delivered via callback.
 func get_lobby_data(lobbyID: String, key: String, callback: Callable) -> void:
     send_command("get_lobby_data", { "lobby_id": lobbyID, "key": key }, callback)
 
 
 ## Starts a Steam Networking Sockets P2P listen socket on the host.
-## Incoming Steam peers are relayed to the local ENet server on [param enetPort].
 func start_p2p_host(callback: Callable, enetPort: int = 9050) -> void:
     send_command("start_p2p_host", { "enet_port": enetPort }, callback)
 
@@ -452,7 +440,6 @@ func start_p2p_host(callback: Callable, enetPort: int = 9050) -> void:
 func start_p2p_client(hostSteamID: String, callback: Callable) -> void:
     send_command("start_p2p_client", { "host_steam_id": hostSteamID }, callback)
 
-# ---------- File Extraction ----------
 
 
 func extract_file(resPath: String, userPath: String) -> void:
@@ -480,7 +467,6 @@ func extract_file(resPath: String, userPath: String) -> void:
     _log("Extracted: %s -> %s (%d bytes)" % [resPath, userPath, data.size()])
 
 
-## Reads a file from res:// (works for editor and PCK-embedded files).
 func read_from_res(resPath: String) -> PackedByteArray:
     var src: FileAccess = FileAccess.open(resPath, FileAccess.READ)
     if src == null:
@@ -511,10 +497,8 @@ func read_from_vmz(resPath: String) -> PackedByteArray:
     zip.close()
     return data
 
-# ---------- Platform Paths ----------
 
 
-## Detects if running under Proton/Wine.
 func is_proton() -> bool:
     return OS.get_name() == "Windows" && OS.has_environment("STEAM_COMPAT_DATA_PATH")
 

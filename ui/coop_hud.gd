@@ -1,6 +1,4 @@
-## Always-visible HUD overlay in the top-right showing keybind hints,
-## connected players, and their ping. [kbd]F12[/kbd] toggles visibility.
-## Added as a child of [code]Node[/code]'s [code]CanvasLayer[/code].
+## Top-right HUD overlay showing keybind hints, players, and ping; F12 toggles.
 extends VBoxContainer
 
 var _cm: Node
@@ -30,7 +28,6 @@ func init_manager(manager: Node) -> void:
     offset_top = 10
     mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-    # Static keybind hints label (always at top of VBox)
     hintsLabel = Label.new()
     hintsLabel.add_theme_font_size_override("font_size", 12)
     hintsLabel.add_theme_color_override("font_color", HINT_COLOR)
@@ -54,7 +51,7 @@ func _process(delta: float) -> void:
             visible = false
         return
 
-    # Cache is_in_gameplay on scene change instead of calling get_node_or_null every frame
+    # Cache inGameplay on scene change; avoids per-frame get_node_or_null.
     var scene: Node = get_tree().current_scene
     var scenePath: String = scene.scene_file_path if is_instance_valid(scene) else ""
     if scenePath != lastScenePath:
@@ -83,16 +80,14 @@ func _process(delta: float) -> void:
     update_player_labels()
 
 
-## Updates the keybind hints based on connection and Steam state.
-## Multiplayer controls live in the Esc menu now — only show Steam status when
-## something is wrong, otherwise the label stays empty.
 func update_hints() -> void:
     if _cm.isActive:
         hintsLabel.text = ""
     elif !_cm.DEBUG && !_cm.steamBridge.is_ready():
-        if _cm.steamBridge.connected:
+        var bridgeState: int = _cm.steamBridge.state
+        if bridgeState == _cm.steamBridge.State.CONNECTED:
             hintsLabel.text = "Steam: verifying..."
-        elif _cm.steamBridge.connecting:
+        elif bridgeState == _cm.steamBridge.State.CONNECTING:
             hintsLabel.text = "Steam: connecting..."
         else:
             hintsLabel.text = "Steam: offline"
@@ -106,9 +101,11 @@ func update_pings() -> void:
         return
     var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
 
-    # Rebuild each tick — no stale entries possible, no scan needed.
     peerPings.clear()
-    for peerId: int in _cm.connectedPeers:
+    var localPid: int = _cm.localPeerId
+    for peerId: int in _cm.peerGodotIds:
+        if peerId == -1 || peerId == localPid:
+            continue
         var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
         if enetPeer != null:
             peerPings[peerId] = roundi(
@@ -134,7 +131,10 @@ func update_player_labels() -> void:
     else:
         localAvatar.hide()
 
-    for peerId: int in _cm.connectedPeers:
+    var localPid: int = _cm.localPeerId
+    for peerId: int in _cm.peerGodotIds:
+        if peerId == -1 || peerId == localPid:
+            continue
         var row: HBoxContainer = get_pooled_row(idx)
         idx += 1
         var avatar: TextureRect = row.get_child(0)

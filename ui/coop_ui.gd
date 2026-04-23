@@ -179,7 +179,8 @@ func _process(_delta: float) -> void:
     var currentState: int = 0
     var currentPeerCount: int = 0
     if _cm.isActive:
-        currentPeerCount = _cm.connectedPeers.size()
+        # Remote peer count excludes our own slot in peerGodotIds.
+        currentPeerCount = maxi(0, _cm.active_peer_count() - 1)
         currentState = 1 if _cm.isHost else 2
 
     if currentState == lastConnectionState && currentPeerCount == lastPeerCount:
@@ -219,7 +220,10 @@ func update_player_list() -> void:
         else:
             localAvatar.hide()
 
-        for peerId: int in _cm.connectedPeers:
+        var localPid: int = _cm.localPeerId
+        for peerId: int in _cm.peerGodotIds:
+            if peerId == -1 || peerId == localPid:
+                continue
             var row: HBoxContainer = get_pooled_player_row(idx)
             idx += 1
             var avatar: TextureRect = row.get_child(0)
@@ -256,17 +260,14 @@ func get_pooled_player_row(idx: int) -> HBoxContainer:
     playerLabelPool.append(row)
     return row
 
-# ---------- Helpers ----------
 
 
 ## Returns true if the current scene is a gameplay map (has Core/Controller).
-## Closes the panel, unfreezes the game, and recaptures the mouse.
 func close_panel() -> void:
     if !panelVisible:
         return
     panelVisible = false
     panel.visible = false
-    _cm.panelOpen = false
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 
@@ -274,7 +275,6 @@ func is_in_gameplay() -> bool:
     var scene: Node = get_tree().current_scene
     return is_instance_valid(scene) && scene.get_node_or_null(PATH_CONTROLLER) != null
 
-# ---------- Actions ----------
 
 
 func on_host_pressed() -> void:
@@ -289,7 +289,6 @@ func on_disconnect_pressed() -> void:
     _cm.disconnect_session()
 
 
-## Copies godot.log + steam_helper.log to a timestamped folder and opens it.
 func _on_collect_logs_pressed() -> void:
     if !is_instance_valid(_cm):
         return
@@ -298,7 +297,6 @@ func _on_collect_logs_pressed() -> void:
 
 ## Shows a themed, menu-specific lobby browser (separate from the F10 in-game
 ## panel which has cluttered controls). Called when the user clicks
-## Multiplayer → Browse Lobbies from the main menu.
 func show_lobby_browser() -> void:
     _free_dialog(menuLobbyBrowser)
     menuLobbyBrowser = _make_menu_dialog_panel("Browse Lobbies", "Join a friend's game")
@@ -435,7 +433,6 @@ func on_friends_received(response: Dictionary) -> void:
         friendLabelPool[i].hide()
 
 
-## Fills one pooled friend row with name, avatar, and invite button state.
 func _populate_friend_row(friend: Dictionary, rowIndex: int) -> void:
     var row: HBoxContainer = get_pooled_friend_row(rowIndex)
     var avatar: TextureRect = row.get_child(0)
@@ -473,7 +470,6 @@ func _friend_display_styling(inGame: bool, state: int) -> Dictionary:
 
 ## Fetches the Steam avatar via binary channel (faster than inline base64).
 ## Reveals a cached texture when available, otherwise requests a fetch and hides
-## the slot until the async fill arrives.
 func _apply_friend_avatar(avatar: TextureRect, steamID: String) -> void:
     var cached: Texture2D = null
     if _cm.avatarCache.has(steamID):
@@ -489,7 +485,6 @@ func _apply_friend_avatar(avatar: TextureRect, steamID: String) -> void:
 
 
 ## Disconnects prior handlers before rebinding so the invite button stays idempotent
-## across friend-list refreshes (pool reuse would otherwise stack connections).
 func _rebind_friend_invite(btn: Button, steamID: String, friendName: String) -> void:
     for conn: Dictionary in btn.pressed.get_connections():
         btn.pressed.disconnect(conn["callable"])
@@ -534,11 +529,9 @@ func get_pooled_friend_row(idx: int) -> HBoxContainer:
     return row
 
 
-# ---------- World Picker ----------
 
 
 ## Reads the display name for the currently active co-op world from meta.cfg.
-## Returns empty string if no world is active or meta is missing.
 func _get_active_world_name() -> String:
     if _cm == null || _cm.worldId.is_empty():
         return ""
@@ -598,14 +591,17 @@ func show_world_picker() -> void:
 
 ## Full-screen menu scaffold matching the game's Modes/Difficulty layout:
 ## everything (header, subheader, content, return) stacks tightly in a single
-## centered VBox so spacing between elements stays compact.
 func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control:
     var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
 
     var wrapper: Control = Control.new()
     wrapper.name = "MenuDialog"
     wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
+    # PASS, not STOP — wrapper spans full rect but has no _gui_input handler.
+    # STOP swallows every mouse motion event, which blocks the in-game camera
+    # if the wrapper lingers after a scene change. The inner centered panel
+    # still uses MOUSE_FILTER_STOP so clicks on the dialog itself register.
+    wrapper.mouse_filter = Control.MOUSE_FILTER_PASS
     if gameTheme != null:
         wrapper.theme = gameTheme
 
@@ -660,7 +656,6 @@ func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control
 
 
 ## Wires the Return button on a menu dialog to the given callback.
-## Uses find_child so the lookup works regardless of nesting depth.
 func _wire_return_button(dialog: Control, callback: Callable) -> void:
     var returnBtn: Button = dialog.find_child("ReturnBtn", true, false) as Button
     if returnBtn == null:
@@ -672,13 +667,11 @@ func _wire_return_button(dialog: Control, callback: Callable) -> void:
 
 ## Returns the content VBox slot inside a menu dialog (where callers append
 ## buttons/lists). Uses find_child so callers don't need to know the panel's
-## internal node hierarchy.
 func _dialog_vbox(dialog: Control) -> VBoxContainer:
     return dialog.find_child("VBox", true, false) as VBoxContainer
 
 
 ## Hides the world picker. Returns to the Multiplayer submenu when opened from
-## the main menu, otherwise just closes silently.
 func hide_world_picker() -> void:
     _free_dialog(worldPickerPanel)
     worldPickerPanel = null
@@ -686,7 +679,6 @@ func hide_world_picker() -> void:
     _show_mp_submenu_if_on_menu()
 
 
-## Frees a dialog panel along with its wrapper (if present).
 func _free_dialog(dialog: Control) -> void:
     if dialog == null:
         return
@@ -697,8 +689,23 @@ func _free_dialog(dialog: Control) -> void:
         dialog.queue_free()
 
 
+## Frees every outstanding menu dialog wrapper. Called from
+## [method CoopManager.on_scene_changed] so any dialog whose back-button
+## cleanup was skipped (e.g. Host -> New World -> Play flow transitions
+## straight into gameplay without closing the lobby panel) doesn't linger
+func free_all_dialogs() -> void:
+    for child: Node in get_children():
+        if child.name == &"MenuDialog":
+            child.queue_free()
+    lobbyPanel = null
+    worldPickerPanel = null
+    newWorldPanel = null
+    directJoinPanel = null
+    menuLobbyBrowser = null
+    worldPickerVisible = false
+
+
 ## Shows the CoopMPSubmenu on the main menu. Used as the "Return" target for
-## any coop dialog that was opened from Multiplayer.
 func _show_mp_submenu_if_on_menu() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene) || scene.scene_file_path != "res://Scenes/Menu.tscn":
@@ -713,7 +720,6 @@ func _show_mp_submenu_if_on_menu() -> void:
 
 
 ## When a coop dialog is cancelled from the main menu, restore Main visibility
-## so the player isn't left staring at an empty screen.
 func _restore_main_menu_if_open() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene) || scene.scene_file_path != "res://Scenes/Menu.tscn":
@@ -777,7 +783,6 @@ func populate_world_list() -> void:
 
 
 ## Creates a clickable button with two stacked labels (title + metadata).
-## The Button handles click/hover; child labels render on top of its text area.
 func _make_two_line_row_button(titleText: String, metaText: String) -> Button:
     var btn: Button = Button.new()
     btn.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -844,7 +849,6 @@ func _read_world_meta(worldDir: String, dirName: String) -> Dictionary:
 
 
 ## Returns just the metadata line (day, difficulty, season, player count, last played)
-## for use below the world name in two-line list rows.
 func _format_world_meta(world: Dictionary) -> String:
     var day: int = world.get(&"day", 1)
     var season: int = world.get(&"season", 1)
@@ -925,7 +929,6 @@ func _count_players_in_world(playersDir: String) -> int:
     return count
 
 
-# ---------- New World Dialog ----------
 
 
 func show_new_world_dialog() -> void:
@@ -1079,7 +1082,6 @@ func on_create_world_confirmed() -> void:
 
 
 ## Spawns the character-creation dialog. [param onConfirm] runs after confirm,
-## [param onCancel] runs on Back — callers differ between host and client.
 func show_character_picker(onConfirm: Callable, onCancel: Callable) -> void:
     var picker: Control = load("res://mod/ui/character_creation.gd").new()
     add_child(picker)
@@ -1098,7 +1100,6 @@ func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
 
 ## Back out of world creation from inside the picker: tear down the host
 ## session we started pre-picker, delete the empty world dir, and return to
-## the world list so the player can pick again or cancel entirely.
 func _on_host_picker_cancel(worldId: String, worldDir: String) -> void:
     _cm.disconnect_session()
     _cm.clear_active_world()
@@ -1108,7 +1109,6 @@ func _on_host_picker_cancel(worldId: String, worldDir: String) -> void:
 
 
 ## Recursively removes a directory and its contents. Used to clean up an empty
-## world dir when world creation fails.
 func _remove_dir_recursive(path: String) -> void:
     if !DirAccess.dir_exists_absolute(path):
         return
@@ -1134,7 +1134,6 @@ func on_new_world_back() -> void:
     show_world_picker()
 
 
-# ---------- Direct Join Dialog ----------
 
 
 func show_direct_join_dialog() -> void:
@@ -1197,11 +1196,9 @@ func _on_direct_join_back() -> void:
     _show_mp_submenu_if_on_menu()
 
 
-# ---------- Lobby Dialog ----------
 
 
 ## Unified lobby for both Steam and IP hosting. Starts the ENet server
-## immediately so peers can connect while the host is on this screen.
 func show_lobby(useSteam: bool) -> void:
     _lobbyUseSteam = useSteam
     pendingHostUseSteam = useSteam
@@ -1302,7 +1299,6 @@ func _on_lobby_copy_text(copyText: String) -> void:
 ## Builds a labeled HSlider row bound to a [member CoopManager.settings] key.
 ## Value range mirrors the simulation_patch clamp (0.1×..10×). Label on the
 ## right updates live as the host drags. Slider → _cm.set_setting broadcasts
-## to every peer through world_state.
 func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> void:
     var row: HBoxContainer = HBoxContainer.new()
     row.add_theme_constant_override("separation", 8)
@@ -1350,18 +1346,16 @@ func _update_lobby_players() -> void:
     if !_cm.isActive:
         return
     var hostLabel: Label = Label.new()
-    var hostName: String = "Host"
-    if _cm.peerNames.has(_cm.localPeerId):
-        hostName = _cm.peerNames[_cm.localPeerId]
+    var hostName: String = _cm.get_peer_name(_cm.localPeerId)
     hostLabel.text = "%s (Host)" % hostName
     hostLabel.add_theme_font_size_override("font_size", 13)
     _lobbyPlayerList.add_child(hostLabel)
-    for peerId: int in _cm.connectedPeers:
+    var localPid: int = _cm.localPeerId
+    for peerId: int in _cm.peerGodotIds:
+        if peerId == -1 || peerId == localPid:
+            continue
         var peerLabel: Label = Label.new()
-        var pname: String = "Peer %d" % peerId
-        if _cm.peerNames.has(peerId):
-            pname = _cm.peerNames[peerId]
-        peerLabel.text = pname
+        peerLabel.text = _cm.get_peer_name(peerId)
         peerLabel.add_theme_font_size_override("font_size", 13)
         _lobbyPlayerList.add_child(peerLabel)
 
@@ -1458,7 +1452,6 @@ func on_world_selected(worldId: String) -> void:
     loader.LoadScene(shelter)
 
 
-# ---------- Delete World ----------
 
 
 func on_delete_world_pressed(worldId: String, worldName: String) -> void:
@@ -1531,7 +1524,6 @@ func _recursive_delete(path: String) -> void:
     DirAccess.remove_absolute(path)
 
 
-# ---------- World Meta Helpers ----------
 
 
 func _write_world_meta(worldDir: String, worldName: String) -> void:

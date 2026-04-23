@@ -1,12 +1,4 @@
-## Patch for [code]KnifeRig.gd[/code] — broadcasts knife attacks for co-op sync.
-##
-## Overrides:
-## [br]- [method SlashAudio]: broadcasts slash event to remote peers
-## [br]- [method StabAudio]: broadcasts stab event to remote peers
-## [br]- [method HitCheck]: broadcasts hit impact to remote peers
-##
-## Remote players hear the slash/stab audio spatially and see knife
-## hit decals. Original behaviour preserved when not in a co-op session.
+## Patch for KnifeRig.gd — broadcasts slash/stab audio and hit decals to remotes.
 extends "res://Scripts/KnifeRig.gd"
 
 var _cm: Node
@@ -38,21 +30,18 @@ func StabAudio() -> void:
 
 
 func HitCheck() -> void:
-    _ensure_cm()
-    # Capture raycast data before super consumes it
-    var wasColliding: bool = raycast.is_colliding()
-    var hitPoint: Vector3 = Vector3.ZERO
-    var hitNormal: Vector3 = Vector3.ZERO
-    var hitSurface: Variant = null
-    var isFlesh: bool = false
-    if wasColliding:
-        hitPoint = raycast.get_collision_point()
-        hitNormal = raycast.get_collision_normal()
-        hitSurface = raycast.get_collider().get(&"surface")
-        isFlesh = raycast.get_collider() is Hitbox
-
     super.HitCheck()
-
-    if wasColliding && is_instance_valid(_cm) && _cm.is_session_active():
-        var surfaceStr: String = str(hitSurface) if hitSurface != null else ""
-        _cm.playerState.broadcast_knife_hit(hitPoint, hitNormal, surfaceStr, isFlesh, attack)
+    if !_ensure_cm() || !_cm.is_session_active():
+        return
+    if !raycast.is_colliding():
+        return
+    var collider: Object = raycast.get_collider()
+    var hitSurface: Variant = collider.get(&"surface")
+    var surfaceStr: String = str(hitSurface) if hitSurface != null else ""
+    _cm.playerState.broadcast_knife_hit(
+        raycast.get_collision_point(),
+        raycast.get_collision_normal(),
+        surfaceStr,
+        collider is Hitbox,
+        attack,
+    )

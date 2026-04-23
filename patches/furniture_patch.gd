@@ -1,9 +1,4 @@
-## Co-op patch for Furniture.gd
-##
-## Syncs furniture placement and catalog (pickup) between peers.
-## ResetMove → broadcasts final position/rotation to all peers.
-## Catalog → broadcasts removal. Host-authoritative to prevent dupes.
-## Intermediate movement during placement is local only.
+## Patch for Furniture.gd — syncs placement (ResetMove) and pickup (Catalog); host-authoritative.
 @tool
 extends "res://Scripts/Furniture.gd"
 
@@ -31,10 +26,7 @@ func StartMove() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene) || !is_instance_valid(owner):
         return
-    # Last-grab-wins lock: any peer grabbing this piece forces everyone else
-    # currently holding it to drop. Host arbitration is overkill for 2–4
-    # players; the window where two peers grab the same item in the same
-    # frame is narrow enough that the visible yank is acceptable.
+    # Last-grab-wins: grabbing forces any other holder to drop (no host arbitration).
     _cm.worldState.sync_furniture_grab.rpc(scene.get_path_to(owner))
 
 
@@ -55,9 +47,7 @@ func ResetMove() -> void:
     _cm.worldState.sync_furniture_release.rpc(furniturePath)
 
 
-## Called by world_state when another peer grabs this piece while we're also
-## in the middle of moving it. Drop locally so only the latest grabber owns
-## the transform. Mirrors the body of super.ResetMove without broadcasting.
+## Drop locally without broadcasting when another peer grabs this piece.
 func force_release() -> void:
     if !isMoving:
         return
@@ -65,15 +55,14 @@ func force_release() -> void:
 
 
 func Catalog() -> void:
-    _ensure_cm()
-    # Capture path before super — super calls owner.queue_free().
+    # Capture path before super: super calls owner.queue_free().
     var furniturePath: String = ""
-    if _cm != null && _cm.is_session_active() && is_instance_valid(owner):
+    if _ensure_cm() && _cm.is_session_active() && is_instance_valid(owner):
         var scene: Node = get_tree().current_scene
         if is_instance_valid(scene):
             furniturePath = scene.get_path_to(owner)
     super.Catalog()
-    if furniturePath.is_empty() || !is_instance_valid(_cm):
+    if furniturePath.is_empty():
         return
     if _cm.isHost:
         _cm.worldState.sync_furniture_catalog.rpc(furniturePath)

@@ -1,19 +1,9 @@
-## Patch for [code]Settings.gd[/code] — restructures the in-game pause/settings
-## screen as a vertical TabContainer with grouped categories, and adds a
-## "Multiplayer" tab for co-op host/join controls.
-##
-## Vanilla Settings has 17 sections in flat rows which is cluttered. We move
-## each existing section Control into a logical tab group. Reparenting nodes
-## preserves the @onready references held by Settings.gd (Godot tracks by
-## object pointer, not path), so all vanilla settings continue working.
+## Patch for Settings.gd — regroups pause UI into vertical tabs and adds a Multiplayer tab.
 extends "res://Scripts/Settings.gd"
 
 var _cm: Node
-## Path-based mapping from group name to the section node names inside
-## Settings/Row_NN that should land in that tab. static var (not const)
-## because const Array[Array] inner arrays are mutable shared refs per
-## Godot #61274 — accidental mutation would corrupt every Settings instance.
-static var TAB_GROUPS: Array[Array] = [
+# var (not const): Godot #61274 makes const Array[Array] inner arrays shared mutable refs.
+var TAB_GROUPS: Array[Array] = [
     ["Multiplayer", []],
     ["Controls", ["Inputs", "Mouse"]],
     ["Audio", ["Audio", "Music"]],
@@ -28,10 +18,6 @@ func init_manager(manager: Node) -> void:
     _cm = manager
 
 
-## Lazy CoopManager lookup — Settings instances on the menu / pause overlay
-## may construct their MP tab BEFORE coop_manager.inject_manager has reached
-## them (or in the menu case, never reaches them at all because PATH_SETTINGS
-## targets the in-game Core/UI/Settings only). Walks root once on demand.
 func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
         return true
@@ -66,13 +52,7 @@ func _default_port() -> int:
     return _cm.DEFAULT_PORT if _ensure_cm() else _DEFAULT_PORT_FALLBACK
 
 
-## Overrides base [method Settings._ready] to null-guard the absolute-path
-## lookups for [code]/root/Map/World[/code] and [code]/root/Menu[/code]. Base
-## uses [method Node.get_node] (no fallback) after a 100 ms await, so a scene
-## transition landing mid-await — or any instance where [member GameData.menu]
-## disagrees with the actual current_scene — crashes with "Node not found".
-## Replicates base body otherwise; [code]super._ready()[/code] is intentionally
-## skipped to avoid the unguarded lookup.
+# Null-guards the /root/Map/World and /root/Menu lookups base does without fallback.
 func _ready() -> void:
     await get_tree().create_timer(0.1, false).timeout
     if !is_instance_valid(self):
@@ -109,11 +89,7 @@ func _ready() -> void:
 
     _restructure_into_tabs.call_deferred()
 
-    # Force a friends-list fetch the moment the pause menu becomes visible.
-    # Without this, the list populates on the next 30-frame tick (~0.5s) plus
-    # the IPC round-trip — long enough for the player to dismiss the menu
-    # before the first response arrives, making the list appear empty until
-    # the second open.
+    # Immediate friends fetch so the list paints before the user dismisses the menu.
     if !visibility_changed.is_connected(_on_settings_visibility_changed):
         visibility_changed.connect(_on_settings_visibility_changed)
 
@@ -121,9 +97,7 @@ func _ready() -> void:
 func _on_settings_visibility_changed() -> void:
     if !visible:
         return
-    # Paint from the steam_bridge friends cache first so a list populated by
-    # the main-menu lobby shows instantly. The async fetch below then replaces
-    # it with fresh state (online/in-game flags may have changed).
+    # Paint cache first for instant feedback; async fetch replaces with fresh state.
     _paint_friends_from_cache()
     _lastFriendRefreshMs = 0
     _maybe_refresh_friends()
@@ -139,31 +113,15 @@ func _paint_friends_from_cache() -> void:
     _on_friends_received({&"ok": true, &"data": cached})
 
 
-## Overrides base [method Settings.LoadPreferences] only to guard the
-## [code]!gameData.menu[/code] branch that calls [member interface] methods.
-## Base assumes [member interface] is wired (Core.tscn sets it via NodePath
-## export) but the Menu-layer Settings instance — and editor-driven runs that
-## instantiate Settings.tscn at [code]/root/Settings[/code] standalone —
-## leave it null. Loose [member gameData] timing during scene transitions
-## (menu→map / map→menu) also lands here: [member gameData.menu] stays stale
-## after a reparent so the branch fires when it shouldn't. Crash path:
-## [code]interface.LoadDefaultType → "Nonexistent function on Nil"[/code].
+## Guards the !gameData.menu branch that would crash if interface is null.
 func LoadPreferences() -> void:
-    # Delegate the menu-side prefs wiring to base unconditionally — those
-    # touch [member mainMenu] which we don't use here.
     if gameData.menu or interface != null:
         super.LoadPreferences()
         return
-    # gameData.menu is false but [member interface] isn't wired yet — run
-    # base prefs wiring that doesn't depend on [member interface], then
-    # skip the unsafe block at Settings.gd:217.
     _load_prefs_without_interface()
 
 
-## Mirrors base [method Settings.LoadPreferences] but omits the
-## [code]!gameData.menu[/code] block at [code]Scripts/Settings.gd:216-220[/code]
-## so a null [member interface] doesn't crash. Everything after that block
-## is safe to run.
+## Mirrors base LoadPreferences without the interface-dependent block (Settings.gd:216-220).
 func _load_prefs_without_interface() -> void:
     if preferences == null:
         return
@@ -181,22 +139,17 @@ func _load_prefs_without_interface() -> void:
     AudioServer.set_bus_mute(musicBus, preferences.musicVolume < 0.01)
 
 
-## Tracks the currently-shown tab content panel so we can hide/show on click.
 var _tabPanels: Dictionary[String, Control] = {}
 var _tabButtons: Dictionary[String, Button] = {}
 var _activeTab: String = ""
 
 
-## Walks the existing Settings layout, finds each grouped section by name, and
-## reparents it into a vertical-tab layout (custom-built since Godot 4's
-## TabContainer only supports horizontal tabs). Idempotent — if the layout
-## already exists, returns immediately. Skipped on the main menu so that
-## Settings stays vanilla there; only the in-game pause version uses tabs.
+## Reparents existing sections into a vertical-tab layout (Godot 4 TabContainer is horizontal only).
 func _restructure_into_tabs() -> void:
     if get_node_or_null(PATH_COOP_TABS) != null:
         return
     if gameData != null && gameData.menu:
-        return  # main menu — keep vanilla Settings layout
+        return
 
     var origBox: Node = get_node_or_null(PATH_SETTINGS)
     if origBox == null:
@@ -229,28 +182,24 @@ func _restructure_into_tabs() -> void:
     tabRoot.add_theme_constant_override("separation", 24)
     outer.add_child(tabRoot)
 
-    # Left column: vertical tab button list.
     var tabBar: VBoxContainer = VBoxContainer.new()
     tabBar.name = "TabBar"
     tabBar.custom_minimum_size = Vector2(200, 0)
     tabBar.add_theme_constant_override("separation", 4)
     tabRoot.add_child(tabBar)
 
-    # Right column: content stack (only one panel visible at a time).
     var contentArea: Control = Control.new()
     contentArea.name = "ContentArea"
     contentArea.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     contentArea.size_flags_vertical = Control.SIZE_EXPAND_FILL
     tabRoot.add_child(contentArea)
 
-    # Hide vanilla layout — the original sections still exist, we just move them.
     origBox.hide()
 
     for group: Array in TAB_GROUPS:
         var groupName: String = group[0]
         var sectionNames: Array = group[1]
 
-        # Tab button on the left — centered text to match game's button style.
         var tabBtn: Button = Button.new()
         tabBtn.text = groupName
         tabBtn.custom_minimum_size = Vector2(0, 36)
@@ -259,7 +208,6 @@ func _restructure_into_tabs() -> void:
         tabBar.add_child(tabBtn)
         _tabButtons[groupName] = tabBtn
 
-        # Content panel on the right (scrollable)
         var panel: ScrollContainer = ScrollContainer.new()
         panel.name = groupName + "_Panel"
         panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -268,8 +216,6 @@ func _restructure_into_tabs() -> void:
         contentArea.add_child(panel)
         _tabPanels[groupName] = panel
 
-        # Two-column grid so sections sit side-by-side instead of stacked.
-        # Multiplayer tab keeps single-column (it's content, not settings).
         var panelBox: Container
         if groupName == "Multiplayer":
             panelBox = VBoxContainer.new()
@@ -297,24 +243,16 @@ func _restructure_into_tabs() -> void:
             section.reparent(panelBox)
             if section is Control:
                 section.show()
-                # Each section's children use anchor-based layout (CENTER +
-                # pixel offsets), so the section needs explicit dimensions
-                # or those children collapse to 0×0 and overlap. Tight sizing
-                # keeps the grid compact (no gaping empty space between cells).
+                # Sections use anchor-based layout; explicit sizing keeps children from collapsing.
                 (section as Control).custom_minimum_size = Vector2(420, 180)
                 (section as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-    # Show first tab by default.
     if !TAB_GROUPS.is_empty():
         _show_tab(TAB_GROUPS[0][0])
 
-    # Exit buttons (Main Menu / Quit Game) — pulled out of the tab system so
-    # they're always visible at the bottom of the pause menu.
     _build_exit_bar(origBox, outer)
 
 
-## Pulls the Main Menu and Quit Game buttons out of the original Exit section
-## and places them in a centered row anchored to the bottom of the pause menu.
 func _build_exit_bar(origBox: Node, outer: Control) -> void:
     var exitSection: Node = _find_section(origBox, "Exit")
     if exitSection == null:
@@ -345,7 +283,6 @@ func _build_exit_bar(origBox: Node, outer: Control) -> void:
         (quitBtn as Control).show()
 
 
-## Shows the named tab's content panel and hides all others.
 func _show_tab(groupName: String) -> void:
     if _activeTab == groupName:
         return
@@ -360,8 +297,6 @@ func _show_tab(groupName: String) -> void:
             btn.modulate = Color(1, 1, 1, 1) if button_name == groupName else Color(1, 1, 1, 0.6)
 
 
-## Finds a named section anywhere inside the original Settings BoxContainer.
-## Sections live as direct children of Settings or Settings/Row_NN.
 func _find_section(box: Node, sectionName: String) -> Node:
     var path: NodePath = NodePath(sectionName)
     var direct: Node = box.get_node_or_null(path)
@@ -374,9 +309,6 @@ func _find_section(box: Node, sectionName: String) -> Node:
     return null
 
 
-## Custom Controls tab layout: Inputs key bindings on the left, Mouse sliders
-## + Inputs Modes (toggles) stacked on the right. Splits Inputs's children so
-## the toggles visually group with the Mouse settings.
 func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
     var settings_inputs: Node = _find_section(origBox, "Inputs")
     var mouse: Node = _find_section(origBox, "Mouse")
@@ -399,9 +331,6 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
     hbox.add_child(rightCol)
 
     if settings_inputs != null:
-        # Inputs scene contains: Header, Panel (key bindings), Modes
-        # (toggles), Reset (button). We split: Panel + Header + Reset go left,
-        # Modes goes right with Mouse.
         var header: Node = settings_inputs.get_node_or_null(PATH_HEADER)
         var inputsPanel: Node = settings_inputs.get_node_or_null(PATH_PANEL)
         var modes: Node = settings_inputs.get_node_or_null(PATH_MODES)
@@ -413,15 +342,11 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
         if inputsPanel != null:
             inputsPanel.reparent(leftCol)
             (inputsPanel as Control).show()
-            # Inputs/Panel is layout_mode=0 (free positioning) with fixed
-            # offsets — switch to container-managed sizing so it fills the
-            # left column instead of a 348×598 fixed rect.
+            # Inputs/Panel is layout_mode=0; switch to container-managed sizing.
             (inputsPanel as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
             (inputsPanel as Control).custom_minimum_size = Vector2(0, 480)
             (inputsPanel as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
             (inputsPanel as Control).size_flags_vertical = Control.SIZE_EXPAND_FILL
-            # The MarginContainer inside also has layout_mode=0 — make it
-            # follow its parent (the Panel) so it fills properly too.
             var margin: Node = inputsPanel.get_node_or_null(PATH_MARGIN)
             if margin != null:
                 (margin as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -435,7 +360,7 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
             (modes as Control).custom_minimum_size = Vector2(0, 130)
             (modes as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-        settings_inputs.hide()  # empty wrapper, keep hidden
+        settings_inputs.hide()
 
     if mouse != null:
         mouse.reparent(rightCol)
@@ -444,8 +369,6 @@ func _build_controls_tab(origBox: Node, panel: ScrollContainer) -> void:
         (mouse as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 
-## Builds the Multiplayer tab content. Two columns: left has session controls,
-## right has a Steam friends list with inline Invite buttons.
 func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     var outerHBox: HBoxContainer = HBoxContainer.new()
     outerHBox.add_theme_constant_override("separation", 24)
@@ -468,7 +391,6 @@ func _build_multiplayer_tab(parent: VBoxContainer) -> void:
     _build_mp_right_column(rightCol)
 
 
-## Left column: title, status label, host/join/action rows, connected players list.
 func _build_mp_left_column(leftCol: VBoxContainer) -> void:
     var title: Label = Label.new()
     title.text = "Multiplayer"
@@ -498,7 +420,6 @@ func _build_mp_left_column(leftCol: VBoxContainer) -> void:
     _build_mp_players_section(leftCol)
 
 
-## Host (Steam) + Host (IP) buttons side by side.
 func _build_mp_host_row(leftCol: VBoxContainer) -> void:
     var hostRow: HBoxContainer = HBoxContainer.new()
     hostRow.add_theme_constant_override("separation", 8)
@@ -521,7 +442,6 @@ func _build_mp_host_row(leftCol: VBoxContainer) -> void:
     hostRow.add_child(hostIpBtn)
 
 
-## Direct-join: address input, port input, Join button.
 func _build_mp_join_row(leftCol: VBoxContainer) -> void:
     var joinRow: HBoxContainer = HBoxContainer.new()
     joinRow.add_theme_constant_override("separation", 4)
@@ -549,7 +469,6 @@ func _build_mp_join_row(leftCol: VBoxContainer) -> void:
     joinRow.add_child(joinBtn)
 
 
-## Disconnect + Logs buttons.
 func _build_mp_action_row(leftCol: VBoxContainer) -> void:
     var actionRow: HBoxContainer = HBoxContainer.new()
     actionRow.add_theme_constant_override("separation", 8)
@@ -571,7 +490,6 @@ func _build_mp_action_row(leftCol: VBoxContainer) -> void:
     actionRow.add_child(logsBtn)
 
 
-## Connected players header + scrolling list.
 func _build_mp_players_section(leftCol: VBoxContainer) -> void:
     var playersHeader: Label = Label.new()
     playersHeader.text = "Connected Players"
@@ -591,7 +509,6 @@ func _build_mp_players_section(leftCol: VBoxContainer) -> void:
     playersScroll.add_child(playersList)
 
 
-## Right column: friends list header, hint label, scrolling invite list.
 func _build_mp_right_column(rightCol: VBoxContainer) -> void:
     var friendsLabel: Label = Label.new()
     friendsLabel.text = "Invite Friends"
@@ -620,20 +537,13 @@ func _build_mp_right_column(rightCol: VBoxContainer) -> void:
 
 var _lastFriendRefreshMs: int = 0
 const FRIEND_REFRESH_INTERVAL_MS: int = 5000
-## Maps Steam ID → TextureRect so we can patch in late-arriving avatars
-## without waiting for the next 5s friend list rebuild.
+# Maps Steam ID to TextureRect to patch in avatars that arrive after list rebuild.
 var _avatarSlots: Dictionary[String, TextureRect] = {}
 
 
-## Polls the coop session state every ~0.5s and refreshes the MP tab labels
-## and button enable states. Also re-fetches the friends list every 5s while
-## a session is active so invite buttons reflect online/in-game status.
 func _process(_delta: float) -> void:
-    # Skip the whole tick when the Settings panel isn't visible — the player
-    # isn't paused and doesn't need the MP status poll.
     if !visible:
         return
-    # Patch in late-arriving avatars every frame — cheap, no IPC.
     _patch_pending_avatars()
     if Engine.get_process_frames() % 30 != 0:
         return
@@ -653,7 +563,8 @@ func _refresh_mp_status() -> void:
     if statusLabel != null:
         if active:
             var role: String = "Host" if _cm.isHost else "Client"
-            statusLabel.text = "%s — %d peer(s)" % [role, _cm.connectedPeers.size()]
+            var remoteCount: int = maxi(0, _cm.active_peer_count() - 1)
+            statusLabel.text = "%s — %d peer(s)" % [role, remoteCount]
             statusLabel.modulate = Color(0.5, 0.9, 0.5, 0.9)
         else:
             statusLabel.text = "Disconnected"
@@ -674,7 +585,6 @@ func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
     if !active || !_cm.isHost || _cm._pendingHostUseSteam:
         ipInfo.hide()
         return
-    # Only rebuild when first shown or peer count changes.
     if ipInfo.visible && ipInfo.get_child_count() > 0:
         return
     ipInfo.show()
@@ -693,8 +603,7 @@ func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
         var copyBtn: Button = Button.new()
         copyBtn.text = "Copy"
         copyBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-        # Bind value-type String, not Button ref — prevents dangling Callable
-        # capture when the row is freed on next refresh.
+        # Bind String value to avoid dangling Callable on row free.
         copyBtn.pressed.connect(_on_copy_ip_text.bind(text))
         row.add_child(copyBtn)
 
@@ -712,13 +621,12 @@ func _refresh_players_list(active: bool) -> void:
         hint.add_theme_font_size_override("font_size", 12)
         list.add_child(hint)
         return
-    # Local player first.
     list.add_child(_make_player_row(_cm.localPeerId, _cm.get_local_name(), true))
-    for peerId: int in _cm.connectedPeers:
-        var peerName: String = "Player %d" % peerId
-        if _cm.peerNames.has(peerId):
-            peerName = _cm.peerNames[peerId]
-        list.add_child(_make_player_row(peerId, peerName, false))
+    var localPid: int = _cm.localPeerId
+    for peerId: int in _cm.peerGodotIds:
+        if peerId == -1 || peerId == localPid:
+            continue
+        list.add_child(_make_player_row(peerId, _cm.get_peer_name(peerId), false))
 
 
 func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxContainer:
@@ -730,8 +638,9 @@ func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxCo
     avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
     avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
     var steamId: String = ""
-    if _cm.peerSteamIDs.has(peerId):
-        steamId = _cm.peerSteamIDs[peerId]
+    var peerSlotIdx: int = _cm.peer_idx(peerId)
+    if peerSlotIdx >= 0:
+        steamId = _cm.peerSteamIDs[peerSlotIdx]
     if isLocal:
         steamId = _cm.steamBridge.localSteamID if _cm.steamBridge.is_ready() else ""
     if !steamId.is_empty():
@@ -780,8 +689,7 @@ func _maybe_refresh_friends() -> void:
 
 
 func _on_friends_received(response: Dictionary) -> void:
-    # Callback fires asynchronously after an IPC round-trip — this Settings
-    # node may have been freed (pause menu closed) in the meantime.
+    # Async callback: Settings may have been freed between request and response.
     if !is_inside_tree():
         return
     var friendList: VBoxContainer = find_child("MPFriendsList", true, false) as VBoxContainer
@@ -789,8 +697,6 @@ func _on_friends_received(response: Dictionary) -> void:
         return
     if !response.get(&"ok", false):
         return
-    # Clear and rebuild the list. Friend lists are short (~50 max) so we just
-    # rebuild rather than diffing.
     for child: Node in friendList.get_children():
         child.queue_free()
     _avatarSlots.clear()
@@ -821,7 +727,6 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
     inviteBtn.custom_minimum_size = Vector2(72, 28)
     row.add_child(inviteBtn)
 
-    # Populate from friend data (reuses cached avatars when possible).
     var friendName: String = friend.get(&"name", "Unknown")
     var state: int = friend.get(&"state", 0)
     var gameID: String = friend.get(&"game_id", "")
@@ -857,15 +762,12 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
         avatar.texture = cached
     elif !steamID.is_empty():
         _cm.fetch_avatar(steamID)
-        _avatarSlots[steamID] = avatar  # patch in once IPC fetch completes
+        _avatarSlots[steamID] = avatar
 
     inviteBtn.pressed.connect(_on_invite_friend.bind(steamID, friendName))
     return row
 
 
-## Walks pending avatar slots and assigns the texture once the cache fills.
-## Called from _process so late-arriving avatars appear without needing a
-## full friend-list rebuild.
 func _patch_pending_avatars() -> void:
     if _avatarSlots.is_empty() || !is_instance_valid(_cm):
         return
@@ -899,9 +801,7 @@ func _on_invite_sent(response: Dictionary, friendName: String) -> void:
         _cm._log("Invite failed: %s" % response.get(&"error", "unknown"))
 
 
-## Override vanilla Menu/Quit/Return-from-warning handlers so our CoopTabs
-## layout is shown/hidden correctly (vanilla targets `settings`, the flat
-## BoxContainer that we hid during restructure).
+## Override Menu/Quit/Return handlers since vanilla targets the hidden flat BoxContainer.
 func _on_menu_pressed() -> void:
     if gameData.shelter || gameData.tutorial:
         _on_exit_menu_pressed()

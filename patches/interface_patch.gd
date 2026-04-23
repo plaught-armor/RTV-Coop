@@ -1,15 +1,12 @@
-## Patch for [code]Interface.gd[/code] — broadcasts dropped items for co-op sync.
-## Reimplements [method Drop] with network broadcast after each pickup creation.
-## Also defers client-side trader task completion until host ACK to prevent
-## item loss if the host rejects the task.
+## Patch for Interface.gd — broadcasts drops; defers client task completion until host ACK.
 extends "res://Scripts/Interface.gd"
 
 const PATH_MAP: NodePath = ^"/root/Map"
 
 var _cm: Node
 
-## Pending task completions awaiting host ACK. Keyed by task name.
-## Each entry: { selected: Array[Node], taskData: TaskData }.
+# Pending task completions awaiting host ACK, keyed by task name:
+# { selected: Array[Node], taskData: TaskData }.
 var _pendingTasks: Dictionary = {}
 
 
@@ -45,8 +42,6 @@ func Drop(target: Node) -> void:
     UpdateStats(true)
 
 
-## Returns {direction, position, rotation} for a drop based on trader/hoverGrid context.
-## Values are Vector3.ZERO when no source applies (shouldn't happen under normal flow).
 func _resolve_drop_transform() -> Dictionary:
     var dir: Vector3 = Vector3.ZERO
     var pos: Vector3 = Vector3.ZERO
@@ -68,7 +63,6 @@ func _resolve_drop_transform() -> Dictionary:
     return {"direction": dir, "position": pos, "rotation": rot}
 
 
-## Spawns N pickups for a stackable item, distributing amount across box-sized bundles.
 func _spawn_stackable_drops(file: PackedScene, target: Node, map: Node, transform: Dictionary, dropForce: float) -> void:
     var boxSize: int = target.slotData.itemData.defaultAmount
     var boxesNeeded: int = ceili(float(target.slotData.amount) / float(boxSize))
@@ -89,7 +83,6 @@ func _spawn_stackable_drops(file: PackedScene, target: Node, map: Node, transfor
         _cm.worldState.broadcast_item_drop(pickup)
 
 
-## Spawns a single pickup for a non-stackable item, copying the target's slotData.
 func _spawn_single_drop(file: PackedScene, target: Node, map: Node, transform: Dictionary, dropForce: float) -> void:
     var pickup: Node3D = _instantiate_pickup(file, map, transform, dropForce)
     pickup.slotData.Update(target.slotData)
@@ -97,7 +90,6 @@ func _spawn_single_drop(file: PackedScene, target: Node, map: Node, transform: D
     _cm.worldState.broadcast_item_drop(pickup)
 
 
-## Instantiates a pickup scene, parents it into the map, and primes its physics.
 func _instantiate_pickup(file: PackedScene, map: Node, transform: Dictionary, dropForce: float) -> Node3D:
     var pickup: Node3D = file.instantiate()
     map.add_child(pickup)
@@ -128,7 +120,6 @@ func CompleteDeal() -> void:
         _execute_client_trade(traderPath, requestedIndices, offeredSlots)
 
 
-## Collects indices of supply-grid items the player has selected to request.
 func _collect_requested_supply_indices() -> PackedInt32Array:
     var out: PackedInt32Array = []
     var supplyChildren: Array[Node] = supplyGrid.get_children()
@@ -138,16 +129,14 @@ func _collect_requested_supply_indices() -> PackedInt32Array:
     return out
 
 
-## Packs inventory grid items the player has selected as offered trade payload.
 func _collect_offered_inventory_slots() -> Array[Dictionary]:
     var out: Array[Dictionary] = []
     for element: Node in inventoryGrid.get_children():
         if element.selected:
-            out.append(_cm.SlotSerializerScript.pack(element.slotData))
+            out.append(_cm.slotSerializer.pack(element.slotData))
     return out
 
 
-## Host path: trade executes authoritatively, offered items removed locally.
 func _execute_host_trade(traderPath: String, requestedIndices: PackedInt32Array, offeredSlots: Array[Dictionary]) -> void:
     _cm.worldState.request_trade(traderPath, requestedIndices, offeredSlots)
     for element: Node in inventoryGrid.get_children():
@@ -156,7 +145,7 @@ func _execute_host_trade(traderPath: String, requestedIndices: PackedInt32Array,
             element.queue_free()
 
 
-## Client path: hide offered items pending host ACK so reject_trade can restore them.
+## Hide offered items pending host ACK so reject_trade can restore them.
 func _execute_client_trade(traderPath: String, requestedIndices: PackedInt32Array, offeredSlots: Array[Dictionary]) -> void:
     var pendingElements: Array[Node] = []
     for element: Node in inventoryGrid.get_children():
@@ -168,14 +157,7 @@ func _execute_client_trade(traderPath: String, requestedIndices: PackedInt32Arra
     _cm.worldState.request_trade.rpc_id(1, traderPath, requestedIndices, offeredSlots)
 
 
-# ---------- Trader Task Complete (client-side defer) ----------
-
-
-## Solo + host destroy input items and spawn rewards immediately in vanilla
-## `Complete()`. In co-op a client doing the same before the host validates
-## would lose the inputs and keep fake rewards if the host rejects the task.
-## For client-in-session TaskData, hide selected inputs + stash rewards data
-## and wait for [method finalize_pending_task] or [method reject_pending_task].
+## Client-side defer: hide inputs + stash rewards; host ACK triggers finalize_pending_task.
 func Complete(data: Resource) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active() || _cm.isHost:
         super.Complete(data)
@@ -203,14 +185,11 @@ func Complete(data: Resource) -> void:
         &"taskData": inputTarget.taskData,
     }
 
-    # Routes through trader_patch.CompleteTask → request_trader_task_complete RPC.
     trader.CompleteTask(inputTarget.taskData)
     ResetInput()
 
 
-## Called by [code]world_state.ack_trader_task_complete[/code] when the host
-## confirms this client's task. Destroys the hidden inputs and spawns rewards
-## from the snapshotted TaskData.receive list, mirroring vanilla Complete().
+## Host ACK path: destroy hidden inputs and spawn rewards (mirrors vanilla Complete).
 func finalize_pending_task(taskName: String) -> void:
     if !_pendingTasks.has(taskName):
         return
@@ -239,9 +218,7 @@ func finalize_pending_task(taskName: String) -> void:
     UpdateTraderInfo()
 
 
-## Called by [code]world_state.reject_trader_task_complete[/code] when the host
-## refuses (unknown task name, already completed, etc). Restores the hidden
-## inventory elements so the client keeps their inputs.
+## Host reject path: restore hidden inventory so client keeps inputs.
 func reject_pending_task(taskName: String) -> void:
     if !_pendingTasks.has(taskName):
         return
