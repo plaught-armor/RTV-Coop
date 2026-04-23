@@ -14,8 +14,12 @@ const PATH_CONTROLLER: NodePath = ^"Core/Controller"
 var peerPings: Dictionary[int, int] = { }
 var labelPool: Array[HBoxContainer] = []
 var hintsLabel: Label = null
+var sleepOverlay: CanvasLayer = null
+var sleepLabel: Label = null
 const HINT_COLOR: Color = Color(0.6, 0.6, 0.6, 0.6)
 const PLAYER_COLOR: Color = Color(0.8, 1.0, 0.8, 0.8)
+const SLEEP_LABEL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.95)
+const SLEEP_OUTLINE_COLOR: Color = Color(0.0, 0.0, 0.0, 0.9)
 
 
 func init_manager(manager: Node) -> void:
@@ -35,6 +39,28 @@ func init_manager(manager: Node) -> void:
     hintsLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(hintsLabel)
     update_hints()
+    _build_sleep_overlay()
+
+
+func _build_sleep_overlay() -> void:
+    sleepOverlay = CanvasLayer.new()
+    sleepOverlay.layer = 90
+    sleepOverlay.visible = false
+    _cm.add_child(sleepOverlay)
+
+    sleepLabel = Label.new()
+    sleepLabel.add_theme_font_size_override("font_size", 22)
+    sleepLabel.add_theme_color_override("font_color", SLEEP_LABEL_COLOR)
+    sleepLabel.add_theme_color_override("font_outline_color", SLEEP_OUTLINE_COLOR)
+    sleepLabel.add_theme_constant_override("outline_size", 5)
+    sleepLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    sleepLabel.anchor_left = 0.0
+    sleepLabel.anchor_right = 1.0
+    sleepLabel.anchor_top = 0.0
+    sleepLabel.offset_top = 80
+    sleepLabel.offset_bottom = 130
+    sleepLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    sleepOverlay.add_child(sleepLabel)
 
 
 func _input(event: InputEvent) -> void:
@@ -46,6 +72,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+    _update_sleep_overlay()
     if !is_instance_valid(_cm) || !hudVisible:
         if visible:
             visible = false
@@ -186,3 +213,18 @@ func get_pooled_row(idx: int) -> HBoxContainer:
 func hide_all_player_labels() -> void:
     for row: HBoxContainer in labelPool:
         row.hide()
+
+
+func _update_sleep_overlay() -> void:
+    if !is_instance_valid(sleepOverlay) || !is_instance_valid(sleepLabel):
+        return
+    if !is_instance_valid(_cm) || !_cm.isActive:
+        sleepOverlay.visible = false
+        return
+    var readyIds: Array = _cm.get_meta(&"coop_sleep_ready_ids", []) as Array
+    var total: int = int(_cm.get_meta(&"coop_sleep_total", 0))
+    if total <= 1 || readyIds.is_empty():
+        sleepOverlay.visible = false
+        return
+    sleepLabel.text = "Sleeping: %d/%d ready" % [readyIds.size(), total]
+    sleepOverlay.visible = true

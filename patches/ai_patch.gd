@@ -156,13 +156,17 @@ func Parameters(delta: float) -> void:
 
     LKL = lerp(LKL, lastKnownLocation, delta * LKLSpeed)
 
+    # Host counts as a candidate only when alive AND not in a trader UI.
+    var hostTargetable: bool = !gameData.isDead && !gameData.isTrading
     var bestPos: Vector3 = gameData.playerPosition
-    var bestDist: float = global_position.distance_to(bestPos)
+    var bestDist: float = global_position.distance_to(bestPos) if hostTargetable else INF
     var bestVector: Vector3 = gameData.playerVector
     targetPeerId = -1
 
     for remote: Node3D in _cm.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
+            continue
+        if remote.has_flag(_cm.PlayerStateScript.MoveFlag.TRADING):
             continue
         var pos: Vector3 = remote.global_position
         var dist: float = global_position.distance_to(pos)
@@ -275,9 +279,8 @@ func Hearing() -> void:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         var dist: float = global_position.distance_to(remote.global_position)
-        var flags: int = remote.moveFlags
-        var isRunning: bool = (flags & _cm.PlayerStateScript.MoveFlag.RUNNING) != 0
-        var isWalking: bool = (flags & _cm.PlayerStateScript.MoveFlag.WALKING) != 0
+        var isRunning: bool = remote.has_flag(_cm.PlayerStateScript.MoveFlag.RUNNING)
+        var isWalking: bool = remote.has_flag(_cm.PlayerStateScript.MoveFlag.WALKING)
         if (dist < 20 && isRunning) || (dist < 5 && isWalking):
             if currentState != State.Ambush:
                 lastKnownLocation = remote.global_position
@@ -313,7 +316,7 @@ func FireDetection(delta: float) -> void:
     for remote: Node3D in _cm.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
-        if !remote.isFiring:
+        if !remote.has_flag(_cm.PlayerStateScript.MoveFlag.FIRING):
             continue
         if playerVisible:
             continue

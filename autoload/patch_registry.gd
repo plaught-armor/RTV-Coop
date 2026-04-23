@@ -28,6 +28,16 @@ const PATCHES: Array[String] = [
     "res://Scripts/DecorMode.gd",     "res://mod/patches/decor_mode_patch.gd",
     "res://Scripts/Helicopter.gd",    "res://mod/patches/helicopter_patch.gd",
     "res://Scripts/BTR.gd",           "res://mod/patches/btr_patch.gd",
+    "res://Scripts/Police.gd",        "res://mod/patches/police_patch.gd",
+    "res://Scripts/CASA.gd",          "res://mod/patches/casa_patch.gd",
+    "res://Scripts/RocketGrad.gd",    "res://mod/patches/rocket_grad_patch.gd",
+    "res://Scripts/RocketHelicopter.gd", "res://mod/patches/rocket_helicopter_patch.gd",
+    "res://Scripts/MissileSpawner.gd", "res://mod/patches/missile_spawner_patch.gd",
+    "res://Scripts/Radio.gd",         "res://mod/patches/radio_patch.gd",
+    "res://Scripts/Television.gd",    "res://mod/patches/television_patch.gd",
+    "res://Scripts/Instrument.gd",    "res://mod/patches/instrument_patch.gd",
+    "res://Scripts/CatFeeder.gd",     "res://mod/patches/cat_feeder_patch.gd",
+    "res://Scripts/CatRescue.gd",     "res://mod/patches/cat_rescue_patch.gd",
 ]
 
 

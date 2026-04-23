@@ -39,7 +39,6 @@ var _moveFlag: Dictionary = {}
 var _materialCache: Dictionary[String, Material] = {}
 
 # Decoded from MoveFlag.FIRING on every snapshot so AI FireDetection tracks held-trigger bursts.
-var isFiring: bool = false
 
 var audioPlayer: AudioStreamPlayer3D = null
 
@@ -645,7 +644,12 @@ func update_state(pos: Vector3, rot: Vector3, flags: int) -> void:
     targetRotationY = rot.x
     targetRotationX = rot.y
     moveFlags = flags
-    isFiring = (flags & _moveFlag.FIRING) != 0
+
+
+## Single source of truth — callers read state via predicate to avoid drift
+## between `moveFlags` and mirror bool vars.
+func has_flag(flag: int) -> bool:
+    return (moveFlags & flag) != 0
 
 
 func play_remote_audio(audioPath: String) -> void:

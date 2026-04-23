@@ -1,5 +1,14 @@
-## Host-auth 10Hz transform sync for Helicopter/BTR; rocket/shell spawns stay local (cosmetic).
+## Host-auth 10Hz transform sync for Helicopter/BTR/Police/CASA and rockets in flight.
 extends Node
+
+var TRACKED_SCRIPTS: PackedStringArray = [
+    "res://Scripts/Helicopter.gd",
+    "res://Scripts/BTR.gd",
+    "res://Scripts/Police.gd",
+    "res://Scripts/CASA.gd",
+    "res://Scripts/RocketGrad.gd",
+    "res://Scripts/RocketHelicopter.gd",
+]
 
 var _cm: Node
 var _currentScene: Node = null
@@ -51,7 +60,7 @@ func _walk_for_vehicles(node: Node, out: Array[Node3D]) -> void:
     if node == null:
         return
     var scriptPath: String = node.get_script().resource_path if node.get_script() != null else ""
-    if (scriptPath == "res://Scripts/Helicopter.gd" || scriptPath == "res://Scripts/BTR.gd") && node is Node3D:
+    if TRACKED_SCRIPTS.has(scriptPath) && node is Node3D:
         out.append(node as Node3D)
         return
     for child: Node in node.get_children():

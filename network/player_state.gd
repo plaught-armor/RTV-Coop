@@ -40,6 +40,8 @@ enum MoveFlag {
     FLASHLIGHT = 32,
     # Mirrors isFiring continuously so AI FireDetection sees remotes like the host.
     FIRING = 64,
+    # Mirrors isTrading so AI skips targeting remotes whose owner is in trade UI.
+    TRADING = 128,
 }
 
 
@@ -544,6 +546,8 @@ func encode_flags(data: GameData) -> int:
         flags |= MoveFlag.FLASHLIGHT
     if data.isFiring:
         flags |= MoveFlag.FIRING
+    if data.isTrading:
+        flags |= MoveFlag.TRADING
     return flags
 
 

@@ -336,16 +336,79 @@ func sync_switch_state(switchPath: String, active: bool) -> void:
 
 
 
-## Host triggers sleep: runs the bed locally (advances Simulation, adjusts its
-## own vitals, plays transition audio) and broadcasts the duration so clients
-## freeze + play audio in lock-step. Clients also apply matching stat deltas
+## Ready-set per bed: peers must all mark the same bed before sleep triggers.
+## Resets when sleep fires or when a peer picks a different bed.
+var _bedReady: Dictionary = {}
+
+
+func _expected_peer_count() -> int:
+    var n: int = 1  # local
+    for pid: int in _cm.peerGodotIds:
+        if pid != -1:
+            n += 1
+    return n
+
+
+func _active_peer_ids() -> Array:
+    var out: Array = [_cm.localPeerId]
+    for pid: int in _cm.peerGodotIds:
+        if pid != -1:
+            out.append(pid)
+    return out
+
+
+func _reset_bed_ready_except(keepPath: String) -> void:
+    var toErase: Array = []
+    for path: Variant in _bedReady.keys():
+        if path != keepPath:
+            toErase.append(path)
+    for path: Variant in toErase:
+        _bedReady.erase(path)
+
+
+func _broadcast_bed_ready(bedPath: String) -> void:
+    var readyIds: Array = _bedReady.get(bedPath, [])
+    var total: int = _expected_peer_count()
+    _cm.set_meta(&"coop_sleep_ready_ids", readyIds.duplicate())
+    _cm.set_meta(&"coop_sleep_total", total)
+    sync_bed_ready.rpc(bedPath, readyIds, total)
+
+
+## Host side: local or remote peer marked a bed. Trigger sleep when every
+## active peer has marked the SAME bed; otherwise just update the overlay.
 func host_bed_interact(bed: Node) -> void:
     if !_cm.isHost || !is_instance_valid(bed) || !is_instance_valid(_currentScene):
         return
     if !bed.has_method(&"Interact") || !bed.canSleep:
         return
+    _mark_bed_ready(_currentScene.get_path_to(bed), _cm.localPeerId)
+
+
+func _mark_bed_ready(bedPath: String, peerId: int) -> void:
+    if !_active_peer_ids().has(peerId):
+        return
+    _reset_bed_ready_except(bedPath)
+    var readyIds: Array = _bedReady.get(bedPath, [])
+    if !readyIds.has(peerId):
+        readyIds.append(peerId)
+    _bedReady[bedPath] = readyIds
+    var total: int = _expected_peer_count()
+    if readyIds.size() >= total:
+        _bedReady.erase(bedPath)
+        _trigger_sleep(bedPath)
+    else:
+        _broadcast_bed_ready(bedPath)
+
+
+func _trigger_sleep(bedPath: String) -> void:
+    var bed: Node = _scene_node(bedPath)
+    if !is_instance_valid(bed) || !bed.canSleep:
+        return
     var duration: int = int(bed.randomSleep)
-    var bedPath: String = _currentScene.get_path_to(bed)
+    # Clear overlay on every peer before sleep audio kicks in.
+    _cm.set_meta(&"coop_sleep_ready_ids", [])
+    _cm.set_meta(&"coop_sleep_total", _expected_peer_count())
+    sync_bed_ready.rpc(bedPath, [], _expected_peer_count())
     sync_bed_sleep.rpc(bedPath, duration)
     bed.Interact()
 
@@ -357,9 +420,17 @@ func request_bed_interact(bedPath: String) -> void:
     if !is_valid_path(bedPath):
         return
     var bed: Node = _scene_node(bedPath)
-    if !is_instance_valid(bed):
+    if !is_instance_valid(bed) || !bed.has_method(&"Interact") || !bed.canSleep:
         return
-    host_bed_interact(bed)
+    var senderId: int = multiplayer.get_remote_sender_id()
+    _mark_bed_ready(bedPath, senderId)
+
+
+## Host tells every peer the current ready-set so the overlay renders N/M.
+@rpc("authority", "call_remote", "reliable")
+func sync_bed_ready(_bedPath: String, readyIds: Array, total: int) -> void:
+    _cm.set_meta(&"coop_sleep_ready_ids", readyIds.duplicate())
+    _cm.set_meta(&"coop_sleep_total", total)
 
 
 ## Host broadcasts the sleep fire + duration so clients freeze locally and
@@ -750,6 +821,19 @@ func sync_trader_task_complete(traderPath: String, taskName: String) -> void:
         trader.apply_task_complete(taskName)
 
 
+## Full tasksCompleted snapshot for one trader — sent to each peer on join so
+## clients never see a fresh trader board before host's state lands.
+@rpc("authority", "call_remote", "reliable")
+func sync_trader_tasks_snapshot(traderPath: String, tasks: Array) -> void:
+    var trader: Node = _scene_node(traderPath)
+    if !is_instance_valid(trader):
+        return
+    trader.tasksCompleted.clear()
+    for t: Variant in tasks:
+        if t is String:
+            trader.tasksCompleted.append(t)
+
+
 ## Host tells the requester their deferred completion succeeded. Client
 ## finalises the pending bundle from [method interface_patch.Complete] by
 ## destroying hidden inputs + spawning rewards under host authority.
@@ -1016,7 +1100,210 @@ func send_full_state(peerId: int) -> void:
     # see the host's tuning instantly.
     broadcast_settings.rpc_id(peerId, _cm.settings)
 
+    # Push host's authoritative trader task completion state so a new client
+    # can't re-complete a task already finished by the host before join.
+    for traderNode: Node in tree.get_nodes_in_group(&"Trader"):
+        if !is_instance_valid(traderNode) || !(&"tasksCompleted" in traderNode):
+            continue
+        var traderPath: String = scene.get_path_to(traderNode)
+        sync_trader_tasks_snapshot.rpc_id(peerId, traderPath, traderNode.tasksCompleted.duplicate())
+
 
 
 func is_valid_path(nodePath: String) -> bool:
     return !nodePath.is_empty() && !(".." in nodePath) && !nodePath.begins_with("/")
+
+
+## Host launched MissileSpawner prepare — clients spawn hidden missile pool so
+## later broadcast_missile_launch(index) resolves to a real child.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_missile_prepare(spawnerPath: String) -> void:
+    var spawner: Node = _scene_node(spawnerPath)
+    if spawner == null || !spawner.has_method(&"ExecutePrepareMissiles"):
+        return
+    var existing: Array = spawner.get_children().filter(
+        func(n: Node) -> bool: return n.has_method(&"ExecuteLaunch"))
+    if existing.is_empty():
+        spawner.ExecutePrepareMissiles(true)
+
+
+## Host launched one missile from the pool. Client mirrors visibility + launch.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_missile_launch(spawnerPath: String, childIndex: int) -> void:
+    var spawner: Node = _scene_node(spawnerPath)
+    if spawner == null:
+        return
+    if childIndex < 0 || childIndex >= spawner.get_child_count():
+        return
+    var child: Node = spawner.get_child(childIndex)
+    if !is_instance_valid(child) || !child.has_method(&"ExecuteLaunch"):
+        return
+    spawner.launched = true
+    if child is Node3D:
+        (child as Node3D).visible = true
+    child.ExecuteLaunch(true)
+
+
+## Host RocketHelicopter hit terrain — clients spawn explosion at pos and the
+## authoritative node will queue_free itself locally via vehicle_state staleness.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_rocket_explode(pos: Vector3) -> void:
+    var scene: Node = _currentScene
+    if !is_instance_valid(scene):
+        return
+    var packed: PackedScene = load("res://Effects/Explosion.tscn") as PackedScene
+    if packed == null:
+        return
+    var instance: Node = packed.instantiate()
+    get_tree().get_root().add_child(instance)
+    if instance is Node3D:
+        (instance as Node3D).global_position = pos
+    if "size" in instance:
+        instance.size = 20.0
+    if instance.has_method(&"Explode"):
+        instance.Explode()
+
+
+## Host rocket left range — no-op marker; clients let vehicle_state drop the
+## snapshot and the rocket queue_frees itself when broadcasts stop.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_rocket_cleanup(_pos: Vector3) -> void:
+    pass
+
+
+## Host CASA airdrop drop/release edge. Client airdrop runs `set_as_top_level`
+## in casa_patch._ready, so no reparent RPC is needed — client airdrop body
+## lerps independently from its own pose snapshot regardless of the plane.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_airdrop_state(casaPath: String, isDropped: bool, isReleased: bool) -> void:
+    var casa: Node = _scene_node(casaPath)
+    if casa == null:
+        return
+    casa.dropped = isDropped
+    casa.released = isReleased
+    if isDropped:
+        var airdropVar: Variant = casa.get(&"airdrop")
+        if airdropVar != null && airdropVar is Node3D && is_instance_valid(airdropVar):
+            (airdropVar as Node3D).visible = true
+
+
+## Per-peer live instrument audio spawned on remote_player puppet.
+var _remoteInstrumentAudio: Dictionary = {}
+
+
+func _stop_remote_instrument(peerId: int) -> void:
+    if !_remoteInstrumentAudio.has(peerId):
+        return
+    var audio: Node = _remoteInstrumentAudio[peerId]
+    _remoteInstrumentAudio.erase(peerId)
+    if is_instance_valid(audio):
+        audio.queue_free()
+
+
+func _play_remote_instrument(peerId: int, clipPath: String) -> void:
+    _stop_remote_instrument(peerId)
+    if clipPath.is_empty():
+        return
+    var idx: int = _cm.peer_idx(peerId)
+    if idx < 0 || idx >= _cm.remoteNodes.size():
+        return
+    var puppet: Node3D = _cm.remoteNodes[idx]
+    if !is_instance_valid(puppet):
+        return
+    var clip: AudioStream = load(clipPath) as AudioStream
+    if clip == null:
+        return
+    var audio: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
+    audio.stream = clip
+    audio.max_distance = 50.0
+    audio.unit_size = 6.0
+    audio.bus = &"Master"
+    puppet.add_child(audio)
+    audio.play()
+    _remoteInstrumentAudio[peerId] = audio
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_instrument_play(clipPath: String) -> void:
+    if !_cm.isHost:
+        return
+    var sender: int = multiplayer.get_remote_sender_id()
+    broadcast_instrument_play.rpc(sender, clipPath)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_instrument_stop() -> void:
+    if !_cm.isHost:
+        return
+    var sender: int = multiplayer.get_remote_sender_id()
+    broadcast_instrument_stop.rpc(sender)
+
+
+@rpc("authority", "call_remote", "reliable")
+func broadcast_instrument_play(peerId: int, clipPath: String) -> void:
+    if peerId == multiplayer.get_unique_id():
+        return
+    _play_remote_instrument(peerId, clipPath)
+
+
+@rpc("authority", "call_remote", "reliable")
+func broadcast_instrument_stop(peerId: int) -> void:
+    if peerId == multiplayer.get_unique_id():
+        return
+    _stop_remote_instrument(peerId)
+
+
+## Client requests host to toggle a node's Interact (Radio/TV). Host runs super
+## then broadcasts so every peer stays in sync.
+@rpc("any_peer", "call_remote", "reliable")
+func request_interact_toggle(nodePath: String) -> void:
+    if !_cm.isHost:
+        return
+    var node: Node = _scene_node(nodePath)
+    if !is_instance_valid(node) || !node.has_method(&"coop_remote_interact"):
+        return
+    node.coop_remote_interact()
+    broadcast_interact_toggle.rpc(nodePath)
+
+
+## Host tells every peer to run the same toggled Interact locally.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_interact_toggle(nodePath: String) -> void:
+    var node: Node = _scene_node(nodePath)
+    if !is_instance_valid(node) || !node.has_method(&"coop_remote_interact"):
+        return
+    node.coop_remote_interact()
+
+
+## Client asks host to accept its cat-state delta. Host applies + rebroadcasts.
+@rpc("any_peer", "call_remote", "reliable")
+func request_cat_state(catFound: bool, catDead: bool, catHydration: float) -> void:
+    if !_cm.isHost:
+        return
+    if catFound:
+        gameData.catFound = true
+    if catDead:
+        gameData.catDead = true
+    gameData.cat = catHydration
+    broadcast_cat_state.rpc(gameData.catFound, gameData.catDead, gameData.cat)
+
+
+## Host pushes authoritative cat state; monotonic (found/dead latch true).
+@rpc("authority", "call_remote", "reliable")
+func broadcast_cat_state(catFound: bool, catDead: bool, catHydration: float) -> void:
+    if catFound:
+        gameData.catFound = true
+    if catDead:
+        gameData.catDead = true
+    gameData.cat = catHydration
+
+
+## Host CASA airdrop landed — spawn hotspot + play bounce sound locally.
+@rpc("authority", "call_remote", "reliable")
+func broadcast_airdrop_landing(pos: Vector3) -> void:
+    var scene: Node = _currentScene
+    if !is_instance_valid(scene):
+        return
+    var aiRoot: Node = scene.get_node_or_null(^"AI")
+    if aiRoot != null && aiRoot.has_method(&"CreateHotspot"):
+        aiRoot.CreateHotspot(pos, false)
