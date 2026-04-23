@@ -10,18 +10,29 @@ const _AIPatchScript: Script = preload("res://mod/patches/ai_patch.gd")
 const _AIOriginalPath: String = "res://Scripts/AI.gd"
 
 
+# Rotates the AI rig child 180deg around Y so its +Z-facing skeleton matches
+# the sending Controller's -Z forward. Applied before add_child so the weapon
+# grip transforms (authored in this rotated frame) render correctly.
+const PUPPET_TRANSFORM: Transform3D = Transform3D(
+    Vector3(-1, 0, 0),
+    Vector3(0, 1, 0),
+    Vector3(0, 0, -1),
+    Vector3.ZERO
+)
+
 # Fallback grips for weapons no AI scene placed (HK416/MK18/MP7/etc).
+# Basis columns authored against PUPPET_TRANSFORM-rotated skeleton.
 const FALLBACK_RIFLE_GRIP: Transform3D = Transform3D(
-    Vector3(-0.168531, 0.983905, 0.0593909),
-    Vector3(0.17101, -0.0301536, 0.984808),
-    Vector3(0.97075, 0.176127, -0.163175),
-    Vector3(0.103742, 0.101099, 0.0396876)
+    Vector3(-0.168531, 0.17101, 0.97075),
+    Vector3(0.983905, -0.0301536, 0.176127),
+    Vector3(0.0593909, 0.984808, -0.163175),
+    Vector3(0.1, 0.12, 0.03)
 )
 const FALLBACK_PISTOL_GRIP: Transform3D = Transform3D(
-    Vector3(0.174912, 0.982636, -0.0618917),
-    Vector3(0.0847189, 0.047607, 0.995267),
-    Vector3(0.980934, -0.179328, -0.07492),
-    Vector3(0.0715436, 0.101432, 0.0108366)
+    Vector3(0.174912, 0.0847189, 0.980934),
+    Vector3(0.982636, 0.047607, -0.179328),
+    Vector3(-0.0618917, 0.995267, -0.07492),
+    Vector3(0.073, 0.108, 0.01)
 )
 
 
@@ -163,6 +174,7 @@ func _spawn_puppet_rig(body: String) -> bool:
     # Mark as puppet BEFORE add_child so AI._ready / Initialize see the flag
     # and skip their normal setup paths.
     ai.set(&"puppetMode", true)
+    ai.transform = PUPPET_TRANSFORM
 
     # Inert collision body — host AI normally is a CharacterBody3D in mask
     # layers. Our hit detection uses a separate StaticBody3D in COOP_HIT_LAYER
