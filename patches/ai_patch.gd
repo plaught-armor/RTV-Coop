@@ -485,4 +485,3 @@ func Interactor(delta: float) -> void:
         _cm.worldState.sync_door_state.rpc(doorPath, true)
         if _cm.DEBUG:
             print("[ai_patch] AI opened door %s — broadcast" % doorPath)
-

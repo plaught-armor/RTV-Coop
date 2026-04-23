@@ -1187,6 +1187,10 @@ func _on_direct_join_connect() -> void:
         port = int(djPortInput.text.strip_edges())
     _free_dialog(directJoinPanel)
     directJoinPanel = null
+    # Re-surface MP submenu so the player isn't left on a blank screen while
+    # ENet handshakes; a scene change will kill it on successful connect, and
+    # on failure it lets them retry without restarting the client.
+    _show_mp_submenu_if_on_menu()
     _cm.join_game(addr, port, true)
 
 

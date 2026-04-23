@@ -695,8 +695,7 @@ func notify_scene_loaded() -> void:
 
 func inject_manager() -> void:
     var scene: Node = get_tree().current_scene
-    if DEBUG:
-        print("[coop] inject_manager: scene=%s" % (scene.scene_file_path if is_instance_valid(scene) else "<null>"))
+    _log("inject_manager: scene=%s" % (scene.scene_file_path if is_instance_valid(scene) else "<null>"))
     if !is_instance_valid(scene):
         return
 
