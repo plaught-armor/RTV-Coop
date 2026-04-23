@@ -448,6 +448,14 @@ func PlayDamage() -> void:
     _broadcast_voice(_AIStateScript.VoiceType.DAMAGE)
 
 
+# Puppet rigs have stripped Raycasts/Below; animation tracks still fire this
+# via call-method. Skip to avoid freed-instance crash.
+func PlayFootstep() -> void:
+    if puppetMode:
+        return
+    super.PlayFootstep()
+
+
 func _broadcast_voice(voiceType: int) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active() || !_cm.isHost:
         return
