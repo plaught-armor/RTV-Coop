@@ -77,6 +77,10 @@ const _RECHECK_TIMEOUT_SEC: float = 5.0
 
 
 func _ready() -> void:
+    # Editor autoloads via project.godot -> /root/CoopManager.
+    # Exported build autoloads via ModLoader -> /root/RTVModLoader/CoopManager.
+    # RPC uses NodePath across peers, so force /root/CoopManager on both sides.
+    _normalize_autoload_path.call_deferred()
     set_meta(&"is_coop_manager", true)
     if DEBUG:
         force_windowed()
@@ -96,6 +100,14 @@ func _ready() -> void:
     inject_manager.call_deferred()
     _register_ai_pools.call_deferred()
     _log("Initialized (debug: %s)" % str(DEBUG))
+
+
+func _normalize_autoload_path() -> void:
+    var root: Window = get_tree().root
+    if get_parent() != root:
+        get_parent().remove_child(self)
+        root.add_child(self)
+    name = "CoopManager"
 
 
 func _spawn_network_children() -> void:
