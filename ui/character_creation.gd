@@ -231,18 +231,14 @@ func _attach_preview_rifle(skel: Skeleton3D) -> void:
 
 
 ## Loads the AI scene for [param body], strips the AI script + sensors so it's
-## inert, and reparents the visual subtree into the preview viewport. Mirrors
-## remote_player._load_body_rig but trimmed to what the picker needs (no
-## Collision/Flash, no spine pitch override).
-## Lazy-loaded once; gives the picker access to BODY_SCENES without forcing
-## a circular preload at parse time.
-const _RemotePlayerScript: GDScript = preload("res://mod/presentation/remote_player.gd")
+## inert, and reparents the visual subtree into the preview viewport.
+const _PuppetBodies: GDScript = preload("res://mod/network/puppet_bodies.gd")
 
 
 func _instantiate_body_rig(body: String) -> Node3D:
-    if !_RemotePlayerScript.BODY_SCENES.has(body):
+    if !_PuppetBodies.BODY_SCENES.has(body):
         return null
-    var path: String = _RemotePlayerScript.BODY_SCENES[body]
+    var path: String = _PuppetBodies.BODY_SCENES[body]
     if path.is_empty():
         return null
     var packed: PackedScene = load(path) as PackedScene

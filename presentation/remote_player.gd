@@ -94,13 +94,9 @@ const PATH_MUZZLE: NodePath = ^"Muzzle"
 const PATH_HITBODY: NodePath = ^"HitBody"
 const PATH_LOCAL_CONTROLLER: NodePath = ^"Core/Controller"
 
+const _PuppetBodies: GDScript = preload("res://mod/network/puppet_bodies.gd")
 # Per-body source: instantiating per-peer avoids bone-weight clamping from merged super_rig.
-const BODY_SCENES: Dictionary[String, String] = {
-    "Bandit": "res://AI/Bandit/AI_Bandit.tscn",
-    "Guard": "res://AI/Guard/AI_Guard.tscn",
-    "Military": "res://AI/Military/AI_Military.tscn",
-    "Punisher": "res://AI/Punisher/AI_Punisher.tscn",
-}
+const BODY_SCENES: Dictionary[String, String] = _PuppetBodies.BODY_SCENES
 
 # Collision + Flash kept for hit reg + muzzle flash.
 const SCENE_TRASH: Array[NodePath] = [^"Detector", ^"Raycasts", ^"Poles", ^"Gizmo", ^"Agent"]
