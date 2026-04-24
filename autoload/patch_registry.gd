@@ -57,7 +57,7 @@ const PATCHES: Array[String] = [
 
 ## Loads, reloads, and hot-swaps every patched script; call once at mod boot.
 func register_all() -> int:
-    var count: int = PATCHES.size() / 2
+    var count: int = PATCHES.size() >> 1
     var i: int = 0
     while i < PATCHES.size():
         var origPath: String = PATCHES[i]
