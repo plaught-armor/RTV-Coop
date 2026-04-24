@@ -5,24 +5,27 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 ## Features
 
 - **Co-op multiplayer** with 20Hz position sync and interpolation
+- **Remote player rigs** -- full AI body model (Bandit/Guard/Military/Punisher) with character-picker, synced pose and weapon grip
 - **Steam integration** -- lobby browser, friend invites with avatars, P2P NAT traversal
 - **Direct connect** -- host via IP for non-Steam or LAN play
 - **World state sync** -- doors, switches, containers, time/weather synced between all players
 - **AI multi-player awareness** -- enemies detect, target, and fight all players (host-authoritative, 10Hz replication)
-- **Combat sync** -- weapon fire audio, muzzle flash, bullet impact decals, AI damage routing, grenade throws, explosion damage, mine detonation
+- **Combat sync** -- weapon fire audio, muzzle flash, bullet impact decals, AI damage routing, grenade throws, knife attacks, explosion damage, mine detonation
 - **Death sync** -- remote players removed on death, AI stops targeting dead players
 - **Trader sync** -- host-authoritative trading with ACK flow (client items restored on reject)
-- **World events** -- helicopters, BTRs, airdrops, crash sites, police patrols synced from host
+- **Quest sync** -- trader tasks and cat-rescue state replicated, late-joiners see host's progression
+- **World events** -- helicopters, BTRs, airdrops (CASA), crash sites, police patrols, missile launches synced from host
 - **Furniture sync** -- placement and pickup replicated between all players
 - **Campfire sync** -- fire ignite/extinguish replicated between all players
+- **Radio/TV/instrument sync** -- toggle state replicated, instrument audio plays spatially from remote player rig
+- **Multi-peer sleep** -- all peers at same bed must be ready; HUD shows N/M ready count
 - **Deterministic layouts** -- room layouts seeded from node path, consistent across all peers
 - **Deterministic fishing** -- fish pools seeded for identical spawns, activate near any player
-- **Sleep blocked in co-op** -- prevents time desync from bed usage
 - **Per-world saves** -- each hosted world has its own save directory; player characters persist per-world
 - **World picker** -- choose to create a new world or continue an existing one when hosting
 - **Independent map transitions** -- players can explore different maps simultaneously
 - **Headless AI** -- host runs AI for remote maps via SubViewport, enemies detect all players everywhere
-- **Remote player audio** -- footsteps, jumps, landings, gunshots, and bullet impacts play spatially
+- **Remote player audio** -- footsteps, jumps, landings, gunshots, bullet impacts, and instruments play spatially
 - **Host-authoritative pickups** -- prevents item duplication
 - **Non-destructive** -- installs as a `.vmz` mod archive, no game files modified
 - **Ping overlay** -- HUD showing connected players, avatars, and round-trip times
@@ -125,9 +128,9 @@ Both log files live in the same `logs/` directory. **Include both when reporting
 
 ## Known Limitations
 
-- **Ghost capsule model** -- remote players shown as translucent capsules (full model planned)
 - **No voice chat** -- use Steam/Discord voice as a workaround
 - **Inventory is independent** -- each player manages their own loot; no shared inventory view
+- **Reload animation on remote rig** -- AI skeletons have no reload clips; other players don't see your reload motion (firing/walking/crouching do animate)
 - **Knife swing animations not visible** -- melee audio and hit decals sync, but other players don't see the swing animation
 - **Random events (helicopters, etc.)** -- visual events are not replayed for players who join mid-session (crash sites with loot are replayed)
 
@@ -135,23 +138,26 @@ Both log files live in the same `logs/` directory. **Include both when reporting
 
 ## Roadmap
 
-- [x] Player sync and ghost visuals
+- [x] Player sync and remote rig visuals
 - [x] Steam lobbies, friend invites, P2P
 - [x] Direct connect (IP)
 - [x] World state (doors, switches, containers, time/weather)
 - [x] AI awareness and replication
 - [x] Combat (weapons, grenades, explosions, mines, knives)
 - [x] Death sync
-- [x] Traders
-- [x] World events (helicopters, BTR, airdrops, crash sites)
+- [x] Traders + quest sync
+- [x] World events (helicopters, BTR, CASA airdrop, crash sites, police, missiles)
 - [x] Furniture placement
 - [x] Campfires
+- [x] Radio/TV/instrument sync
+- [x] Cat rescue quest sync
+- [x] Multi-peer bed sleep ready-gate
 - [x] Fishing pools
 - [x] Room layout determinism
 - [x] Per-world saves
 - [x] Map transitions
 - [x] Proton/Linux support
-- [ ] Third-person player model
+- [ ] Reload animations on remote rig
 - [ ] Voice chat
 - [ ] Mod compatibility improvements
 
@@ -171,6 +177,9 @@ This mod patches game scripts via `take_over_path()`. Other mods patching the sa
 | `Loader.gd` | Medium |
 | `Settings.gd` | Medium |
 | `BTR.gd` | Low |
+| `CASA.gd` | Low |
+| `CatFeeder.gd` | Low |
+| `CatRescue.gd` | Low |
 | `Character.gd` | Low |
 | `DecorMode.gd` | Low |
 | `EventSystem.gd` | Low |
@@ -179,12 +188,19 @@ This mod patches game scripts via `take_over_path()`. Other mods patching the sa
 | `Furniture.gd` | Low |
 | `GrenadeRig.gd` | Low |
 | `Helicopter.gd` | Low |
+| `Instrument.gd` | Low |
 | `KnifeRig.gd` | Low |
 | `Layouts.gd` | Low |
 | `LootSimulation.gd` | Low |
 | `Mine.gd` | Low |
+| `MissileSpawner.gd` | Low |
 | `Pickup.gd` | Low |
+| `Police.gd` | Low |
+| `Radio.gd` | Low |
+| `RocketGrad.gd` | Low |
+| `RocketHelicopter.gd` | Low |
 | `Simulation.gd` | Low |
+| `Television.gd` | Low |
 | `Trader.gd` | Low |
 | `Transition.gd` | Low |
 
