@@ -50,6 +50,7 @@ var saveMirror: RefCounted = preload("res://mod/autoload/save_mirror.gd").new()
 var gameState: RefCounted = preload("res://mod/autoload/coop_game_state.gd").new()
 var _interactRouter: RefCounted = preload("res://mod/autoload/coop_interact_router.gd").new()
 var layoutsHook: RefCounted = preload("res://mod/network/layouts_hook.gd").new()
+var simulationHook: RefCounted = preload("res://mod/network/simulation_hook.gd").new()
 var MenuCustomizerScript: Script = preload("res://mod/autoload/coop_menu_customizer.gd")
 var menuCustomizer: Node = null
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
@@ -90,6 +91,7 @@ func _ready() -> void:
     saveMirror.init_manager(self)
     gameState.init_manager(self)
     layoutsHook.init_manager.call_deferred(self)
+    simulationHook.init_manager(self)
 
     _spawn_network_children()
     _spawn_coop_ui()
@@ -175,6 +177,10 @@ func _connect_multiplayer_signals() -> void:
     multiplayer.connected_to_server.connect(on_connected_to_server)
     multiplayer.connection_failed.connect(on_connection_failed)
     multiplayer.server_disconnected.connect(on_server_disconnected)
+
+
+func _process(delta: float) -> void:
+    simulationHook.apply(delta)
 
 
 func _physics_process(_delta: float) -> void:
