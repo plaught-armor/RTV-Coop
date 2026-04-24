@@ -1,16 +1,7 @@
 ## Patch for GrenadeRig.gd — broadcasts throw params so remotes spawn matching grenades.
 extends "res://Scripts/GrenadeRig.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
-
-var _cm: Node
 
 
-
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
 
 
 func ThrowHighExecute() -> void:
@@ -24,8 +15,8 @@ func ThrowHighExecute() -> void:
 
     super.ThrowHighExecute()
 
-    if _ensure_cm() && _cm.is_session_active() && !grenadeScene.is_empty():
-        _cm.playerState.broadcast_grenade_throw(
+    if CoopManager.is_session_active() && !grenadeScene.is_empty():
+        CoopManager.playerState.broadcast_grenade_throw(
             grenadeScene, handleScene, throwPos, throwRotY,
             throwDir, throwBasisX, throwForce,
         )
@@ -42,8 +33,8 @@ func ThrowLowExecute() -> void:
 
     super.ThrowLowExecute()
 
-    if _ensure_cm() && _cm.is_session_active() && !grenadeScene.is_empty():
-        _cm.playerState.broadcast_grenade_throw(
+    if CoopManager.is_session_active() && !grenadeScene.is_empty():
+        CoopManager.playerState.broadcast_grenade_throw(
             grenadeScene, handleScene, throwPos, throwRotY,
             throwDir, throwBasisX, throwForce,
         )

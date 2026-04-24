@@ -1,16 +1,14 @@
 ## Patch for EventSystem.gd — host-auth event rolls; clients receive spawns via world_state RPC.
 extends "res://Scripts/EventSystem.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 
 const PATH_WELL_BOTTOM: NodePath = ^"Bottom"
 
 
-var _cm: Node
 
 
 func _ready() -> void:
-    if _ensure_cm() && _cm.is_session_active() && !_cm.isHost:
+    if CoopManager.is_session_active() && !CoopManager.isHost:
         paths = $Paths
         crashes = $Crashes
         await get_tree().create_timer(5.0, false).timeout
@@ -22,58 +20,51 @@ func _ready() -> void:
     super._ready()
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func FighterJet() -> void:
     super.FighterJet()
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("FighterJet", PackedInt32Array())
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("FighterJet", PackedInt32Array())
 
 
 func Helicopter() -> void:
     super.Helicopter()
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("Helicopter", PackedInt32Array())
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("Helicopter", PackedInt32Array())
 
 
 func Airdrop() -> void:
     super.Airdrop()
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("Airdrop", PackedInt32Array())
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("Airdrop", PackedInt32Array())
 
 
 func Transmission() -> void:
     super.Transmission()
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("Transmission", PackedInt32Array())
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("Transmission", PackedInt32Array())
 
 
 func Police() -> void:
     var pathIndex: int = randi_range(0, paths.get_child_count() - 1)
     var pathDirection: int = randi_range(1, 2)
     _spawn_pathed_vehicle(police, pathIndex, pathDirection)
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("Police", PackedInt32Array([pathIndex, pathDirection]))
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("Police", PackedInt32Array([pathIndex, pathDirection]))
 
 
 func BTR() -> void:
     var pathIndex: int = randi_range(0, paths.get_child_count() - 1)
     var pathDirection: int = randi_range(1, 2)
     _spawn_pathed_vehicle(btr, pathIndex, pathDirection)
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("BTR", PackedInt32Array([pathIndex, pathDirection]))
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("BTR", PackedInt32Array([pathIndex, pathDirection]))
 
 
 func CrashSite() -> void:
     var crashIndex: int = randi_range(0, crashes.get_child_count() - 1)
     _spawn_crash(crashIndex)
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("CrashSite", PackedInt32Array([crashIndex]))
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("CrashSite", PackedInt32Array([crashIndex]))
 
 
 func Cat() -> void:
@@ -84,8 +75,8 @@ func Cat() -> void:
         return
     var wellIndex: int = randi_range(0, wells.size() - 1)
     _spawn_cat(wellIndex)
-    if _cm != null && _cm.is_session_active() && _cm.isHost:
-        _cm.worldState.broadcast_event.rpc("Cat", PackedInt32Array([wellIndex]))
+    if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.worldState.broadcast_event.rpc("Cat", PackedInt32Array([wellIndex]))
 
 
 # Trader events: host via ActivateTraderEvent super; clients receive via world_state trader sync RPCs.

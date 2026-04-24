@@ -1,26 +1,17 @@
 ## Patch for Explosion.gd — co-op splash damage (host-authoritative, remote player detection).
 extends "res://Scripts/Explosion.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node
 const COOP_HIT_LAYER: int = 1 << 19
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func Explode() -> void:
-    if _ensure_cm() && _cm.is_session_active():
+    if CoopManager.is_session_active():
         area.collision_mask |= COOP_HIT_LAYER
     super.Explode()
 
 
 func CheckOverlap() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.CheckOverlap()
         return
 
@@ -36,7 +27,7 @@ func CheckOverlap() -> void:
 
 
 func CheckLOS(target) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.CheckLOS(target)
         return
 
@@ -49,7 +40,7 @@ func CheckLOS(target) -> void:
     var collider: Node = LOS.get_collider()
 
     # Host-only: client-side AI damage would be overwritten by next AIState snapshot (desync).
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
 
     if collider.is_in_group(&"AI"):
@@ -59,7 +50,7 @@ func CheckLOS(target) -> void:
 
 
 func _check_los_remote(target: Node3D) -> void:
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
 
     var eyePos: Vector3 = target.global_position + Vector3(0, 1.6, 0)
@@ -71,10 +62,10 @@ func _check_los_remote(target: Node3D) -> void:
 
     var collider: Node = LOS.get_collider()
     if collider.is_in_group(&"CoopRemote"):
-        var remoteRoot: Node3D = _cm.find_remote_root(collider)
+        var remoteRoot: Node3D = CoopManager.find_remote_root(collider)
         if remoteRoot != null:
             var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
             if peerId > 0:
-                _cm.aiState.send_explosion_damage_to_peer(peerId)
+                CoopManager.aiState.send_explosion_damage_to_peer(peerId)
 
 

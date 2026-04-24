@@ -1,20 +1,11 @@
 ## Patch for Controller.gd — adds network broadcast hooks and flattens Movement/input helpers.
 extends "res://Scripts/Controller.gd"
 
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node
 
 var audioPool: Array[AudioStreamPlayer] = []
 const AUDIO_POOL_INITIAL: int = 8
 var wasFiring: bool = false
-
-
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
 
 
 func _ready() -> void:
@@ -57,23 +48,21 @@ func play_pooled(audioEvent: AudioEvent) -> void:
     player.play()
 
 func _input(event: InputEvent) -> void:
-    if !_ensure_cm():
-        return
-    if _cm.gd.freeze || _cm.gd.isCaching || _cm.gd.vehicle:
+    if CoopManager.gd.freeze || CoopManager.gd.isCaching || CoopManager.gd.vehicle:
         return
     if !(event is InputEventMouseMotion):
         return
 
     var sens: float
-    if _cm.gd.isAiming && _cm.gd.isScoped:
-        sens = _cm.gd.scopeSensitivity
-    elif _cm.gd.isAiming:
-        sens = _cm.gd.aimSensitivity
+    if CoopManager.gd.isAiming && CoopManager.gd.isScoped:
+        sens = CoopManager.gd.scopeSensitivity
+    elif CoopManager.gd.isAiming:
+        sens = CoopManager.gd.aimSensitivity
     else:
-        sens = _cm.gd.lookSensitivity
+        sens = CoopManager.gd.lookSensitivity
 
     var factor: float = clampf(sens, 0.1, 2.0) / 10.0
-    var ySign: float = 1.0 if _cm.gd.mouseMode == 2 else -1.0
+    var ySign: float = 1.0 if CoopManager.gd.mouseMode == 2 else -1.0
 
     rotate_y(deg_to_rad(-event.relative.x * factor))
     head.rotate_x(deg_to_rad(ySign * event.relative.y * factor))
@@ -82,28 +71,25 @@ func _input(event: InputEvent) -> void:
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         return
 
-    _cm.playerState.broadcast_position(
+    CoopManager.playerState.broadcast_position(
         global_transform.origin,
         Vector3(rotation.y, head.rotation.x, 0.0),
-        _cm.playerState.encode_flags(_cm.gd),
+        CoopManager.playerState.encode_flags(CoopManager.gd),
     )
 
-    _cm.playerState.broadcast_vitals()
+    CoopManager.playerState.broadcast_vitals()
 
-    if _cm.gd.isFiring && !wasFiring:
+    if CoopManager.gd.isFiring && !wasFiring:
         _broadcast_fire_event()
-    wasFiring = _cm.gd.isFiring
+    wasFiring = CoopManager.gd.isFiring
 
 
 func Inertia(delta: float) -> void:
-    if !_ensure_cm():
-        super.Inertia(delta)
-        return
-    if _cm.gd.isWalking || _cm.gd.isRunning:
-        var backwardPenalty: float = 0.7 if _cm.gd.isRunning else 0.8
+    if CoopManager.gd.isWalking || CoopManager.gd.isRunning:
+        var backwardPenalty: float = 0.7 if CoopManager.gd.isRunning else 0.8
 
         if inputDirection.y > 0.5:
             inertia = lerpf(inertia, 0.6, delta * 2.0)
@@ -115,33 +101,28 @@ func Inertia(delta: float) -> void:
         inertia = lerpf(inertia, 1.0, delta * 2.0)
 
 func SurfaceDetection(delta: float) -> void:
-    if !_ensure_cm():
-        super.SurfaceDetection(delta)
-        return
     scanTimer += delta
     if scanTimer <= scanCycle:
         return
     scanTimer = 0.0
 
     if below.is_colliding():
-        _cm.gd.surface = "Generic"
+        CoopManager.gd.surface = "Generic"
         var collider: Object = below.get_collider()
         if collider is Surface:
-            _cm.gd.surface = collider.surface
+            CoopManager.gd.surface = collider.surface
 
-    _cm.gd.leanLBlocked = left.is_colliding()
-    _cm.gd.leanRBlocked = right.is_colliding()
+    CoopManager.gd.leanLBlocked = left.is_colliding()
+    CoopManager.gd.leanRBlocked = right.is_colliding()
 
 func ResolveFootstep(isLanding: bool) -> AudioEvent:
-    if !_ensure_cm():
-        return audioLibrary.footstepGenericLand if isLanding else audioLibrary.footstepGeneric
-    match _cm.gd.surface:
+    match CoopManager.gd.surface:
         &"Grass":
-            if _cm.gd.season == 2:
+            if CoopManager.gd.season == 2:
                 return audioLibrary.footstepSnowHardLand if isLanding else audioLibrary.footstepSnowHard
             return audioLibrary.footstepGrassLand if isLanding else audioLibrary.footstepGrass
         &"Dirt":
-            if _cm.gd.season == 2:
+            if CoopManager.gd.season == 2:
                 return audioLibrary.footstepSnowHardLand if isLanding else audioLibrary.footstepSnowHard
             return audioLibrary.footstepDirtLand if isLanding else audioLibrary.footstepDirt
         &"Asphalt":
@@ -160,28 +141,22 @@ func ResolveFootstep(isLanding: bool) -> AudioEvent:
 
 func play_footstep_and_broadcast(isLanding: bool) -> void:
     var audio: AudioEvent
-    if _cm.gd.isWater:
+    if CoopManager.gd.isWater:
         audio = audioLibrary.footstepWaterLand if isLanding else audioLibrary.footstepWater
     else:
         audio = ResolveFootstep(isLanding)
     play_pooled(audio)
-    if _cm.is_session_active():
-        _cm.playerState.broadcast_footstep(audio.resource_path)
+    if CoopManager.is_session_active():
+        CoopManager.playerState.broadcast_footstep(audio.resource_path)
 
 
 func PlayFootstep() -> void:
-    if !_ensure_cm():
-        super.PlayFootstep()
-        return
     if character.heavyGear && randi_range(1, 2) == 1:
         PlayMovementGear()
     play_footstep_and_broadcast(false)
 
 
 func PlayFootstepJump() -> void:
-    if !_ensure_cm():
-        super.PlayFootstepJump()
-        return
     PlayMovementCloth()
     if character.heavyGear:
         PlayMovementGear()
@@ -189,9 +164,6 @@ func PlayFootstepJump() -> void:
 
 
 func PlayFootstepLand() -> void:
-    if !_ensure_cm():
-        super.PlayFootstepLand()
-        return
     PlayMovementCloth()
     if character.heavyGear:
         PlayMovementGear()
@@ -226,7 +198,7 @@ func _broadcast_fire_event() -> void:
         return
 
     var hit: Dictionary = _trace_bullet_impact()
-    _cm.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor, hit.point, hit.normal, hit.surface)
+    CoopManager.playerState.broadcast_fire_event(fireAudio, tailAudio, !hasSuppressor, hit.point, hit.normal, hit.surface)
 
 
 func _resolve_fire_audio(weaponData: Resource, hasSuppressor: bool) -> Dictionary:
@@ -234,14 +206,14 @@ func _resolve_fire_audio(weaponData: Resource, hasSuppressor: bool) -> Dictionar
     var tailAudio: String = ""
     var fireRes: Resource = null
     var tailRes: Resource = null
-    var indoorVal: Variant = _cm.gd.get(&"indoor")
+    var indoorVal: Variant = CoopManager.gd.get(&"indoor")
     var indoor: bool = indoorVal == true
 
     if hasSuppressor:
         fireRes = weaponData.get(&"fireSuppressed")
         tailRes = weaponData.get(&"tailIndoorSuppressed") if indoor else weaponData.get(&"tailOutdoorSuppressed")
     else:
-        var modeVal: Variant = _cm.gd.get(&"firemode")
+        var modeVal: Variant = CoopManager.gd.get(&"firemode")
         var mode: int = int(modeVal) if modeVal != null else 1
         fireRes = weaponData.get(&"fireAuto") if mode == 2 else weaponData.get(&"fireSemi")
         tailRes = weaponData.get(&"tailIndoor") if indoor else weaponData.get(&"tailOutdoor")

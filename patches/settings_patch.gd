@@ -1,8 +1,6 @@
 ## Patch for Settings.gd — regroups pause UI into vertical tabs and adds a Multiplayer tab.
 extends "res://Scripts/Settings.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node
 # var (not const): Godot #61274 makes const Array[Array] inner arrays shared mutable refs.
 var TAB_GROUPS: Array[Array] = [
     ["Multiplayer", []],
@@ -14,13 +12,6 @@ var TAB_GROUPS: Array[Array] = [
     ["Effects", ["Shadows", "Water", "AO", "Color"]],
 ]
 
-
-
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
 
 
 const _DEFAULT_PORT_FALLBACK: int = 9050
@@ -41,7 +32,7 @@ const PATH_ROOT_MENU: NodePath = ^"/root/Menu"
 
 
 func _default_port() -> int:
-    return _cm.DEFAULT_PORT if _ensure_cm() else _DEFAULT_PORT_FALLBACK
+    return CoopManager.DEFAULT_PORT if true else _DEFAULT_PORT_FALLBACK
 
 
 # Null-guards the /root/Map/World and /root/Menu lookups base does without fallback.
@@ -96,9 +87,9 @@ func _on_settings_visibility_changed() -> void:
 
 
 func _paint_friends_from_cache() -> void:
-    if !is_instance_valid(_cm) || !is_instance_valid(_cm.steamBridge):
+    if !is_instance_valid(CoopManager) || !is_instance_valid(CoopManager.steamBridge):
         return
-    var raw: Variant = _cm.steamBridge.friendsCache
+    var raw: Variant = CoopManager.steamBridge.friendsCache
     var cached: Array = raw as Array
     if cached.is_empty():
         return
@@ -544,18 +535,18 @@ func _process(_delta: float) -> void:
 
 
 func _refresh_mp_status() -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
     var statusLabel: Label = find_child("MPStatus", true, false) as Label
     var hostBtn: Button = find_child("MPHostBtn", true, false) as Button
     var hostIpBtn: Button = find_child("MPHostIpBtn", true, false) as Button
     var disconnectBtn: Button = find_child("MPDisconnectBtn", true, false) as Button
     var ipInfo: VBoxContainer = find_child("MPIpInfo", true, false) as VBoxContainer
-    var active: bool = _cm.is_session_active()
+    var active: bool = CoopManager.is_session_active()
     if statusLabel != null:
         if active:
-            var role: String = "Host" if _cm.isHost else "Client"
-            var remoteCount: int = maxi(0, _cm.active_peer_count() - 1)
+            var role: String = "Host" if CoopManager.isHost else "Client"
+            var remoteCount: int = maxi(0, CoopManager.active_peer_count() - 1)
             statusLabel.text = "%s — %d peer(s)" % [role, remoteCount]
             statusLabel.modulate = Color(0.5, 0.9, 0.5, 0.9)
         else:
@@ -574,7 +565,7 @@ func _refresh_mp_status() -> void:
 func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
     if ipInfo == null:
         return
-    if !active || !_cm.isHost || _cm._pendingHostUseSteam:
+    if !active || !CoopManager.isHost || CoopManager._pendingHostUseSteam:
         ipInfo.hide()
         return
     if ipInfo.visible && ipInfo.get_child_count() > 0:
@@ -583,7 +574,7 @@ func _refresh_ip_info(ipInfo: VBoxContainer, active: bool) -> void:
     for child: Node in ipInfo.get_children():
         child.queue_free()
     var port: int = _default_port()
-    for addr: String in _cm.get_sharable_addresses():
+    for addr: String in CoopManager.get_sharable_addresses():
         var row: HBoxContainer = HBoxContainer.new()
         ipInfo.add_child(row)
         var text: String = "%s:%d" % [addr, port]
@@ -613,12 +604,12 @@ func _refresh_players_list(active: bool) -> void:
         hint.add_theme_font_size_override("font_size", 12)
         list.add_child(hint)
         return
-    list.add_child(_make_player_row(_cm.localPeerId, _cm.get_local_name(), true))
-    var localPid: int = _cm.localPeerId
-    for peerId: int in _cm.peerGodotIds:
+    list.add_child(_make_player_row(CoopManager.localPeerId, CoopManager.get_local_name(), true))
+    var localPid: int = CoopManager.localPeerId
+    for peerId: int in CoopManager.peerGodotIds:
         if peerId == -1 || peerId == localPid:
             continue
-        list.add_child(_make_player_row(peerId, _cm.get_peer_name(peerId), false))
+        list.add_child(_make_player_row(peerId, CoopManager.get_peer_name(peerId), false))
 
 
 func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxContainer:
@@ -630,19 +621,19 @@ func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxCo
     avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
     avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
     var steamId: String = ""
-    var peerSlotIdx: int = _cm.peer_idx(peerId)
+    var peerSlotIdx: int = CoopManager.peer_idx(peerId)
     if peerSlotIdx >= 0:
-        steamId = _cm.peerSteamIDs[peerSlotIdx]
+        steamId = CoopManager.peerSteamIDs[peerSlotIdx]
     if isLocal:
-        steamId = _cm.steamBridge.localSteamID if _cm.steamBridge.is_ready() else ""
+        steamId = CoopManager.steamBridge.localSteamID if CoopManager.steamBridge.is_ready() else ""
     if !steamId.is_empty():
         var cached: Texture2D = null
-        if _cm.avatarCache.has(steamId):
-            cached = _cm.avatarCache[steamId]
+        if CoopManager.avatarCache.has(steamId):
+            cached = CoopManager.avatarCache[steamId]
         if cached != null:
             avatar.texture = cached
         else:
-            _cm.fetch_avatar(steamId)
+            CoopManager.fetch_avatar(steamId)
     row.add_child(avatar)
 
     var nameLabel: Label = Label.new()
@@ -651,7 +642,7 @@ func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxCo
     var suffix: String = " (You)" if isLocal else ""
     if peerId == 1 && !isLocal:
         suffix += " — Host"
-    elif isLocal && _cm.isHost:
+    elif isLocal && CoopManager.isHost:
         suffix += " — Host"
     nameLabel.text = "%s%s" % [displayName, suffix]
     row.add_child(nameLabel)
@@ -660,11 +651,11 @@ func _make_player_row(peerId: int, displayName: String, isLocal: bool) -> HBoxCo
 
 
 func _maybe_refresh_friends() -> void:
-    if !is_instance_valid(_cm) || !is_instance_valid(_cm.steamBridge):
+    if !is_instance_valid(CoopManager) || !is_instance_valid(CoopManager.steamBridge):
         return
     var hint: Label = find_child("MPFriendsHint", true, false) as Label
     var friendList: VBoxContainer = find_child("MPFriendsList", true, false) as VBoxContainer
-    var canInvite: bool = _cm.is_session_active() && _cm.isHost && _cm.steamBridge.is_ready()
+    var canInvite: bool = CoopManager.is_session_active() && CoopManager.isHost && CoopManager.steamBridge.is_ready()
     if hint != null:
         hint.visible = !canInvite
     if friendList != null && !canInvite:
@@ -677,7 +668,7 @@ func _maybe_refresh_friends() -> void:
     if now - _lastFriendRefreshMs < FRIEND_REFRESH_INTERVAL_MS:
         return
     _lastFriendRefreshMs = now
-    _cm.steamBridge.get_friends(_on_friends_received)
+    CoopManager.steamBridge.get_friends(_on_friends_received)
 
 
 func _on_friends_received(response: Dictionary) -> void:
@@ -748,12 +739,12 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
 
     var steamID: String = friend.get(&"steam_id", "")
     var cached: Texture2D = null
-    if _cm.avatarCache.has(steamID):
-        cached = _cm.avatarCache[steamID]
+    if CoopManager.avatarCache.has(steamID):
+        cached = CoopManager.avatarCache[steamID]
     if cached != null:
         avatar.texture = cached
     elif !steamID.is_empty():
-        _cm.fetch_avatar(steamID)
+        CoopManager.fetch_avatar(steamID)
         _avatarSlots[steamID] = avatar
 
     inviteBtn.pressed.connect(_on_invite_friend.bind(steamID, friendName))
@@ -761,13 +752,13 @@ func _make_friend_row(friend: Dictionary) -> HBoxContainer:
 
 
 func _patch_pending_avatars() -> void:
-    if _avatarSlots.is_empty() || !is_instance_valid(_cm):
+    if _avatarSlots.is_empty() || !is_instance_valid(CoopManager):
         return
     var resolved: Array[String] = []
     for steamID: String in _avatarSlots:
         var tex: Texture2D = null
-        if _cm.avatarCache.has(steamID):
-            tex = _cm.avatarCache[steamID]
+        if CoopManager.avatarCache.has(steamID):
+            tex = CoopManager.avatarCache[steamID]
         if tex == null:
             continue
         var slot: TextureRect = _avatarSlots[steamID]
@@ -779,18 +770,18 @@ func _patch_pending_avatars() -> void:
 
 
 func _on_invite_friend(steamID: String, friendName: String) -> void:
-    if !is_instance_valid(_cm) || steamID.is_empty():
+    if !is_instance_valid(CoopManager) || steamID.is_empty():
         return
-    _cm.steamBridge.invite_friend(steamID, _on_invite_sent.bind(friendName))
+    CoopManager.steamBridge.invite_friend(steamID, _on_invite_sent.bind(friendName))
 
 
 func _on_invite_sent(response: Dictionary, friendName: String) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
     if response.get(&"ok", false):
-        _cm._log("Invite sent to %s" % friendName)
+        CoopManager._log("Invite sent to %s" % friendName)
     else:
-        _cm._log("Invite failed: %s" % response.get(&"error", "unknown"))
+        CoopManager._log("Invite failed: %s" % response.get(&"error", "unknown"))
 
 
 ## Override Menu/Quit/Return handlers since vanilla targets the hidden flat BoxContainer.
@@ -846,19 +837,19 @@ func _show_coop_tabs() -> void:
 
 
 func _on_mp_host() -> void:
-    if !is_instance_valid(_cm) || _cm.is_session_active():
+    if !is_instance_valid(CoopManager) || CoopManager.is_session_active():
         return
-    _cm.host_game()
+    CoopManager.host_game()
 
 
 func _on_mp_host_ip() -> void:
-    if !is_instance_valid(_cm) || _cm.is_session_active():
+    if !is_instance_valid(CoopManager) || CoopManager.is_session_active():
         return
-    _cm.host_game(_default_port(), false)
+    CoopManager.host_game(_default_port(), false)
 
 
 func _on_mp_direct_join() -> void:
-    if !is_instance_valid(_cm) || _cm.is_session_active():
+    if !is_instance_valid(CoopManager) || CoopManager.is_session_active():
         return
     var addrInput: LineEdit = find_child("MPAddrInput", true, false) as LineEdit
     var portInput: LineEdit = find_child("MPPortInput", true, false) as LineEdit
@@ -868,13 +859,13 @@ func _on_mp_direct_join() -> void:
     var port: int = _default_port()
     if portInput != null && !portInput.text.strip_edges().is_empty():
         port = int(portInput.text.strip_edges())
-    _cm.join_game(addr, port, true)
+    CoopManager.join_game(addr, port, true)
 
 
 func _on_mp_disconnect() -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         return
-    _cm.disconnect_session()
+    CoopManager.disconnect_session()
     var ipInfo: VBoxContainer = find_child("MPIpInfo", true, false) as VBoxContainer
     if ipInfo != null:
         ipInfo.hide()
@@ -883,9 +874,9 @@ func _on_mp_disconnect() -> void:
 
 
 func _on_mp_logs() -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
-    _cm.logCollector.collect()
+    CoopManager.logCollector.collect()
 
 
 func _on_copy_ip_text(copyText: String) -> void:

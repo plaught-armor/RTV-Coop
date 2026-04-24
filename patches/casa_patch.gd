@@ -1,9 +1,7 @@
 ## Patch for CASA.gd — host authoritative airdrop plane; clients lerp pose +
 ## run parachute cosmetic locally.
 extends "res://Scripts/CASA.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node = null
 var _relPath: String = ""
 var _lastBroadcastDropped: bool = false
 var _lastBroadcastReleased: bool = false
@@ -12,16 +10,9 @@ const LERP_SPEED: float = 8.0
 const AIRDROP_SEND_EVERY_N_TICKS: int = 12
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func _ready() -> void:
     super._ready()
-    if _ensure_cm() && _cm.is_session_active() && !_cm.isHost:
+    if CoopManager.is_session_active() && !CoopManager.isHost:
         if is_instance_valid(airdrop):
             airdrop.freeze = true
             airdrop.sleeping = true
@@ -31,9 +22,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
+    if !CoopManager.is_session_active() || CoopManager.isHost:
         super._physics_process(delta)
-        if _cm != null && _cm.is_session_active() && _cm.isHost:
+        if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost:
             _broadcast_drop_edges()
             _broadcast_airdrop_pose()
         return
@@ -49,7 +40,7 @@ func _broadcast_drop_edges() -> void:
     if dropped != _lastBroadcastDropped || released != _lastBroadcastReleased:
         _lastBroadcastDropped = dropped
         _lastBroadcastReleased = released
-        _cm.worldState.broadcast_airdrop_state.rpc(_get_rel_path(), dropped, released)
+        CoopManager.worldState.broadcast_airdrop_state.rpc(_get_rel_path(), dropped, released)
 
 
 ## Host-only: 10Hz push of airdrop RigidBody3D world transform under the key
@@ -64,7 +55,7 @@ func _broadcast_airdrop_pose() -> void:
         return
     var a: Node3D = airdrop as Node3D
     var quat: Quaternion = a.global_transform.basis.get_rotation_quaternion()
-    _cm.vehicleState.sync_vehicle_snapshot.rpc("airdrop:" + relPath, a.global_transform.origin, quat, 0.0, Engine.get_physics_frames())
+    CoopManager.vehicleState.sync_vehicle_snapshot.rpc("airdrop:" + relPath, a.global_transform.origin, quat, 0.0, Engine.get_physics_frames())
 
 
 func _get_rel_path() -> String:
@@ -79,7 +70,7 @@ func _apply_host_snapshot(delta: float) -> void:
     var relPath: String = _get_rel_path()
     if relPath.is_empty():
         return
-    var snap: Dictionary = _cm.vehicleState.get_snapshot(relPath)
+    var snap: Dictionary = CoopManager.vehicleState.get_snapshot(relPath)
     if snap.is_empty():
         return
     var blend: float = clamp(delta * LERP_SPEED, 0.0, 1.0)
@@ -94,7 +85,7 @@ func _apply_airdrop_snapshot(delta: float) -> void:
     var relPath: String = _get_rel_path()
     if relPath.is_empty():
         return
-    var snap: Dictionary = _cm.vehicleState.get_snapshot("airdrop:" + relPath)
+    var snap: Dictionary = CoopManager.vehicleState.get_snapshot("airdrop:" + relPath)
     if snap.is_empty():
         return
     var blend: float = clamp(delta * LERP_SPEED, 0.0, 1.0)
@@ -104,11 +95,11 @@ func _apply_airdrop_snapshot(delta: float) -> void:
 
 
 func Collided(body: Node3D) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Collided(body)
         return
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
     super.Collided(body)
     if is_instance_valid(airdrop):
-        _cm.worldState.broadcast_airdrop_landing.rpc(airdrop.global_position)
+        CoopManager.worldState.broadcast_airdrop_landing.rpc(airdrop.global_position)

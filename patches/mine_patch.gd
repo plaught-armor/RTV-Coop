@@ -1,8 +1,6 @@
 ## Patch for Mine.gd — host-authoritative detonation; clients request via RPC.
 extends "res://Scripts/Mine.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node
 var _cachedPath: String = ""
 
 
@@ -11,30 +9,23 @@ func _ready() -> void:
     _cachedPath = get_tree().current_scene.get_path_to(self)
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func Detonate() -> void:
-    if _ensure_cm() && _cm.is_session_active():
-        if _cm.isHost:
-            _cm.worldState.broadcast_mine_detonate(_cachedPath, false)
+    if CoopManager.is_session_active():
+        if CoopManager.isHost:
+            CoopManager.worldState.broadcast_mine_detonate(_cachedPath, false)
             super.Detonate()
         else:
-            _cm.worldState.request_mine_detonate.rpc_id(1, _cachedPath, false)
+            CoopManager.worldState.request_mine_detonate.rpc_id(1, _cachedPath, false)
         return
     super.Detonate()
 
 
 func InstantDetonate() -> void:
-    if _ensure_cm() && _cm.is_session_active():
-        if _cm.isHost:
-            _cm.worldState.broadcast_mine_detonate(_cachedPath, true)
+    if CoopManager.is_session_active():
+        if CoopManager.isHost:
+            CoopManager.worldState.broadcast_mine_detonate(_cachedPath, true)
             super.InstantDetonate()
         else:
-            _cm.worldState.request_mine_detonate.rpc_id(1, _cachedPath, true)
+            CoopManager.worldState.request_mine_detonate.rpc_id(1, _cachedPath, true)
         return
     super.InstantDetonate()

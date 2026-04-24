@@ -5,31 +5,20 @@
 extends "res://Scripts/RocketGrad.gd"
 
 
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node = null
 var _relPath: String = ""
 const LERP_SPEED: float = 18.0
-
-
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    if Engine.is_editor_hint():
-        return false
-    _cm = _CML.find(get_tree())
-    return _cm != null
 
 
 func _process(delta: float) -> void:
     if Engine.is_editor_hint():
         super._process(delta)
         return
-    if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
+    if !CoopManager.is_session_active() || CoopManager.isHost:
         # Broadcast cleanup BEFORE super runs — super may queue_free self, after
         # which `.rpc()` on a dying node is undefined.
-        if _cm != null && _cm.is_session_active() && _cm.isHost && launched && global_position.z > abs(tracking) + 100.0:
-            _cm.worldState.broadcast_rocket_cleanup.rpc(global_position)
+        if CoopManager != null && CoopManager.is_session_active() && CoopManager.isHost && launched && global_position.z > abs(tracking) + 100.0:
+            CoopManager.worldState.broadcast_rocket_cleanup.rpc(global_position)
         super._process(delta)
         return
     _apply_host_snapshot(delta)
@@ -42,7 +31,7 @@ func _apply_host_snapshot(delta: float) -> void:
             _relPath = String(scene.get_path_to(self))
     if _relPath.is_empty():
         return
-    var snap: Dictionary = _cm.vehicleState.get_snapshot(_relPath)
+    var snap: Dictionary = CoopManager.vehicleState.get_snapshot(_relPath)
     if snap.is_empty():
         return
     var blend: float = clamp(delta * LERP_SPEED, 0.0, 1.0)

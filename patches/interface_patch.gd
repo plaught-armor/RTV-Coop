@@ -1,25 +1,16 @@
 ## Patch for Interface.gd — broadcasts drops; defers client task completion until host ACK.
 extends "res://Scripts/Interface.gd"
 
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 const PATH_MAP: NodePath = ^"/root/Map"
 
-var _cm: Node
 
 # Pending task completions awaiting host ACK, keyed by task name:
 # { selected: Array[Node], taskData: TaskData }.
 var _pendingTasks: Dictionary = {}
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func Drop(target: Node) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Drop(target)
         return
 
@@ -27,7 +18,7 @@ func Drop(target: Node) -> void:
     var file: PackedScene = Database.get(target.slotData.itemData.file)
 
     if !file:
-        _cm._log("File not found: " + target.slotData.itemData.name)
+        CoopManager._log("File not found: " + target.slotData.itemData.name)
         target.queue_free()
         PlayDrop()
         return
@@ -84,14 +75,14 @@ func _spawn_stackable_drops(file: PackedScene, target: Node, map: Node, transfor
             newSlotData.amount = amountLeft
         pickup.slotData.Update(newSlotData)
 
-        _cm.worldState.broadcast_item_drop(pickup)
+        CoopManager.worldState.broadcast_item_drop(pickup)
 
 
 func _spawn_single_drop(file: PackedScene, target: Node, map: Node, transform: Dictionary, dropForce: float) -> void:
     var pickup: Node3D = _instantiate_pickup(file, map, transform, dropForce)
     pickup.slotData.Update(target.slotData)
     pickup.UpdateAttachments()
-    _cm.worldState.broadcast_item_drop(pickup)
+    CoopManager.worldState.broadcast_item_drop(pickup)
 
 
 func _instantiate_pickup(file: PackedScene, map: Node, transform: Dictionary, dropForce: float) -> Node3D:
@@ -105,7 +96,7 @@ func _instantiate_pickup(file: PackedScene, map: Node, transform: Dictionary, dr
 
 
 func CompleteDeal() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.CompleteDeal()
         return
     if !is_instance_valid(trader):
@@ -118,7 +109,7 @@ func CompleteDeal() -> void:
         return
 
     var traderPath: String = get_tree().current_scene.get_path_to(trader)
-    if _cm.isHost:
+    if CoopManager.isHost:
         _execute_host_trade(traderPath, requestedIndices, offeredSlots)
     else:
         _execute_client_trade(traderPath, requestedIndices, offeredSlots)
@@ -137,12 +128,12 @@ func _collect_offered_inventory_slots() -> Array[Dictionary]:
     var out: Array[Dictionary] = []
     for element: Node in inventoryGrid.get_children():
         if element.selected:
-            out.append(_cm.slotSerializer.pack(element.slotData))
+            out.append(CoopManager.slotSerializer.pack(element.slotData))
     return out
 
 
 func _execute_host_trade(traderPath: String, requestedIndices: PackedInt32Array, offeredSlots: Array[Dictionary]) -> void:
-    _cm.worldState.request_trade(traderPath, requestedIndices, offeredSlots)
+    CoopManager.worldState.request_trade(traderPath, requestedIndices, offeredSlots)
     for element: Node in inventoryGrid.get_children():
         if element.selected:
             inventoryGrid.Pick(element)
@@ -157,22 +148,22 @@ func _execute_client_trade(traderPath: String, requestedIndices: PackedInt32Arra
             pendingElements.append(element)
             element.visible = false
             element.set_meta(&"trade_pending", true)
-    _cm.worldState.set_meta(&"_pending_trade_elements", pendingElements)
-    _cm.worldState.request_trade.rpc_id(1, traderPath, requestedIndices, offeredSlots)
+    CoopManager.worldState.set_meta(&"_pending_trade_elements", pendingElements)
+    CoopManager.worldState.request_trade.rpc_id(1, traderPath, requestedIndices, offeredSlots)
 
 
 ## Client-side defer: hide inputs + stash rewards; host ACK triggers finalize_pending_task.
 ## Host path runs super (vanilla trader save) then broadcasts to peers.
 func Complete(data: Resource) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Complete(data)
         return
-    if _cm.isHost:
+    if CoopManager.isHost:
         super.Complete(data)
         if data is TaskData && is_instance_valid(trader):
             var scene: Node = get_tree().current_scene
             if is_instance_valid(scene):
-                _cm.worldState.sync_trader_task_complete.rpc(scene.get_path_to(trader), data.name)
+                CoopManager.worldState.sync_trader_task_complete.rpc(scene.get_path_to(trader), data.name)
         return
     if !(data is TaskData):
         super.Complete(data)
@@ -199,7 +190,7 @@ func Complete(data: Resource) -> void:
 
     var scene: Node = get_tree().current_scene
     if is_instance_valid(scene):
-        _cm.worldState.request_trader_task_complete.rpc_id(1, scene.get_path_to(trader), taskName)
+        CoopManager.worldState.request_trader_task_complete.rpc_id(1, scene.get_path_to(trader), taskName)
     ResetInput()
 
 

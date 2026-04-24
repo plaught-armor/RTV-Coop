@@ -1,23 +1,14 @@
 ## Patch for Interactor.gd — co-op dispatch choke-point for Interactable targets (host broadcasts, client requests).
 extends "res://Scripts/Interactor.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
-
-var _cm: Node
 
 
-
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
 
 
 func Interact():
     if !Input.is_action_just_pressed(("interact")):
         return
 
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Interact()
         return
 
@@ -46,8 +37,8 @@ func Interact():
     if target.is_in_group(&"Interactable"):
         if !is_instance_valid(target.owner):
             return
-        if _cm.dispatch_interact(target.owner):
-            if _cm.DEBUG:
+        if CoopManager.dispatch_interact(target.owner):
+            if CoopManager.DEBUG:
                 print("[interactor_patch] coop-dispatched %s" % target.owner.name)
             return
         target.owner.Interact()

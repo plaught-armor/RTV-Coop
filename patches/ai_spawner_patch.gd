@@ -1,16 +1,14 @@
 ## Patch for AISpawner.gd — host-auth spawning; clients build pools but suppress spawns.
 extends "res://Scripts/AISpawner.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node
 
 
 func _ready() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super._ready()
         return
 
-    _log("_ready() co-op path (isHost=%s, zone=%d, active=%s)" % [str(_cm.isHost), zone, str(active)])
+    _log("_ready() co-op path (isHost=%s, zone=%d, active=%s)" % [str(CoopManager.isHost), zone, str(active)])
 
     GetPoints()
     HidePoints()
@@ -33,10 +31,10 @@ func _ready() -> void:
     # Tag sync IDs BEFORE spawns: reparent changes child counts, but meta persists.
     _assign_sync_ids()
 
-    if is_instance_valid(_cm.aiState):
-        _cm.aiState.register_spawner_pools(self)
+    if is_instance_valid(CoopManager.aiState):
+        CoopManager.aiState.register_spawner_pools(self)
 
-    if _cm.isHost:
+    if CoopManager.isHost:
         if initialGuard:
             _log("Initial spawn: Guard")
             super.SpawnGuard()
@@ -63,10 +61,10 @@ func _assign_sync_ids() -> void:
 
 ## Host-auth wanderer spawn; filters points by distance to ALL players.
 func SpawnWanderer() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.SpawnWanderer()
         return
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
 
     if APool.get_child_count() == 0:
@@ -94,10 +92,10 @@ func SpawnWanderer() -> void:
 
 
 func SpawnGuard() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.SpawnGuard()
         return
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
     var prevCount: int = agents.get_child_count()
     super.SpawnGuard()
@@ -106,10 +104,10 @@ func SpawnGuard() -> void:
 
 
 func SpawnHider() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.SpawnHider()
         return
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
     var prevCount: int = agents.get_child_count()
     super.SpawnHider()
@@ -118,10 +116,10 @@ func SpawnHider() -> void:
 
 
 func SpawnMinion(spawnPosition: Vector3) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.SpawnMinion(spawnPosition)
         return
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
     var prevCount: int = agents.get_child_count()
     super.SpawnMinion(spawnPosition)
@@ -130,10 +128,10 @@ func SpawnMinion(spawnPosition: Vector3) -> void:
 
 
 func SpawnBoss(spawnPosition: Vector3) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.SpawnBoss(spawnPosition)
         return
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
     var prevCount: int = agents.get_child_count()
     super.SpawnBoss(spawnPosition)
@@ -153,18 +151,18 @@ func _init_and_broadcast(newAgent: Node) -> void:
     if !newAgent.has_meta(&"ai_sync_id"):
         _log("_init_and_broadcast: agent has no sync_id meta!")
         return
-    newAgent._cm = _cm
+    newAgent.CoopManager = CoopManager
     var syncId: int = newAgent.get_meta(&"ai_sync_id")
     var pos: Vector3 = newAgent.global_position
     var rotY: float = newAgent.global_rotation.y
     var stateIdx: int = newAgent.currentState
     _log("Broadcasting AI activate: syncId=%d pos=%s state=%d" % [syncId, str(pos), stateIdx])
-    _cm.aiState.broadcast_ai_activate(syncId, pos, rotY, stateIdx)
+    CoopManager.aiState.broadcast_ai_activate(syncId, pos, rotY, stateIdx)
 
 
 func _min_player_distance(pos: Vector3) -> float:
     var minDist: float = pos.distance_to(gameData.playerPosition)
-    for remote: Node3D in _cm.remoteNodes:
+    for remote: Node3D in CoopManager.remoteNodes:
         if !is_instance_valid(remote):
             continue
         var dist: float = pos.distance_to(remote.global_position)
@@ -173,15 +171,8 @@ func _min_player_distance(pos: Vector3) -> float:
     return minDist
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func _log(msg: String) -> void:
-    if is_instance_valid(_cm):
-        _cm._log("[AISpawner] %s" % msg)
+    if is_instance_valid(CoopManager):
+        CoopManager._log("[AISpawner] %s" % msg)
     else:
         print("[AISpawner] %s" % msg)

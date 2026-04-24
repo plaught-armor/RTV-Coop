@@ -1,8 +1,6 @@
 ## Patch for Transition.gd — independent map transitions; mirrors user://*.tres into per-world dir.
 extends "res://Scripts/Transition.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node
 
 
 
@@ -10,23 +8,14 @@ func _ready() -> void:
     super._ready()
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func Interact() -> void:
-    if _cm != null && _cm.DEBUG:
+    if CoopManager != null && CoopManager.DEBUG:
         print("[TX] Interact begin nextMap=%s" % nextMap)
     super.Interact()
-    if !_ensure_cm():
-        return
     # Client's savePath already points at coop dir; mirror is only needed for host/solo.
-    if _cm.is_session_active() && _cm.isHost:
-        _cm.saveMirror.mirror_user_to_world()
-    elif !_cm.is_session_active():
-        _cm.saveMirror.mirror_user_to_solo()
-    if _cm.DEBUG:
+    if CoopManager.is_session_active() && CoopManager.isHost:
+        CoopManager.saveMirror.mirror_user_to_world()
+    elif !CoopManager.is_session_active():
+        CoopManager.saveMirror.mirror_user_to_solo()
+    if CoopManager.DEBUG:
         print("[TX] Interact end")

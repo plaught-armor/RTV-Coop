@@ -1,27 +1,18 @@
 ## Patch for RocketHelicopter.gd — host runs physics + collision, broadcasts
 ## explosion; clients lerp snapshot.
 extends "res://Scripts/RocketHelicopter.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node = null
 var _relPath: String = ""
 var _exploded: bool = false
 const LERP_SPEED: float = 18.0
 const ROCKET_MAX_RANGE: float = 1000.0
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func _physics_process(delta: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super._physics_process(delta)
         return
-    if _cm.isHost:
+    if CoopManager.isHost:
         _host_tick(delta)
         return
     _apply_host_snapshot(delta)
@@ -46,7 +37,7 @@ func _coop_explode() -> void:
         return
     _exploded = true
     var pos: Vector3 = global_position
-    _cm.worldState.broadcast_rocket_explode.rpc(pos)
+    CoopManager.worldState.broadcast_rocket_explode.rpc(pos)
     var packed: PackedScene = load("res://Effects/Explosion.tscn") as PackedScene
     if packed != null:
         var instance: Node = packed.instantiate()
@@ -64,7 +55,7 @@ func _coop_cleanup() -> void:
     if _exploded:
         return
     _exploded = true
-    _cm.worldState.broadcast_rocket_cleanup.rpc(global_position)
+    CoopManager.worldState.broadcast_rocket_cleanup.rpc(global_position)
     queue_free()
 
 
@@ -75,7 +66,7 @@ func _apply_host_snapshot(delta: float) -> void:
             _relPath = String(scene.get_path_to(self))
     if _relPath.is_empty():
         return
-    var snap: Dictionary = _cm.vehicleState.get_snapshot(_relPath)
+    var snap: Dictionary = CoopManager.vehicleState.get_snapshot(_relPath)
     if snap.is_empty():
         return
     var blend: float = clamp(delta * LERP_SPEED, 0.0, 1.0)

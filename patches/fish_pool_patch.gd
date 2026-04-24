@@ -1,9 +1,7 @@
 ## Patch for FishPool.gd — path-seeded RNG for deterministic spawns; all-peer distance check.
 extends "res://Scripts/FishPool.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 
-var _cm: Node
 
 
 func _ready() -> void:
@@ -41,19 +39,12 @@ func _set_children_active(enabled: bool) -> void:
 
 func _nearest_player_distance() -> float:
     var dist: float = global_position.distance_to(gameData.playerPosition)
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         return dist
-    for remote: Node3D in _cm.remoteNodes:
+    for remote: Node3D in CoopManager.remoteNodes:
         if !is_instance_valid(remote):
             continue
         var d: float = global_position.distance_to(remote.global_position)
         if d < dist:
             dist = d
     return dist
-
-
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null

@@ -1,31 +1,22 @@
 ## Patch for Police.gd — host authoritative; clients freeze and lerp snapshots.
 extends "res://Scripts/Police.gd"
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node = null
 var _relPath: String = ""
 var _clientPrevPos: Vector3 = Vector3.ZERO
 var _clientPrevReady: bool = false
 const LERP_SPEED: float = 10.0
 
 
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
-
-
 func _ready() -> void:
     super._ready()
-    if _ensure_cm() && _cm.is_session_active() && !_cm.isHost:
+    if CoopManager.is_session_active() && !CoopManager.isHost:
         freeze = true
         _clientPrevPos = global_position
         _clientPrevReady = true
 
 
 func _physics_process(delta: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
+    if !CoopManager.is_session_active() || CoopManager.isHost:
         super._physics_process(delta)
         return
     _apply_host_snapshot(delta)
@@ -39,7 +30,7 @@ func _apply_host_snapshot(delta: float) -> void:
             _relPath = String(scene.get_path_to(self))
     if _relPath.is_empty():
         return
-    var snap: Dictionary = _cm.vehicleState.get_snapshot(_relPath)
+    var snap: Dictionary = CoopManager.vehicleState.get_snapshot(_relPath)
     if snap.is_empty():
         return
     var blend: float = clamp(delta * LERP_SPEED, 0.0, 1.0)

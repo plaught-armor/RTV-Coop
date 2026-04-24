@@ -4,16 +4,7 @@ extends "res://Scripts/AI.gd"
 const PATH_AI: NodePath = ^"AI"
 
 
-const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
-var _cm: Node
-
-
-func _ensure_cm() -> bool:
-    if is_instance_valid(_cm):
-        return true
-    _cm = _CML.find(get_tree())
-    return _cm != null
 
 # -1 = host's local player; otherwise a remote peer ID.
 var targetPeerId: int = -1
@@ -103,8 +94,8 @@ func _find_map_ancestor() -> Node:
 func _physics_process(delta: float) -> void:
     if puppetMode:
         return
-    if _ensure_cm() && _cm.is_session_active():
-        if !_cm.isHost:
+    if CoopManager.is_session_active():
+        if !CoopManager.isHost:
             return
         # Skip gameData.isDead so AI stays active for surviving remotes after host dies.
         if pause || dead:
@@ -139,7 +130,7 @@ func _all_players_dead() -> bool:
     if !gameData.isDead:
         _allDeadCachedResult = false
         return false
-    for remote: Node3D in _cm.remoteNodes:
+    for remote: Node3D in CoopManager.remoteNodes:
         if is_instance_valid(remote) && !remote.get_meta(&"is_dead", false):
             _allDeadCachedResult = false
             return false
@@ -147,10 +138,10 @@ func _all_players_dead() -> bool:
     return true
 
 func Parameters(delta: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Parameters(delta)
         return
-    var _pt: int = _cm.perf.start()
+    var _pt: int = CoopManager.perf.start()
 
     LKL = lerp(LKL, lastKnownLocation, delta * LKLSpeed)
 
@@ -161,10 +152,10 @@ func Parameters(delta: float) -> void:
     var bestVector: Vector3 = gameData.playerVector
     targetPeerId = -1
 
-    for remote: Node3D in _cm.remoteNodes:
+    for remote: Node3D in CoopManager.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
-        if remote.has_flag(_cm.PlayerStateScript.MoveFlag.TRADING):
+        if remote.has_flag(CoopManager.PlayerStateScript.MoveFlag.TRADING):
             continue
         var pos: Vector3 = remote.global_position
         var dist: float = global_position.distance_to(pos)
@@ -190,13 +181,13 @@ func Parameters(delta: float) -> void:
     elif playerDistance3D > 50:
         sensorCycle = 0.5
         LKLSpeed = 1.0
-    _cm.perf.stop("ai.Parameters", _pt)
+    CoopManager.perf.stop("ai.Parameters", _pt)
 
 func Sensor(delta: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Sensor(delta)
         return
-    var _pt: int = _cm.perf.start()
+    var _pt: int = CoopManager.perf.start()
     sensorTimer += delta
     if sensorTimer > sensorCycle:
         if playerDistance3D <= 200.0:
@@ -216,22 +207,22 @@ func Sensor(delta: float) -> void:
             Hearing()
 
         sensorTimer = 0.0
-    _cm.perf.stop("ai.Sensor", _pt)
+    CoopManager.perf.stop("ai.Sensor", _pt)
 
 
 # Host local player uses gameData.cameraPosition; remotes approximate eye height at +1.6m.
 func _get_target_camera_position() -> Vector3:
     if targetPeerId < 0:
         return gameData.cameraPosition
-    var remote: Node3D = _cm.get_remote_player_node(targetPeerId)
+    var remote: Node3D = CoopManager.get_remote_player_node(targetPeerId)
     if !is_instance_valid(remote):
         return gameData.cameraPosition
     return remote.global_position + Vector3(0, 1.6, 0)
 
 func LOSCheck(target: Vector3) -> void:
-    var _pt: int = _cm.perf.start()
-    if !_ensure_cm() || !_cm.is_session_active():
-        _cm.perf.stop("ai.LOSCheck", _pt)
+    var _pt: int = CoopManager.perf.start()
+    if !CoopManager.is_session_active():
+        CoopManager.perf.stop("ai.LOSCheck", _pt)
         super.LOSCheck(target)
         return
 
@@ -255,14 +246,14 @@ func LOSCheck(target: Vector3) -> void:
                 Decision()
             elif currentState == State.Ambush:
                 ChangeState("Combat")
-            _cm.perf.stop("ai.LOSCheck", _pt)
+            CoopManager.perf.stop("ai.LOSCheck", _pt)
             return
 
     playerVisible = false
-    _cm.perf.stop("ai.LOSCheck", _pt)
+    CoopManager.perf.stop("ai.LOSCheck", _pt)
 
 func Hearing() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Hearing()
         return
 
@@ -273,12 +264,12 @@ func Hearing() -> void:
             Decision()
         return
 
-    for remote: Node3D in _cm.remoteNodes:
+    for remote: Node3D in CoopManager.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
         var dist: float = global_position.distance_to(remote.global_position)
-        var isRunning: bool = remote.has_flag(_cm.PlayerStateScript.MoveFlag.RUNNING)
-        var isWalking: bool = remote.has_flag(_cm.PlayerStateScript.MoveFlag.WALKING)
+        var isRunning: bool = remote.has_flag(CoopManager.PlayerStateScript.MoveFlag.RUNNING)
+        var isWalking: bool = remote.has_flag(CoopManager.PlayerStateScript.MoveFlag.WALKING)
         if (dist < 20 && isRunning) || (dist < 5 && isWalking):
             if currentState != State.Ambush:
                 lastKnownLocation = remote.global_position
@@ -287,10 +278,10 @@ func Hearing() -> void:
             return
 
 func FireDetection(delta: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.FireDetection(delta)
         return
-    var _pt: int = _cm.perf.start()
+    var _pt: int = CoopManager.perf.start()
 
     if gameData.isFiring && !playerVisible:
         var hostDist: float = global_position.distance_to(gameData.playerPosition)
@@ -311,10 +302,10 @@ func FireDetection(delta: float) -> void:
             fireDetected = true
             extraVisibility = 50.0
 
-    for remote: Node3D in _cm.remoteNodes:
+    for remote: Node3D in CoopManager.remoteNodes:
         if !is_instance_valid(remote) || remote.get_meta(&"is_dead", false):
             continue
-        if !remote.has_flag(_cm.PlayerStateScript.MoveFlag.FIRING):
+        if !remote.has_flag(CoopManager.PlayerStateScript.MoveFlag.FIRING):
             continue
         if playerVisible:
             continue
@@ -333,10 +324,10 @@ func FireDetection(delta: float) -> void:
             extraVisibility = 0.0
             fireDetectionTimer = 0.0
             fireDetected = false
-    _cm.perf.stop("ai.FireDetection", _pt)
+    CoopManager.perf.stop("ai.FireDetection", _pt)
 
 func Raycast() -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Raycast()
         return
 
@@ -349,12 +340,12 @@ func Raycast() -> void:
             return
 
         if hitCollider.is_in_group(&"CoopRemote"):
-            var remoteRoot: Node3D = _cm.find_remote_root(hitCollider)
+            var remoteRoot: Node3D = CoopManager.find_remote_root(hitCollider)
             if remoteRoot != null:
                 var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
                 if peerId > 0:
                     var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
-                    _cm.aiState.send_ai_damage_to_peer(peerId, dmg, weaponData.penetration)
+                    CoopManager.aiState.send_ai_damage_to_peer(peerId, dmg, weaponData.penetration)
 
         elif hitCollider.is_in_group(&"Player"):
             var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
@@ -373,7 +364,7 @@ func Raycast() -> void:
         PlayFlyby()
 
 func Fire(delta: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.Fire(delta)
         return
 
@@ -409,7 +400,7 @@ func Fire(delta: float) -> void:
 
         if has_meta(&"ai_sync_id"):
             var syncId: int = get_meta(&"ai_sync_id")
-            _cm.aiState.broadcast_ai_fire(syncId)
+            CoopManager.aiState.broadcast_ai_fire(syncId)
 
         if playerDistance3D > 50:
             await get_tree().create_timer(0.1, false).timeout
@@ -419,16 +410,16 @@ func Fire(delta: float) -> void:
 
 ## Host applies damage locally; client routes to host via RPC.
 func WeaponDamage(hitbox: String, damage: float) -> void:
-    if !_ensure_cm() || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         super.WeaponDamage(hitbox, damage)
         return
-    if _cm.isHost:
+    if CoopManager.isHost:
         super.WeaponDamage(hitbox, damage)
         return
     if !has_meta(&"ai_sync_id"):
         return
     var syncId: int = get_meta(&"ai_sync_id")
-    _cm.aiState.request_ai_damage_from_client.rpc_id(1, syncId, hitbox, damage)
+    CoopManager.aiState.request_ai_damage_from_client.rpc_id(1, syncId, hitbox, damage)
 
 const _AIStateScript: GDScript = preload("res://mod/network/ai_state.gd")
 
@@ -457,18 +448,18 @@ func PlayFootstep() -> void:
 
 
 func _broadcast_voice(voiceType: int) -> void:
-    if !_ensure_cm() || !_cm.is_session_active() || !_cm.isHost:
+    if !CoopManager.is_session_active() || !CoopManager.isHost:
         return
     if !has_meta(&"ai_sync_id"):
         return
-    _cm.aiState.broadcast_ai_voice(get_meta(&"ai_sync_id"), voiceType)
+    CoopManager.aiState.broadcast_ai_voice(get_meta(&"ai_sync_id"), voiceType)
 
 
 func Death(direction: Vector3, force: float) -> void:
-    if _ensure_cm() && _cm.is_session_active() && _cm.isHost:
+    if CoopManager.is_session_active() && CoopManager.isHost:
         if has_meta(&"ai_sync_id"):
             var syncId: int = get_meta(&"ai_sync_id")
-            _cm.aiState.broadcast_ai_death(syncId, direction, force)
+            CoopManager.aiState.broadcast_ai_death(syncId, direction, force)
     super.Death(direction, force)
 
 
@@ -487,10 +478,10 @@ func Interactor(delta: float) -> void:
 
     if !is_instance_valid(doorBefore):
         return
-    if !_ensure_cm() || !_cm.is_session_active() || !_cm.isHost:
+    if !CoopManager.is_session_active() || !CoopManager.isHost:
         return
     if doorBefore.isOpen:
         var doorPath: String = get_tree().current_scene.get_path_to(doorBefore)
-        _cm.worldState.sync_door_state.rpc(doorPath, true)
-        if _cm.DEBUG:
+        CoopManager.worldState.sync_door_state.rpc(doorPath, true)
+        if CoopManager.DEBUG:
             print("[ai_patch] AI opened door %s — broadcast" % doorPath)
