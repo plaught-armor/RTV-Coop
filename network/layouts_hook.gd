@@ -14,20 +14,15 @@ extends RefCounted
 
 const LAYOUTS_SCRIPT_PATH: String = "res://Scripts/Layouts.gd"
 
-var _cm: Node
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
-    if !manager.is_inside_tree():
-        return
-    var tree: SceneTree = manager.get_tree()
-    if !tree.node_added.is_connected(_on_node_added):
+func connect_tree() -> void:
+    var tree: SceneTree = CoopManager.get_tree()
+    if tree != null && !tree.node_added.is_connected(_on_node_added):
         tree.node_added.connect(_on_node_added)
 
 
 func _on_node_added(n: Node) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !CoopManager.is_session_active():
         return
     var script: Script = n.get_script()
     if script == null:

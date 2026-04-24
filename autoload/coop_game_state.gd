@@ -3,12 +3,7 @@
 extends RefCounted
 
 
-var _cm: Node
 var _gd: GameData = preload("res://Resources/GameData.tres")
-
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func apply_sleep_start() -> void:

@@ -91,13 +91,8 @@ func _ready() -> void:
 
     register_patches()
     loader = get_node_or_null(PATH_LOADER_ABS)
-    saveMirror.init_manager(self)
-    gameState.init_manager(self)
-    layoutsHook.init_manager.call_deferred(self)
-    simulationHook.init_manager(self)
-    catStateHook.init_manager(self)
-    deathStateHook.init_manager(self)
-    instrumentHook.init_manager.call_deferred(self)
+    layoutsHook.connect_tree.call_deferred()
+    instrumentHook.connect_tree.call_deferred()
 
     _spawn_network_children()
     _spawn_coop_ui()

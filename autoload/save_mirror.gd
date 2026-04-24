@@ -13,16 +13,8 @@ const COOP_PLAYER_SAVE: String = "Character.tres"
 const COOP_ACTIVE_WORLD_FILE: String = "user://coop_active.txt"
 
 
-var _cm: Node
-
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
-
-
 func set_active_world(activeWorldId: String) -> void:
-    if is_instance_valid(_cm):
-        _cm.worldId = activeWorldId
+    CoopManager.worldId = activeWorldId
     var f: FileAccess = FileAccess.open(COOP_ACTIVE_WORLD_FILE, FileAccess.WRITE)
     if f != null:
         f.store_string(activeWorldId)
@@ -41,26 +33,23 @@ func get_active_world() -> String:
 
 
 func clear_active_world() -> void:
-    if is_instance_valid(_cm):
-        _cm.worldId = ""
+    CoopManager.worldId = ""
     if FileAccess.file_exists(COOP_ACTIVE_WORLD_FILE):
         DirAccess.remove_absolute(ProjectSettings.globalize_path(COOP_ACTIVE_WORLD_FILE))
 
 
 ## Host-only. Copies user://*.tres into the world dir after a save event.
 func mirror_user_to_world() -> void:
-    if !is_instance_valid(_cm):
+    if CoopManager.worldId.is_empty() || !CoopManager.isHost:
         return
-    if _cm.worldId.is_empty() || !_cm.isHost:
-        return
-    var worldDir: String = COOP_WORLDS_DIR + _cm.worldId + "/"
+    var worldDir: String = COOP_WORLDS_DIR + CoopManager.worldId + "/"
     DirAccess.make_dir_recursive_absolute(worldDir)
     var jobs: Array = []
     for saveName: String in COOP_WORLD_SAVES:
         var src: String = "user://" + saveName
         if FileAccess.file_exists(src):
             jobs.append([src, worldDir + saveName])
-    var steamId: String = _cm.steamBridge.localSteamID if _cm.steamBridge.is_ready() else "local"
+    var steamId: String = CoopManager.steamBridge.localSteamID if CoopManager.steamBridge.is_ready() else "local"
     if FileAccess.file_exists("user://" + COOP_PLAYER_SAVE):
         var playerDir: String = worldDir + "players/" + steamId + "/"
         DirAccess.make_dir_recursive_absolute(playerDir)
@@ -79,8 +68,8 @@ func mirror_world_to_user(forWorldId: String) -> void:
         if FileAccess.file_exists(src):
             _copy_file(src, "user://" + saveName)
     var steamId: String = "local"
-    if is_instance_valid(_cm) && _cm.steamBridge.is_ready():
-        steamId = _cm.steamBridge.localSteamID
+    if CoopManager.steamBridge.is_ready():
+        steamId = CoopManager.steamBridge.localSteamID
     var playerSrc: String = worldDir + "players/" + steamId + "/" + COOP_PLAYER_SAVE
     if FileAccess.file_exists(playerSrc):
         _copy_file(playerSrc, "user://" + COOP_PLAYER_SAVE)
@@ -183,59 +172,59 @@ func _run_copy_jobs(jobs: Array) -> void:
 
 
 func setup_save_paths() -> void:
-    if _cm.worldId.is_empty():
-        _cm.worldId = "world_%d" % Time.get_unix_time_from_system()
-    var localSteamId: String = _cm.steamBridge.localSteamID if _cm.steamBridge.is_ready() else "local"
-    apply_save_paths("user://coop/%s/" % _cm.worldId, "user://coop/%s/players/%s/" % [_cm.worldId, localSteamId])
+    if CoopManager.worldId.is_empty():
+        CoopManager.worldId = "world_%d" % Time.get_unix_time_from_system()
+    var localSteamId: String = CoopManager.steamBridge.localSteamID if CoopManager.steamBridge.is_ready() else "local"
+    apply_save_paths("user://coop/%s/" % CoopManager.worldId, "user://coop/%s/players/%s/" % [CoopManager.worldId, localSteamId])
 
 
 ## Uses patched savePath var when present; falls back to meta if loader_patch didn't apply.
 func apply_save_paths(sp: String, pp: String) -> void:
-    if !is_instance_valid(_cm.loader):
+    if !is_instance_valid(CoopManager.loader):
         return
-    if "savePath" in _cm.loader:
-        _cm.loader.savePath = sp
-        _cm.loader.playerSavePath = pp
+    if "savePath" in CoopManager.loader:
+        CoopManager.loader.savePath = sp
+        CoopManager.loader.playerSavePath = pp
     else:
-        _cm.loader.set_meta(&"savePath", sp)
-        _cm.loader.set_meta(&"playerSavePath", pp)
+        CoopManager.loader.set_meta(&"savePath", sp)
+        CoopManager.loader.set_meta(&"playerSavePath", pp)
     DirAccess.make_dir_recursive_absolute(sp)
     DirAccess.make_dir_recursive_absolute(pp)
-    _cm._log("Save paths: world=%s player=%s" % [sp, pp])
+    CoopManager._log("Save paths: world=%s player=%s" % [sp, pp])
 
 
 func get_save_path() -> String:
-    if !is_instance_valid(_cm.loader):
+    if !is_instance_valid(CoopManager.loader):
         return "user://"
-    if "savePath" in _cm.loader:
-        return _cm.loader.savePath
-    return _cm.loader.get_meta(&"savePath", "user://")
+    if "savePath" in CoopManager.loader:
+        return CoopManager.loader.savePath
+    return CoopManager.loader.get_meta(&"savePath", "user://")
 
 
 func get_player_save_path() -> String:
-    if !is_instance_valid(_cm.loader):
+    if !is_instance_valid(CoopManager.loader):
         return "user://"
-    if "playerSavePath" in _cm.loader:
-        return _cm.loader.playerSavePath
-    return _cm.loader.get_meta(&"playerSavePath", "user://")
+    if "playerSavePath" in CoopManager.loader:
+        return CoopManager.loader.playerSavePath
+    return CoopManager.loader.get_meta(&"playerSavePath", "user://")
 
 
 func load_local_appearance() -> Dictionary:
     var dir: String = get_player_save_path()
-    var entry: Variant = _cm.appearance.load_from(dir)
+    var entry: Variant = CoopManager.appearance.load_from(dir)
     if entry == null:
-        return _cm.appearance.get_defaults()
+        return CoopManager.appearance.get_defaults()
     return entry
 
 
 func has_local_appearance() -> bool:
     var dir: String = get_player_save_path()
-    return FileAccess.file_exists(_cm.appearance.file_path(dir))
+    return FileAccess.file_exists(CoopManager.appearance.file_path(dir))
 
 
 func save_local_appearance(entry: Dictionary) -> bool:
     var dir: String = get_player_save_path()
-    return _cm.appearance.save_to(dir, entry)
+    return CoopManager.appearance.save_to(dir, entry)
 
 
 func sanitize_path_component(component: String) -> bool:
@@ -247,5 +236,5 @@ func sanitize_path_component(component: String) -> bool:
 
 
 func reset_save_paths() -> void:
-    _cm.worldId = ""
+    CoopManager.worldId = ""
     apply_save_paths("user://", "user://")
