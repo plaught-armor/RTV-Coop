@@ -296,7 +296,7 @@ func disconnect_session() -> void:
     # Mirror before nulling peer so late frame saves still have valid state (host only).
     var wasHost: bool = isHost
     if wasHost && !worldId.is_empty():
-        mirror_user_to_world()
+        saveMirror.mirror_user_to_world()
 
     for i: int in peerGodotIds.size():
         var pid: int = peerGodotIds[i]
