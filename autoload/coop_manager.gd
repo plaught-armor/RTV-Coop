@@ -52,6 +52,7 @@ var _interactRouter: RefCounted = preload("res://mod/autoload/coop_interact_rout
 var layoutsHook: RefCounted = preload("res://mod/network/layouts_hook.gd").new()
 var simulationHook: RefCounted = preload("res://mod/network/simulation_hook.gd").new()
 var catStateHook: RefCounted = preload("res://mod/network/cat_state_hook.gd").new()
+var deathStateHook: RefCounted = preload("res://mod/network/death_state_hook.gd").new()
 var MenuCustomizerScript: Script = preload("res://mod/autoload/coop_menu_customizer.gd")
 var menuCustomizer: Node = null
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
@@ -94,6 +95,7 @@ func _ready() -> void:
     layoutsHook.init_manager.call_deferred(self)
     simulationHook.init_manager(self)
     catStateHook.init_manager(self)
+    deathStateHook.init_manager(self)
 
     _spawn_network_children()
     _spawn_coop_ui()
@@ -184,6 +186,7 @@ func _connect_multiplayer_signals() -> void:
 func _process(delta: float) -> void:
     simulationHook.apply(delta)
     catStateHook.poll()
+    deathStateHook.poll()
 
 
 func _physics_process(_delta: float) -> void:
