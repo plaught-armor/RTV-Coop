@@ -4,6 +4,9 @@
 @tool
 extends "res://Scripts/RocketGrad.gd"
 
+
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
+
 var _cm: Node = null
 var _relPath: String = ""
 const LERP_SPEED: float = 18.0
@@ -14,17 +17,8 @@ func _ensure_cm() -> bool:
         return true
     if Engine.is_editor_hint():
         return false
-    var tree: SceneTree = get_tree()
-    if tree == null:
-        return false
-    var root: Node = tree.root
-    if root == null:
-        return false
-    for child: Node in root.get_children():
-        if child.has_meta(&"is_coop_manager"):
-            _cm = child
-            return true
-    return false
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 
 func _process(delta: float) -> void:

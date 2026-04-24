@@ -9,14 +9,8 @@ const LERP_SPEED: float = 8.0
 func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
         return true
-    var root: Node = get_tree().root if get_tree() != null else null
-    if root == null:
-        return false
-    for child: Node in root.get_children():
-        if child.has_meta(&"is_coop_manager"):
-            _cm = child
-            return true
-    return false
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 
 func _physics_process(delta: float) -> void:

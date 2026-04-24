@@ -25,7 +25,7 @@ func ResetCharacter():
     character.catFound = gameData.catFound
     character.catDead = gameData.catDead
     ResourceSaver.save(character, playerSavePath + "Character.tres")
-    print("Loader: Reset Character (%s)" % playerSavePath)
+    _dbg_print("Loader: Reset Character (%s)" % playerSavePath)
 
 
 func SaveCharacter():
@@ -42,13 +42,23 @@ func SaveCharacter():
     _save_inventory_grids(character, interface)
 
     ResourceSaver.save(character, playerSavePath + "Character.tres")
-    print("SAVE: Character (%s)" % playerSavePath)
+    _dbg_print("SAVE: Character (%s)" % playerSavePath)
     var root: Node = get_tree().root if get_tree() != null else null
     if root != null:
         for child: Node in root.get_children():
             if child.has_meta(&"is_coop_manager") && child.is_session_active():
                 child.send_character_to_host()
                 break
+
+
+func _dbg_print(msg: String) -> void:
+    var root: Node = get_tree().root if get_tree() != null else null
+    if root == null:
+        return
+    for child: Node in root.get_children():
+        if child.has_meta(&"is_coop_manager") && child.DEBUG:
+            print(msg)
+            return
 
 
 func _save_vitals(character: CharacterSave) -> void:
@@ -99,7 +109,8 @@ func _save_inventory_grids(character: CharacterSave, interface) -> void:
         character.inventory.append(newSlotData)
 
     for equipmentSlot in interface.equipment.get_children():
-        if equipmentSlot is Slot && equipmentSlot.get_child_count() != 0:
+        # Duck-typed: Slot class_name unreliable after take_over_path; treat any child holding a slotItem as an equip slot.
+        if equipmentSlot.get_child_count() != 0 && equipmentSlot.get_child(0).get(&"slotData") != null:
             var slotItem = equipmentSlot.get_child(0)
             var newSlotData = SlotData.new()
             newSlotData.Update(slotItem.slotData)
@@ -360,20 +371,23 @@ func SaveShelter(targetShelter):
     shelter.lastVisit = (Simulation.day * 10000) + Simulation.time
 
     for furniture in get_tree().get_nodes_in_group(&"Furniture"):
-        var furnitureComponent: Furniture
+        # Duck-typed: Furniture class_name false-positives on siblings after take_over_path patches it.
+        # `itemData` is Furniture's distinguishing prop; .get(&"itemData") returns null on other node types.
+        var furnitureComponent: Node = null
         for child in furniture.owner.get_children():
-            if child is Furniture:
+            if child.get(&"itemData") != null:
                 furnitureComponent = child
-        if furnitureComponent:
+        if furnitureComponent != null:
             var furnitureSave = FurnitureSave.new()
             furnitureSave.name = furnitureComponent.itemData.name
             furnitureSave.itemData = furnitureComponent.itemData
             furnitureSave.position = furniture.owner.global_position
             furnitureSave.rotation = furniture.owner.global_rotation
             furnitureSave.scale = furniture.owner.scale
-            if furniture.owner is LootContainer:
-                if furniture.owner.storage.size() != 0:
-                    furnitureSave.storage = furniture.owner.storage
+            # LootContainer detection via duck-typing (`storage` prop) — safe if LootContainer.gd ever gets patched.
+            var storageVal: Variant = furniture.owner.get(&"storage")
+            if storageVal != null && storageVal is Array && storageVal.size() != 0:
+                furnitureSave.storage = storageVal
             shelter.furnitures.append(furnitureSave)
 
     for item in get_tree().get_nodes_in_group(&"Item"):

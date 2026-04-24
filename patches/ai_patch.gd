@@ -347,6 +347,8 @@ func Raycast() -> void:
 
     if fire.is_colliding():
         var hitCollider: Node = fire.get_collider()
+        if !is_instance_valid(hitCollider):
+            return
 
         if hitCollider.is_in_group(&"CoopRemote"):
             var remoteRoot: Node3D = _cm.find_remote_root(hitCollider)
@@ -475,10 +477,11 @@ func Death(direction: Vector3, force: float) -> void:
 ## Broadcasts AI-triggered door opens; AI only runs on host so this is the sync point.
 func Interactor(delta: float) -> void:
     # Snapshot before super so fresh-open detection has something to compare.
+    # Duck-type Door via `isOpen` prop: `is Door` breaks if Door.gd gets take_over_path'd later.
     var doorBefore: Node = null
     if is_instance_valid(forward) && forward.is_colliding():
         var hit: Node = forward.get_collider()
-        if is_instance_valid(hit) && hit.is_in_group(&"Interactable") && hit.owner is Door:
+        if is_instance_valid(hit) && hit.is_in_group(&"Interactable") && hit.owner != null && hit.owner.get(&"isOpen") != null:
             if !hit.owner.isOpen && !hit.owner.locked && !hit.owner.jammed:
                 doorBefore = hit.owner
 

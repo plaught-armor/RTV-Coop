@@ -14,14 +14,8 @@ const AIRDROP_SEND_EVERY_N_TICKS: int = 12
 func _ensure_cm() -> bool:
     if is_instance_valid(_cm):
         return true
-    var root: Node = get_tree().root if get_tree() != null else null
-    if root == null:
-        return false
-    for child: Node in root.get_children():
-        if child.has_meta(&"is_coop_manager"):
-            _cm = child
-            return true
-    return false
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 
 func _ready() -> void:
@@ -69,7 +63,7 @@ func _broadcast_airdrop_pose() -> void:
         return
     var a: Node3D = airdrop as Node3D
     var quat: Quaternion = a.global_transform.basis.get_rotation_quaternion()
-    _cm.vehicleState.sync_vehicle_snapshot.rpc("airdrop:" + relPath, a.global_transform.origin, quat, 0.0)
+    _cm.vehicleState.sync_vehicle_snapshot.rpc("airdrop:" + relPath, a.global_transform.origin, quat, 0.0, Engine.get_physics_frames())
 
 
 func _get_rel_path() -> String:

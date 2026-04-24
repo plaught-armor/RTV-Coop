@@ -3,6 +3,9 @@
 @tool
 extends "res://Scripts/MissileSpawner.gd"
 
+
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
+
 var _cm: Node = null
 
 
@@ -11,17 +14,8 @@ func _ensure_cm() -> bool:
         return true
     if Engine.is_editor_hint():
         return false
-    var tree: SceneTree = get_tree()
-    if tree == null:
-        return false
-    var root: Node = tree.root
-    if root == null:
-        return false
-    for child: Node in root.get_children():
-        if child.has_meta(&"is_coop_manager"):
-            _cm = child
-            return true
-    return false
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 
 func ExecuteLaunchMissiles(value: bool) -> void:
@@ -34,14 +28,16 @@ func ExecuteLaunchMissiles(value: bool) -> void:
     _coop_host_launch()
 
 
+func _has_execute_launch(n: Node) -> bool:
+    return n.has_method(&"ExecuteLaunch")
+
+
 func _coop_host_launch() -> void:
-    var pool: Array = get_children().filter(
-        func(n: Node) -> bool: return n.has_method(&"ExecuteLaunch"))
+    var pool: Array = get_children().filter(_has_execute_launch)
     var needsPrepare: bool = pool.is_empty()
     if needsPrepare:
         ExecutePrepareMissiles(true)
-        pool = get_children().filter(
-            func(n: Node) -> bool: return n.has_method(&"ExecuteLaunch"))
+        pool = get_children().filter(_has_execute_launch)
 
     var scene: Node = get_tree().current_scene
     var relPath: String = String(scene.get_path_to(self)) if is_instance_valid(scene) else ""
@@ -54,15 +50,18 @@ func _coop_host_launch() -> void:
     var fired: int = 0
     for element: Node in pool:
         await get_tree().create_timer(randf_range(0.0, launchDelay)).timeout
-        if !is_instance_valid(self):
+        if !is_instance_valid(self) || !is_instance_valid(_cm) || !_cm.is_session_active():
             return
         if !is_instance_valid(element):
             continue
         if element is Node3D:
             (element as Node3D).visible = true
         element.ExecuteLaunch(true)
-        if !relPath.is_empty():
-            _cm.worldState.broadcast_missile_launch.rpc(relPath, element.get_index())
+        if !relPath.is_empty() && is_instance_valid(_cm.worldState):
+            var orderedPool: Array = get_children().filter(_has_execute_launch)
+            var poolIdx: int = orderedPool.find(element)
+            if poolIdx >= 0:
+                _cm.worldState.broadcast_missile_launch.rpc(relPath, poolIdx)
         fired += 1
         if fired == total:
             launched = false
