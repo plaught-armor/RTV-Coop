@@ -32,7 +32,6 @@ var vehicleState: Node = null
 var steamBridge: Node = null
 var loader: Node = null
 var coopUI: Control = null
-var _pendingHostUseSteam: bool = true
 
 var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
 var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
@@ -391,8 +390,8 @@ func cache_peer_equipment(godotId: int, weaponName: String) -> void:
     cachedEquipment[alloc_peer_slot(godotId)] = weaponName
 
 
-func cache_peer_appearance(godotId: int, appearance: Dictionary) -> void:
-    cachedAppearances[alloc_peer_slot(godotId)] = appearance
+func cache_peer_appearance(godotId: int, entry: Dictionary) -> void:
+    cachedAppearances[alloc_peer_slot(godotId)] = entry
 
 
 func cache_peer_attachments(godotId: int, names: Array) -> void:
