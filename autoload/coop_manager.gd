@@ -49,6 +49,7 @@ var logCollector: RefCounted = preload("res://mod/autoload/log_collector.gd").ne
 var saveMirror: RefCounted = preload("res://mod/autoload/save_mirror.gd").new()
 var gameState: RefCounted = preload("res://mod/autoload/coop_game_state.gd").new()
 var _interactRouter: RefCounted = preload("res://mod/autoload/coop_interact_router.gd").new()
+var layoutsHook: RefCounted = preload("res://mod/network/layouts_hook.gd").new()
 var MenuCustomizerScript: Script = preload("res://mod/autoload/coop_menu_customizer.gd")
 var menuCustomizer: Node = null
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
@@ -88,6 +89,7 @@ func _ready() -> void:
     loader = get_node_or_null(PATH_LOADER_ABS)
     saveMirror.init_manager(self)
     gameState.init_manager(self)
+    layoutsHook.init_manager.call_deferred(self)
 
     _spawn_network_children()
     _spawn_coop_ui()

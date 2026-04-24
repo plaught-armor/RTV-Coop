@@ -39,7 +39,6 @@ const PATCHES: Array[String] = [
     "res://Scripts/Mine.gd",          "res://mod/patches/mine_patch.gd",
     "res://Scripts/Loader.gd",        "res://mod/patches/loader_patch.gd",
     "res://Scripts/Settings.gd",      "res://mod/patches/settings_patch.gd",
-    "res://Scripts/Layouts.gd",       "res://mod/patches/layouts_patch.gd",
     "res://Scripts/Furniture.gd",     "res://mod/patches/furniture_patch.gd",
     "res://Scripts/FishPool.gd",      "res://mod/patches/fish_pool_patch.gd",
     "res://Scripts/Trader.gd",        "res://mod/patches/trader_patch.gd",
