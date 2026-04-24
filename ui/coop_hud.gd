@@ -12,7 +12,7 @@ const PING_INTERVAL: float = 1.0
 const PATH_CONTROLLER: NodePath = ^"Core/Controller"
 var peerPings: Dictionary[int, int] = { }
 var labelPool: Array[HBoxContainer] = []
-var hintsLabel: Label = null
+var keybindLabel: Label = null
 var sleepOverlay: CanvasLayer = null
 var sleepLabel: Label = null
 const HINT_COLOR: Color = Color(0.6, 0.6, 0.6, 0.6)
@@ -30,23 +30,43 @@ func _ready() -> void:
     offset_top = 10
     mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-    hintsLabel = Label.new()
-    hintsLabel.add_theme_font_size_override("font_size", 12)
-    hintsLabel.add_theme_color_override("font_color", HINT_COLOR)
-    hintsLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-    hintsLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    add_child(hintsLabel)
-    update_hints()
+    _build_keybind_label()
     _build_sleep_overlay()
+
+
+# Keybind hint — first child of coop_hud so it sits above Connected Players
+# in the same top-right block. F12 hides it alongside player roster.
+func _build_keybind_label() -> void:
+    keybindLabel = Label.new()
+    keybindLabel.name = "KeybindLabel"
+    var font: FontFile = load("res://Fonts/Lora-Regular.ttf") as FontFile
+    if font != null:
+        keybindLabel.add_theme_font_override("font", font)
+    keybindLabel.add_theme_font_size_override("font_size", 12)
+    keybindLabel.add_theme_color_override("font_color", HINT_COLOR)
+    keybindLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    keybindLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    add_child(keybindLabel)
+    move_child(keybindLabel, 0)
+    _update_keybind_label()
+
+
+func _update_keybind_label() -> void:
+    if keybindLabel == null:
+        return
+    var toggleText: String = "Hide Connected" if hudVisible else "Show Connected"
+    keybindLabel.text = "[F11] Coop Menu | [F12] %s" % toggleText
 
 
 func _build_sleep_overlay() -> void:
     sleepOverlay = CanvasLayer.new()
+    sleepOverlay.name = "SleepOverlay"
     sleepOverlay.layer = 90
     sleepOverlay.visible = false
     CoopManager.add_child(sleepOverlay)
 
     sleepLabel = Label.new()
+    sleepLabel.name = "SleepLabel"
     sleepLabel.add_theme_font_size_override(&"font_size", 22)
     sleepLabel.add_theme_color_override(&"font_color", SLEEP_LABEL_COLOR)
     sleepLabel.add_theme_color_override(&"font_outline_color", SLEEP_OUTLINE_COLOR)
@@ -67,6 +87,7 @@ func _input(event: InputEvent) -> void:
     if event.keycode == KEY_F12:
         hudVisible = !hudVisible
         visible = hudVisible
+        _update_keybind_label()
 
 
 func _process(delta: float) -> void:
@@ -82,6 +103,8 @@ func _process(delta: float) -> void:
     if scenePath != lastScenePath:
         lastScenePath = scenePath
         inGameplay = is_instance_valid(scene) && scene.get_node_or_null(PATH_CONTROLLER) != null
+        if keybindLabel != null:
+            keybindLabel.visible = inGameplay
 
     if !inGameplay:
         if visible:
@@ -89,8 +112,6 @@ func _process(delta: float) -> void:
         return
     if !visible:
         visible = true
-
-    update_hints()
 
     if !CoopManager.isActive:
         hide_all_player_labels()
@@ -103,21 +124,6 @@ func _process(delta: float) -> void:
 
     update_pings()
     update_player_labels()
-
-
-func update_hints() -> void:
-    if CoopManager.isActive:
-        hintsLabel.text = ""
-    elif !CoopManager.DEBUG && !CoopManager.steamBridge.is_ready():
-        var bridgeState: int = CoopManager.steamBridge.state
-        if bridgeState == CoopManager.steamBridge.State.CONNECTED:
-            hintsLabel.text = "Steam: verifying..."
-        elif bridgeState == CoopManager.steamBridge.State.CONNECTING:
-            hintsLabel.text = "Steam: connecting..."
-        else:
-            hintsLabel.text = "Steam: offline"
-    else:
-        hintsLabel.text = ""
 
 
 func update_pings() -> void:
@@ -186,10 +192,12 @@ func get_pooled_row(idx: int) -> HBoxContainer:
         return labelPool[idx]
 
     var row: HBoxContainer = HBoxContainer.new()
+    row.name = "PlayerRow"
     row.mouse_filter = Control.MOUSE_FILTER_IGNORE
     row.alignment = BoxContainer.ALIGNMENT_END
 
     var avatar: TextureRect = TextureRect.new()
+    avatar.name = "Avatar"
     avatar.custom_minimum_size = Vector2(18, 18)
     avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
     avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -197,6 +205,10 @@ func get_pooled_row(idx: int) -> HBoxContainer:
     row.add_child(avatar)
 
     var label: Label = Label.new()
+    label.name = "NameLabel"
+    var font: FontFile = load("res://Fonts/Lora-Regular.ttf") as FontFile
+    if font != null:
+        label.add_theme_font_override("font", font)
     label.add_theme_font_size_override("font_size", 14)
     label.add_theme_color_override("font_color", PLAYER_COLOR)
     label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT

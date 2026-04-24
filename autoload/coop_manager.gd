@@ -21,9 +21,28 @@ var avatarCache: Dictionary[String, ImageTexture] = { }
 var headlessMaps: Dictionary[String, Node] = {}
 var mapSnapshots: Dictionary[String, Dictionary] = {}
 # Host-owned session settings broadcast to every peer (update via set_setting).
+# All float (0/1 encoding for bool-flavoured toggles). Client patches read
+# CoopManager.settings[key] directly with a fallback default at the call site
+# so older hosts don't break newer clients.
 var settings: Dictionary[String, float] = {
+    # Time / weather
     "day_rate_multiplier": 1.0,
     "night_rate_multiplier": 1.0,
+    "weather_locked": 0.0,
+    # Combat scaling
+    "damage_to_ai_multiplier": 1.0,
+    "damage_to_player_multiplier": 1.0,
+    "friendly_fire": 0.0,
+    # AI
+    "ai_spawn_multiplier": 1.0,
+    "ai_aggression_multiplier": 1.0,
+    # Loot
+    "loot_multiplier": 1.0,
+    # Vitals (applied via character_patch)
+    "stamina_regen_multiplier": 1.0,
+    "stamina_drain_multiplier": 1.0,
+    "temperature_loss_multiplier": 1.0,
+    "vitals_decay_multiplier": 1.0,
 }
 var playerState: Node = null
 var worldState: Node = null
@@ -41,7 +60,6 @@ var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
 var slotSerializer: RefCounted = preload("res://mod/network/slot_serializer.gd").new()
 var HeadlessMapScript: Script = preload("res://mod/network/headless_map.gd")
 # Cached before take_over_path to avoid circular extends after path redirect.
-var PickupPatchScript: Script = preload("res://mod/patches/pickup_patch.gd")
 var AIPatchScript: Script = preload("res://mod/patches/ai_patch.gd")
 var appearance: RefCounted = preload("res://mod/network/appearance.gd").new()
 var perf: RefCounted = preload("res://mod/network/perf.gd").new()
@@ -56,6 +74,9 @@ var deathStateHook: RefCounted = preload("res://mod/network/death_state_hook.gd"
 var instrumentHook: RefCounted = preload("res://mod/network/instrument_hook.gd").new()
 var MenuCustomizerScript: Script = preload("res://mod/autoload/coop_menu_customizer.gd")
 var menuCustomizer: Node = null
+# Host-set display name for non-Steam (Direct IP) sessions. Persisted at user://coop/name.txt.
+var coopCustomName: String = ""
+const CUSTOM_NAME_PATH: String = "user://coop/name.txt"
 var audioLibrary: AudioLibrary = preload("res://Resources/AudioLibrary.tres")
 var gd: GameData = preload("res://Resources/GameData.tres")
 var lastScenePath: String = ""
@@ -86,10 +107,15 @@ func _ready() -> void:
     # RPC uses NodePath across peers, so force /root/CoopManager on both sides.
     _normalize_autoload_path.call_deferred()
     set_meta(&"is_coop_manager", true)
+    # Vanilla Settings.gd pauses get_tree() which would also halt host-side RPC
+    # dispatch + state ticks here. ALWAYS keeps network alive so peers don't
+    # freeze when anyone (host or client) opens the Settings menu.
+    process_mode = Node.PROCESS_MODE_ALWAYS
     if DEBUG:
         force_windowed()
 
     register_patches()
+    _load_custom_name()
     loader = get_node_or_null(PATH_LOADER_ABS)
     layoutsHook.connect_tree.call_deferred()
     instrumentHook.connect_tree.call_deferred()
@@ -123,23 +149,28 @@ func _spawn_network_children() -> void:
 
     playerState = PlayerStateScript_.new()
     playerState.name = "PlayerState"
+    playerState.process_mode = Node.PROCESS_MODE_ALWAYS
     add_child(playerState)
 
     worldState = WorldStateScript.new()
     worldState.name = "WorldState"
+    worldState.process_mode = Node.PROCESS_MODE_ALWAYS
     add_child(worldState)
 
     aiState = AIStateScript.new()
     aiState.name = "AIState"
+    aiState.process_mode = Node.PROCESS_MODE_ALWAYS
     add_child(aiState)
 
     var VehicleStateScript: Script = preload("res://mod/network/vehicle_state.gd")
     vehicleState = VehicleStateScript.new()
     vehicleState.name = "VehicleState"
+    vehicleState.process_mode = Node.PROCESS_MODE_ALWAYS
     add_child(vehicleState)
 
     steamBridge = SteamBridgeScript.new()
     steamBridge.name = "SteamBridge"
+    steamBridge.process_mode = Node.PROCESS_MODE_ALWAYS
     add_child(steamBridge)
     steamBridge.launch()
 
@@ -347,6 +378,7 @@ func disconnect_session() -> void:
 func alloc_peer_slot(godotId: int) -> int:
     if peerIdxByGodotId.has(godotId):
         return peerIdxByGodotId[godotId]
+        
     for i: int in peerGodotIds.size():
         if peerGodotIds[i] == -1:
             peerGodotIds[i] = godotId
@@ -512,9 +544,42 @@ func on_p2p_tunnel_ready(response: Dictionary) -> void:
     join_game("127.0.0.1", tunnelPort)
 
 func get_local_name() -> String:
+    if !coopCustomName.is_empty():
+        return coopCustomName
     if steamBridge.is_ready():
         return steamBridge.localSteamName
     return "Player_%d" % localPeerId
+
+
+func set_custom_name(name: String) -> void:
+    var trimmed: String = name.strip_edges().substr(0, 32)
+    coopCustomName = trimmed
+    _save_custom_name()
+    # Rebroadcast to peers if already in a session so their player list updates.
+    if isActive:
+        var localIdx: int = peer_idx(localPeerId)
+        if localIdx >= 0:
+            peerNames[localIdx] = get_local_name()
+        var localSteamID: String = steamBridge.localSteamID if steamBridge.is_ready() else ""
+        sync_name.rpc(get_local_name(), localSteamID)
+
+
+func _save_custom_name() -> void:
+    DirAccess.make_dir_recursive_absolute("user://coop/")
+    var f: FileAccess = FileAccess.open(CUSTOM_NAME_PATH, FileAccess.WRITE)
+    if f != null:
+        f.store_string(coopCustomName)
+        f.close()
+
+
+func _load_custom_name() -> void:
+    if !FileAccess.file_exists(CUSTOM_NAME_PATH):
+        return
+    var f: FileAccess = FileAccess.open(CUSTOM_NAME_PATH, FileAccess.READ)
+    if f == null:
+        return
+    coopCustomName = f.get_as_text().strip_edges().substr(0, 32)
+    f.close()
 
 
 func get_peer_name(peerId: int) -> String:
@@ -616,6 +681,9 @@ func spawn_remote_player(peerId: int) -> void:
     var remote: Node3D = remotePlayerScene.instantiate()
     remote.name = "RemotePlayer_%d" % peerId
     remote.set_meta(&"peer_id", peerId)
+    # Remote puppet must keep ticking while vanilla Settings pauses the tree,
+    # otherwise position snapshots queue up and remote teleports on resume.
+    remote.process_mode = Node.PROCESS_MODE_ALWAYS
     remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
     var peerDisplayName: String = get_peer_name(peerId)
@@ -1066,7 +1134,7 @@ func sync_peer_map(mapPath: String) -> void:
 
 
 # Menu audio bleeds through SubViewport into host's Master bus; skip non-gameplay scenes.
-const _HEADLESS_SKIP_SCENES: Array[String] = [
+var _HEADLESS_SKIP_SCENES: PackedStringArray = [
     "res://Scenes/Menu.tscn",
     "res://Scenes/Death.tscn",
 ]

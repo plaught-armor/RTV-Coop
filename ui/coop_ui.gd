@@ -1,6 +1,6 @@
 ## Host/join panel for the co-op mod.
-## [kbd]F9[/kbd] toggles the panel. [kbd]F10[/kbd] quick-hosts.
-## Primary UI is Steam lobby browser. ENet direct-connect shown only in DEBUG mode.
+## [kbd]F11[/kbd] toggles the in-game coop panel (host/join/browse/disconnect).
+## Primary UI is Steam lobby browser. ENet direct-connect reachable from the panel.
 extends Control
 
 
@@ -14,8 +14,22 @@ var lastConnectionState: int = -1
 var playerLabelPool: Array[HBoxContainer] = []
 
 # Steam lobby widgets
-var lobbyList: VBoxContainer = null
 var lobbyLabelPool: Array[Button] = []
+var _hostRow: HBoxContainer = null
+var _ipJoinRow: HBoxContainer = null
+var _inlineAddrInput: LineEdit = null
+var _inlinePortInput: LineEdit = null
+var _subtitleLabel: Label = null
+var _modeLabel: Label = null
+var _addressRow: HBoxContainer = null
+var _addressLabel: Label = null
+var _sessionInfoRow: HBoxContainer = null
+var _nameRow: HBoxContainer = null
+var _nameInput: LineEdit = null
+var _friendsCol: VBoxContainer = null
+var _dimBackground: ColorRect = null
+var _pausedLabel: Label = null
+var _bottomControlsCol: VBoxContainer = null
 
 # Friend invite widgets
 var friendScroll: ScrollContainer = null
@@ -74,101 +88,388 @@ var playerList: VBoxContainer = null
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     mouse_filter = Control.MOUSE_FILTER_IGNORE
+    # When vanilla Settings pauses the tree, our _process/_input must still run
+    # so F11 can toggle + auto-close/open-swap stays responsive.
+    process_mode = Node.PROCESS_MODE_ALWAYS
+    _apply_theme()
     build_ui()
     panel.hide()
 
 
-## INS panel is deprecated — all session controls now live in the in-game
-## Esc menu's Multiplayer tab (settings_patch.gd). Only F11 (direct-connect)
-## remains in DEBUG builds for testing without Steam.
-func _input(event: InputEvent) -> void:
-    if !(event is InputEventKey) || !event.pressed || event.echo:
+func _apply_theme() -> void:
+    var font: FontFile = load("res://Fonts/Lora-Regular.ttf") as FontFile
+    if font == null:
         return
+    var t: Theme = Theme.new()
+    t.default_font = font
+    t.default_font_size = 14
+    theme = t
+
+
+## F11 toggles the in-game coop panel. Gameplay-only to avoid clashing with menu UI.
+## While coop panel is open, Esc/Tab are swallowed so Settings/Inventory can't
+## open on top — same-key rule: each menu is closed by its own opener.
+func _input(event: InputEvent) -> void:
     if !is_in_gameplay():
         return
-    if event.keycode == KEY_F11 && is_instance_valid(CoopManager) && CoopManager.DEBUG:
-        show_direct_join_dialog()
+
+    # Block Settings (Esc) and Interface (Tab) actions while coop panel is open.
+    if panelVisible && (event.is_action_pressed("settings") || event.is_action_pressed("interface")):
+        get_viewport().set_input_as_handled()
+        return
+
+    if !(event is InputEventKey) || !event.pressed || event.echo:
+        return
+    if event.keycode == KEY_F11:
+        # Same-key toggle rule: F11 only acts on coop panel. If another menu
+        # (Settings/Inventory) is open, F11 is ignored — user must press its
+        # own key to close it first, matching vanilla's menu exclusion.
+        if !panelVisible && (CoopManager.gd.settings || CoopManager.gd.interface):
+            get_viewport().set_input_as_handled()
+            return
+        toggle_panel()
+        get_viewport().set_input_as_handled()
+
+
+func toggle_panel() -> void:
+    if panelVisible:
+        close_panel()
+    else:
+        open_panel()
+
+
+func open_panel() -> void:
+    if panelVisible:
+        return
+    panelVisible = true
+    panel.visible = true
+    _dimBackground.visible = true
+    _pausedLabel.visible = true
+    # Confine matches vanilla Settings (UIManager.UIOpen) — cursor stays inside window.
+    Input.set_mouse_mode(Input.MOUSE_MODE_CONFINED)
+    # Freeze player input only — we DON'T pause the tree in coop because that
+    # would halt host-side network state / RPC dispatch and desync all peers.
+    CoopManager.gd.freeze = true
 
 
 func build_ui() -> void:
+    # Full-screen dim behind panel, matches vanilla Settings overlay.
+    _dimBackground = ColorRect.new()
+    _dimBackground.name = "DimBackground"
+    _dimBackground.color = Color(0, 0, 0, 0.75)
+    _dimBackground.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    _dimBackground.mouse_filter = Control.MOUSE_FILTER_STOP
+    _dimBackground.visible = false
+    add_child(_dimBackground)
+
+    # "Game Paused" banner at top-center.
+    _pausedLabel = Label.new()
+    _pausedLabel.name = "PausedLabel"
+    _pausedLabel.text = "Game Paused"
+    _pausedLabel.add_theme_font_size_override("font_size", 16)
+    _pausedLabel.add_theme_color_override("font_color", Color(0.85, 0.25, 0.25, 1.0))
+    _pausedLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    _pausedLabel.anchor_left = 0.0
+    _pausedLabel.anchor_right = 1.0
+    _pausedLabel.anchor_top = 0.0
+    _pausedLabel.anchor_bottom = 0.0
+    _pausedLabel.offset_top = 120
+    _pausedLabel.offset_bottom = 144
+    _pausedLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    _pausedLabel.visible = false
+    add_child(_pausedLabel)
+
     panel = PanelContainer.new()
-    panel.custom_minimum_size = Vector2(340, 400)
+    panel.name = "CoopPanel"
     panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
     panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
     panel.grow_vertical = Control.GROW_DIRECTION_BOTH
     panel.mouse_filter = Control.MOUSE_FILTER_STOP
+    # Kill vanilla PanelContainer grey bg; dim ColorRect behind already darkens scene.
+    panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
     add_child(panel)
 
-    var vbox: VBoxContainer = VBoxContainer.new()
-    panel.add_child(vbox)
+    var margin: MarginContainer = MarginContainer.new()
+    margin.name = "Margin"
+    margin.add_theme_constant_override("margin_left", 24)
+    margin.add_theme_constant_override("margin_right", 24)
+    margin.add_theme_constant_override("margin_top", 20)
+    margin.add_theme_constant_override("margin_bottom", 20)
+    panel.add_child(margin)
+
+    var columns: HBoxContainer = HBoxContainer.new()
+    columns.name = "Columns"
+    columns.add_theme_constant_override("separation", 48)
+    margin.add_child(columns)
+
+    var mainCol: VBoxContainer = VBoxContainer.new()
+    mainCol.name = "MainCol"
+    mainCol.custom_minimum_size = Vector2(500, 0)
+    mainCol.add_theme_constant_override("separation", 8)
+    columns.add_child(mainCol)
+
+    # Top row: [ title/subtitle/status (left) ] [ Connected Players (right) ]
+    var topRow: HBoxContainer = HBoxContainer.new()
+    topRow.name = "TopRow"
+    topRow.add_theme_constant_override("separation", 24)
+    mainCol.add_child(topRow)
+
+    var titleBlock: VBoxContainer = VBoxContainer.new()
+    titleBlock.name = "TitleBlock"
+    titleBlock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    topRow.add_child(titleBlock)
 
     var titleLabel: Label = Label.new()
-    titleLabel.text = "Co-op"
-    titleLabel.add_theme_font_size_override("font_size", 18)
-    vbox.add_child(titleLabel)
+    titleLabel.name = "TitleLabel"
+    titleLabel.text = "Multiplayer"
+    titleLabel.add_theme_font_size_override("font_size", 22)
+    titleBlock.add_child(titleLabel)
+
+    _subtitleLabel = Label.new()
+    _subtitleLabel.name = "SubtitleLabel"
+    _subtitleLabel.text = "Co-op session"
+    _subtitleLabel.add_theme_font_size_override("font_size", 12)
+    titleBlock.add_child(_subtitleLabel)
 
     statusLabel = Label.new()
+    statusLabel.name = "StatusLabel"
     statusLabel.text = "Disconnected"
-    vbox.add_child(statusLabel)
+    statusLabel.add_theme_font_size_override("font_size", 14)
+    titleBlock.add_child(statusLabel)
 
-    vbox.add_child(HSeparator.new())
+    # Players column sits on the right of the title info (in TopRow).
+    var playersBlock: VBoxContainer = VBoxContainer.new()
+    playersBlock.name = "PlayersBlock"
+    playersBlock.custom_minimum_size = Vector2(200, 0)
+    topRow.add_child(playersBlock)
 
-    # Steam lobby section (always visible)
-    var steamLabel: Label = Label.new()
-    steamLabel.text = "Steam Lobbies"
-    vbox.add_child(steamLabel)
+    var playersHeader: Label = Label.new()
+    playersHeader.name = "ConnectedPlayersLabel"
+    playersHeader.text = "Connected Players"
+    playersHeader.add_theme_font_size_override("font_size", 14)
+    playersBlock.add_child(playersHeader)
 
-    var btnRow: HBoxContainer = HBoxContainer.new()
-    vbox.add_child(btnRow)
+    playerList = VBoxContainer.new()
+    playerList.name = "PlayerList"
+    playersBlock.add_child(playerList)
 
-    var hostBtn: Button = Button.new()
-    hostBtn.text = "Host (Steam)"
-    hostBtn.pressed.connect(on_host_pressed)
-    btnRow.add_child(hostBtn)
+    # Session info + controls row (visible only during session):
+    #   [ mode+address (left) ] [ Disconnect/Logs stacked (right) ]
+    _sessionInfoRow = HBoxContainer.new()
+    _sessionInfoRow.name = "SessionInfoRow"
+    _sessionInfoRow.add_theme_constant_override("separation", 12)
+    _sessionInfoRow.visible = false
+    mainCol.add_child(_sessionInfoRow)
 
-    var refreshBtn: Button = Button.new()
-    refreshBtn.text = "Refresh"
-    refreshBtn.pressed.connect(on_refresh_lobbies)
-    btnRow.add_child(refreshBtn)
+    var infoCol: VBoxContainer = VBoxContainer.new()
+    infoCol.name = "InfoCol"
+    infoCol.add_theme_constant_override("separation", 4)
+    infoCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _sessionInfoRow.add_child(infoCol)
+
+    _modeLabel = Label.new()
+    _modeLabel.name = "ModeLabel"
+    _modeLabel.add_theme_font_size_override("font_size", 12)
+    infoCol.add_child(_modeLabel)
+
+    _addressRow = HBoxContainer.new()
+    _addressRow.name = "AddressRow"
+    _addressRow.add_theme_constant_override("separation", 6)
+    infoCol.add_child(_addressRow)
+
+    var addrPrefix: Label = Label.new()
+    addrPrefix.name = "AddrPrefixLabel"
+    addrPrefix.text = "Address:"
+    addrPrefix.add_theme_font_size_override("font_size", 12)
+    _addressRow.add_child(addrPrefix)
+
+    _addressLabel = Label.new()
+    _addressLabel.name = "AddressLabel"
+    _addressLabel.add_theme_font_size_override("font_size", 12)
+    _addressRow.add_child(_addressLabel)
+
+    var addrCopyBtn: Button = Button.new()
+    addrCopyBtn.name = "CopyAddressBtn"
+    addrCopyBtn.text = "Copy"
+    addrCopyBtn.custom_minimum_size = Vector2(60, 22)
+    addrCopyBtn.pressed.connect(_on_address_copy_pressed)
+    _addressRow.add_child(addrCopyBtn)
+
+
+    mainCol.add_child(_make_spacer(6))
+
+    # Display name row (above host controls; used on Direct IP where Steam name unavailable)
+    _nameRow = HBoxContainer.new()
+    _nameRow.name = "NameRow"
+    _nameRow.add_theme_constant_override("separation", 8)
+    mainCol.add_child(_nameRow)
+
+    var nameLabel: Label = Label.new()
+    nameLabel.name = "NameLabel"
+    nameLabel.text = "Name"
+    nameLabel.custom_minimum_size = Vector2(60, 0)
+    _nameRow.add_child(nameLabel)
+
+    _nameInput = LineEdit.new()
+    _nameInput.name = "NameInput"
+    _nameInput.placeholder_text = "Player_%d" % CoopManager.localPeerId
+    _nameInput.text = CoopManager.coopCustomName
+    _nameInput.max_length = 32
+    _nameInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _nameInput.custom_minimum_size = Vector2(0, 28)
+    _nameInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    _nameInput.text_submitted.connect(_on_name_submitted)
+    _nameInput.focus_exited.connect(_on_name_focus_exited)
+    _nameRow.add_child(_nameInput)
+
+    # Host row: Host (Steam) | Host (IP)
+    _hostRow = HBoxContainer.new()
+    _hostRow.name = "HostRow"
+    _hostRow.add_theme_constant_override("separation", 8)
+    mainCol.add_child(_hostRow)
+
+    var hostSteamBtn: Button = Button.new()
+    hostSteamBtn.name = "HostSteamBtn"
+    hostSteamBtn.text = "Host (Steam)"
+    hostSteamBtn.custom_minimum_size = Vector2(0, 36)
+    hostSteamBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    hostSteamBtn.pressed.connect(on_host_pressed)
+    _hostRow.add_child(hostSteamBtn)
+
+    var hostIPBtn: Button = Button.new()
+    hostIPBtn.name = "HostIPBtn"
+    hostIPBtn.text = "Host (IP)"
+    hostIPBtn.custom_minimum_size = Vector2(0, 36)
+    hostIPBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    hostIPBtn.pressed.connect(_on_host_ip_pressed)
+    _hostRow.add_child(hostIPBtn)
+
+    # IP/Port/Join row
+    _ipJoinRow = HBoxContainer.new()
+    _ipJoinRow.name = "IPJoinRow"
+    _ipJoinRow.add_theme_constant_override("separation", 8)
+    mainCol.add_child(_ipJoinRow)
+
+    _inlineAddrInput = LineEdit.new()
+    _inlineAddrInput.name = "JoinAddrInput"
+    _inlineAddrInput.placeholder_text = "127.0.0.1"
+    _inlineAddrInput.text = "127.0.0.1"
+    _inlineAddrInput.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    _inlineAddrInput.custom_minimum_size = Vector2(0, 32)
+    _inlineAddrInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    _ipJoinRow.add_child(_inlineAddrInput)
+
+    _inlinePortInput = LineEdit.new()
+    _inlinePortInput.name = "JoinPortInput"
+    _inlinePortInput.placeholder_text = "9050"
+    _inlinePortInput.text = str(CoopManager.DEFAULT_PORT)
+    _inlinePortInput.custom_minimum_size = Vector2(80, 32)
+    _inlinePortInput.mouse_filter = Control.MOUSE_FILTER_STOP
+    _ipJoinRow.add_child(_inlinePortInput)
+
+    var joinBtn: Button = Button.new()
+    joinBtn.name = "JoinBtn"
+    joinBtn.text = "Join"
+    joinBtn.custom_minimum_size = Vector2(80, 32)
+    joinBtn.pressed.connect(_on_inline_join_pressed)
+    _ipJoinRow.add_child(joinBtn)
+
+    mainCol.add_child(_make_spacer(8))
+
+    # Bottom session controls: Disconnect + Logs stacked vertically.
+    _bottomControlsCol = VBoxContainer.new()
+    _bottomControlsCol.name = "BottomControlsCol"
+    _bottomControlsCol.add_theme_constant_override("separation", 6)
+    _bottomControlsCol.visible = false
+    mainCol.add_child(_bottomControlsCol)
+
+    var sessDisconnectBtn: Button = Button.new()
+    sessDisconnectBtn.name = "DisconnectBtn"
+    sessDisconnectBtn.text = "Disconnect"
+    sessDisconnectBtn.custom_minimum_size = Vector2(0, 32)
+    sessDisconnectBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    sessDisconnectBtn.pressed.connect(on_disconnect_pressed)
+    _bottomControlsCol.add_child(sessDisconnectBtn)
+
+    var sessLogsBtn: Button = Button.new()
+    sessLogsBtn.name = "LogsBtn"
+    sessLogsBtn.text = "Logs"
+    sessLogsBtn.custom_minimum_size = Vector2(0, 32)
+    sessLogsBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    sessLogsBtn.pressed.connect(_on_collect_logs_pressed)
+    _bottomControlsCol.add_child(sessLogsBtn)
+
+    # Right column — Invite Friends (Steam only)
+    _friendsCol = VBoxContainer.new()
+    _friendsCol.name = "FriendsCol"
+    _friendsCol.custom_minimum_size = Vector2(280, 0)
+    columns.add_child(_friendsCol)
+
+    var friendsHeader: Label = Label.new()
+    friendsHeader.name = "FriendsHeaderLabel"
+    friendsHeader.text = "Invite Friends"
+    friendsHeader.add_theme_font_size_override("font_size", 16)
+    _friendsCol.add_child(friendsHeader)
+
+    _friendsCol.add_child(_make_spacer(4))
 
     inviteBtn = Button.new()
-    inviteBtn.text = "Invite"
+    inviteBtn.name = "RefreshFriendsBtn"
+    inviteBtn.text = "Refresh"
     inviteBtn.pressed.connect(on_invite_pressed)
-    btnRow.add_child(inviteBtn)
-
-    lobbyList = VBoxContainer.new()
-    vbox.add_child(lobbyList)
+    _friendsCol.add_child(inviteBtn)
 
     friendScroll = ScrollContainer.new()
-    friendScroll.custom_minimum_size = Vector2(0, 200)
+    friendScroll.name = "FriendsScroll"
+    friendScroll.custom_minimum_size = Vector2(0, 360)
     friendScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    friendScroll.hide()
-    vbox.add_child(friendScroll)
+    friendScroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    _friendsCol.add_child(friendScroll)
 
     friendList = VBoxContainer.new()
+    friendList.name = "FriendsList"
     friendList.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     friendScroll.add_child(friendList)
 
-    vbox.add_child(HSeparator.new())
 
-    var disconnectBtn: Button = Button.new()
-    disconnectBtn.text = "Disconnect"
-    disconnectBtn.pressed.connect(on_disconnect_pressed)
-    vbox.add_child(disconnectBtn)
+func _make_spacer(height: int) -> Control:
+    var s: Control = Control.new()
+    s.name = "Spacer"
+    s.custom_minimum_size = Vector2(0, height)
+    return s
 
-    var collectLogsBtn: Button = Button.new()
-    collectLogsBtn.text = "Open Logs Folder"
-    collectLogsBtn.pressed.connect(_on_collect_logs_pressed)
-    vbox.add_child(collectLogsBtn)
 
-    vbox.add_child(HSeparator.new())
+func _on_host_ip_pressed() -> void:
+    if CoopManager.is_session_active():
+        return
+    pendingHostUseSteam = false
+    show_world_picker()
 
-    var playersLabel: Label = Label.new()
-    playersLabel.text = "Connected Players:"
-    vbox.add_child(playersLabel)
 
-    playerList = VBoxContainer.new()
-    vbox.add_child(playerList)
+func _on_inline_join_pressed() -> void:
+    if CoopManager.is_session_active():
+        return
+    var addr: String = _inlineAddrInput.text.strip_edges() if _inlineAddrInput != null else ""
+    if addr.is_empty():
+        addr = "127.0.0.1"
+    var port: int = CoopManager.DEFAULT_PORT
+    if _inlinePortInput != null && !_inlinePortInput.text.strip_edges().is_empty():
+        port = int(_inlinePortInput.text.strip_edges())
+    CoopManager.join_game(addr, port, true)
+
+
+func _on_name_submitted(newText: String) -> void:
+    CoopManager.set_custom_name(newText)
+
+
+func _on_name_focus_exited() -> void:
+    if _nameInput != null:
+        CoopManager.set_custom_name(_nameInput.text)
+
+
+func _on_address_copy_pressed() -> void:
+    if _addressLabel != null:
+        DisplayServer.clipboard_set(_addressLabel.text)
 
 
 func _process(_delta: float) -> void:
@@ -186,15 +487,42 @@ func _process(_delta: float) -> void:
     lastConnectionState = currentState
     lastPeerCount = currentPeerCount
 
+    var inSession: bool = currentState != 0
+    _hostRow.visible = !inSession
+    _ipJoinRow.visible = !inSession
+    _nameRow.visible = !inSession
+    _sessionInfoRow.visible = inSession
+    _bottomControlsCol.visible = inSession
+    var usingSteam: bool = CoopManager.currentLobbyID != "" if CoopManager.isHost else CoopManager.steamBridge != null && CoopManager.steamBridge.is_ready()
+    _friendsCol.visible = !inSession || usingSteam
+    # Let panel auto-size to content and re-center every state change.
+    panel.reset_size()
+    panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+
     match currentState:
         0:
             statusLabel.text = "Disconnected"
+            _subtitleLabel.text = "Co-op session"
+            _addressRow.visible = false
         1:
+            var hostPeers: String = "%d peer(s)" % currentPeerCount
+            statusLabel.text = "Host — %s" % hostPeers
+            var mode: String = "Steam lobby" if CoopManager.currentLobbyID != "" else "Direct IP"
+            _modeLabel.text = "Mode: %s" % mode
+            var addrs: PackedStringArray = CoopManager.get_sharable_addresses()
+            if addrs.size() > 0:
+                _addressLabel.text = addrs[0]
+                _addressRow.visible = true
+            else:
+                _addressRow.visible = false
             var worldLabel: String = _get_active_world_name()
-            statusLabel.text = "Hosting — %s (%d peers)" % [worldLabel, currentPeerCount] if !worldLabel.is_empty() else "Hosting (%d peers)" % currentPeerCount
+            _subtitleLabel.text = worldLabel if !worldLabel.is_empty() else "Co-op session"
         2:
+            statusLabel.text = "Connected"
+            _modeLabel.text = "Mode: Client"
+            _addressRow.visible = false
             var worldLabel: String = _get_active_world_name()
-            statusLabel.text = "Connected — %s" % worldLabel if !worldLabel.is_empty() else "Connected"
+            _subtitleLabel.text = worldLabel if !worldLabel.is_empty() else "Co-op session"
 
     update_player_list()
     _update_lobby_players()
@@ -208,7 +536,8 @@ func update_player_list() -> void:
         idx += 1
         var localAvatar: TextureRect = localRow.get_child(0)
         var localLabel: Label = localRow.get_child(1)
-        localLabel.text = "%s (You)" % CoopManager.get_local_name()
+        var localSuffix: String = " — Host" if CoopManager.isHost else ""
+        localLabel.text = "%s (You)%s" % [CoopManager.get_local_name(), localSuffix]
         var localTex: ImageTexture = null
         if CoopManager.avatarCache.has(CoopManager.steamBridge.localSteamID):
             localTex = CoopManager.avatarCache[CoopManager.steamBridge.localSteamID]
@@ -244,13 +573,16 @@ func get_pooled_player_row(idx: int) -> HBoxContainer:
         return playerLabelPool[idx]
 
     var row: HBoxContainer = HBoxContainer.new()
+    row.name = "PlayerRow"
     var avatar: TextureRect = TextureRect.new()
+    avatar.name = "Avatar"
     avatar.custom_minimum_size = Vector2(24, 24)
     avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
     avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
     row.add_child(avatar)
 
     var label: Label = Label.new()
+    label.name = "NameLabel"
     label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     row.add_child(label)
 
@@ -266,7 +598,10 @@ func close_panel() -> void:
         return
     panelVisible = false
     panel.visible = false
+    _dimBackground.visible = false
+    _pausedLabel.visible = false
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+    CoopManager.gd.freeze = false
 
 
 func is_in_gameplay() -> bool:
@@ -1245,23 +1580,57 @@ func show_lobby(useSteam: bool) -> void:
     # Gate on isHost even though show_lobby's call sites are both host entries
     # today — defensive so future non-host refactors can't re-open this path
     # and flood request_setting_change on every slider tick.
+    var columns: HBoxContainer = HBoxContainer.new()
+    columns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    vbox.add_child(columns)
+
     if CoopManager.isHost:
+        var settingsCol: VBoxContainer = VBoxContainer.new()
+        settingsCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        columns.add_child(settingsCol)
+
         var settingsHeader: Label = Label.new()
         settingsHeader.text = "Session Settings"
         settingsHeader.add_theme_font_size_override("font_size", 14)
-        vbox.add_child(settingsHeader)
+        settingsCol.add_child(settingsHeader)
 
-        _build_rate_slider(vbox, "Day rate", "day_rate_multiplier")
-        _build_rate_slider(vbox, "Night rate", "night_rate_multiplier")
+        var settingsScroll: ScrollContainer = ScrollContainer.new()
+        settingsScroll.custom_minimum_size = Vector2(0, 280)
+        settingsScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+        settingsScroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        settingsCol.add_child(settingsScroll)
+
+        var settingsBox: VBoxContainer = VBoxContainer.new()
+        settingsBox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        settingsBox.add_theme_constant_override("separation", 4)
+        settingsScroll.add_child(settingsBox)
+
+        _build_rate_slider(settingsBox, "Day rate", "day_rate_multiplier")
+        _build_rate_slider(settingsBox, "Night rate", "night_rate_multiplier")
+        _build_rate_slider(settingsBox, "AI spawns", "ai_spawn_multiplier", 0.0, 3.0, 0.1)
+        _build_rate_slider(settingsBox, "AI aggression", "ai_aggression_multiplier", 0.1, 3.0, 0.1)
+        _build_rate_slider(settingsBox, "Dmg → AI", "damage_to_ai_multiplier", 0.1, 5.0, 0.1)
+        _build_rate_slider(settingsBox, "Dmg → player", "damage_to_player_multiplier", 0.1, 5.0, 0.1)
+        _build_rate_slider(settingsBox, "Loot", "loot_multiplier", 0.0, 5.0, 0.1)
+        _build_rate_slider(settingsBox, "Stamina regen", "stamina_regen_multiplier", 0.1, 5.0, 0.1)
+        _build_rate_slider(settingsBox, "Stamina drain", "stamina_drain_multiplier", 0.1, 5.0, 0.1)
+        _build_rate_slider(settingsBox, "Temp loss", "temperature_loss_multiplier", 0.1, 5.0, 0.1)
+        _build_rate_slider(settingsBox, "Vitals decay", "vitals_decay_multiplier", 0.1, 5.0, 0.1)
+        _build_toggle(settingsBox, "Weather locked", "weather_locked")
+        _build_toggle(settingsBox, "Friendly fire", "friendly_fire")
 
     # Connected players
+    var playersCol: VBoxContainer = VBoxContainer.new()
+    playersCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    columns.add_child(playersCol)
+
     var playersHeader: Label = Label.new()
     playersHeader.text = "Players"
     playersHeader.add_theme_font_size_override("font_size", 14)
-    vbox.add_child(playersHeader)
+    playersCol.add_child(playersHeader)
 
     _lobbyPlayerList = VBoxContainer.new()
-    vbox.add_child(_lobbyPlayerList)
+    playersCol.add_child(_lobbyPlayerList)
 
     # Friends list (Steam mode only)
     if useSteam:
@@ -1299,9 +1668,12 @@ func _on_lobby_copy_text(copyText: String) -> void:
 
 
 ## Builds a labeled HSlider row bound to a [member CoopManager.settings] key.
-## Value range mirrors the simulation_patch clamp (0.1×..10×). Label on the
-## right updates live as the host drags. Slider → CoopManager.set_setting broadcasts
-func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> void:
+## Defaults cover simulation rate sliders (0.1×..10×). Override min/max/step
+## for narrower knobs. Slider → CoopManager.set_setting broadcasts.
+func _build_rate_slider(
+    parent: VBoxContainer, caption: String, key: String,
+    minv: float = 0.1, maxv: float = 10.0, step: float = 0.1,
+) -> void:
     var row: HBoxContainer = HBoxContainer.new()
     row.add_theme_constant_override("separation", 8)
     row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1309,16 +1681,17 @@ func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> 
 
     var label: Label = Label.new()
     label.text = caption
-    label.custom_minimum_size = Vector2(96, 0)
+    label.custom_minimum_size = Vector2(110, 0)
     row.add_child(label)
 
     var slider: HSlider = HSlider.new()
-    slider.min_value = 0.1
-    slider.max_value = 10.0
-    slider.step = 0.1
+    slider.min_value = minv
+    slider.max_value = maxv
+    slider.step = step
     slider.value = float(CoopManager.get_setting(key, 1.0))
     slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    slider.custom_minimum_size = Vector2(160, 0)
+    slider.custom_minimum_size = Vector2(120, 0)
+    slider.scrollable = false
     row.add_child(slider)
 
     var valueLabel: Label = Label.new()
@@ -1329,11 +1702,35 @@ func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> 
     slider.value_changed.connect(_on_rate_slider_changed.bind(key, valueLabel))
 
 
+func _build_toggle(parent: VBoxContainer, caption: String, key: String) -> void:
+    var row: HBoxContainer = HBoxContainer.new()
+    row.add_theme_constant_override("separation", 8)
+    row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    parent.add_child(row)
+
+    var label: Label = Label.new()
+    label.text = caption
+    label.custom_minimum_size = Vector2(110, 0)
+    row.add_child(label)
+
+    var checkbox: CheckButton = CheckButton.new()
+    checkbox.button_pressed = float(CoopManager.get_setting(key, 0.0)) >= 0.5
+    checkbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_child(checkbox)
+
+    checkbox.toggled.connect(_on_toggle_changed.bind(key))
+
+
 func _on_rate_slider_changed(value: float, key: String, valueLabel: Label) -> void:
     if is_instance_valid(valueLabel):
         valueLabel.text = "%.1fx" % value
     if is_instance_valid(CoopManager) && CoopManager.has_method(&"set_setting"):
         CoopManager.set_setting(key, value)
+
+
+func _on_toggle_changed(pressed: bool, key: String) -> void:
+    if is_instance_valid(CoopManager) && CoopManager.has_method(&"set_setting"):
+        CoopManager.set_setting(key, 1.0 if pressed else 0.0)
 
 
 func _sort_worlds_by_last_played(a: Dictionary, b: Dictionary) -> bool:
@@ -1545,16 +1942,16 @@ func _update_world_last_played(worldId: String) -> void:
 
 
 func get_pooled_lobby_button(idx: int) -> Button:
-    # When the menu browser is open, pool buttons go there; otherwise F10 panel.
-    var useMenu: bool = menuLobbyBrowser != null
-    var pool: Array[Button] = menuLobbyLabelPool if useMenu else lobbyLabelPool
-    var container: VBoxContainer = menuLobbyList if useMenu else lobbyList
+    # Only path today is the menu-side lobby browser dialog; inline F10 panel was removed.
+    var pool: Array[Button] = menuLobbyLabelPool
+    var container: VBoxContainer = menuLobbyList
 
     if idx < pool.size():
         pool[idx].show()
         return pool[idx]
 
     var btn: Button = Button.new()
+    btn.name = "LobbyBtn%d" % idx
     btn.mouse_filter = Control.MOUSE_FILTER_STOP
     if container != null:
         container.add_child(btn)

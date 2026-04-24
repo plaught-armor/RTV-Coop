@@ -10,6 +10,14 @@ func _ready() -> void:
 
     _log("_ready() co-op path (isHost=%s, zone=%d, active=%s)" % [str(CoopManager.isHost), zone, str(active)])
 
+    # Host scales pool size + concurrent cap by session setting. Applied before
+    # CreatePools so all peers instantiate the same pool count (setting is
+    # broadcast on client connect).
+    var spawnMul: float = CoopManager.settings.get("ai_spawn_multiplier", 1.0)
+    if spawnMul != 1.0:
+        spawnLimit = maxi(0, roundi(float(spawnLimit) * spawnMul))
+        spawnPool = maxi(1, roundi(float(spawnPool) * spawnMul))
+
     GetPoints()
     HidePoints()
 

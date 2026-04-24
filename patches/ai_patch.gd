@@ -172,15 +172,16 @@ func Parameters(delta: float) -> void:
         Vector2(bestPos.x, bestPos.z))
     fireVector = (global_position - bestPos).normalized().dot(bestVector)
 
+    var aggro: float = maxf(0.1, CoopManager.settings.get("ai_aggression_multiplier", 1.0))
     if playerDistance3D < 10 && playerVisible:
-        sensorCycle = 0.05
-        LKLSpeed = 4.0
+        sensorCycle = 0.05 / aggro
+        LKLSpeed = 4.0 * aggro
     elif playerDistance3D > 10 && playerDistance3D < 50:
-        sensorCycle = 0.1
-        LKLSpeed = 2.0
+        sensorCycle = 0.1 / aggro
+        LKLSpeed = 2.0 * aggro
     elif playerDistance3D > 50:
-        sensorCycle = 0.5
-        LKLSpeed = 1.0
+        sensorCycle = 0.5 / aggro
+        LKLSpeed = 1.0 * aggro
     CoopManager.perf.stop("ai.Parameters", _pt)
 
 func Sensor(delta: float) -> void:
@@ -344,11 +345,13 @@ func Raycast() -> void:
             if remoteRoot != null:
                 var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
                 if peerId > 0:
-                    var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
+                    var dmgMul: float = CoopManager.settings.get("damage_to_player_multiplier", 1.0)
+                    var dmg: float = weaponData.damage * (2.0 if boss else 1.0) * dmgMul
                     CoopManager.aiState.send_ai_damage_to_peer(peerId, dmg, weaponData.penetration)
 
         elif hitCollider.is_in_group(&"Player"):
-            var dmg: float = weaponData.damage * (2.0 if boss else 1.0)
+            var dmgMul: float = CoopManager.settings.get("damage_to_player_multiplier", 1.0)
+            var dmg: float = weaponData.damage * (2.0 if boss else 1.0) * dmgMul
             hitCollider.get_child(0).WeaponDamage(dmg, weaponData.penetration)
 
         else:
@@ -410,16 +413,17 @@ func Fire(delta: float) -> void:
 
 ## Host applies damage locally; client routes to host via RPC.
 func WeaponDamage(hitbox: String, damage: float) -> void:
+    var scaledDamage: float = damage * CoopManager.settings.get("damage_to_ai_multiplier", 1.0)
     if !CoopManager.is_session_active():
-        super.WeaponDamage(hitbox, damage)
+        super.WeaponDamage(hitbox, scaledDamage)
         return
     if CoopManager.isHost:
-        super.WeaponDamage(hitbox, damage)
+        super.WeaponDamage(hitbox, scaledDamage)
         return
     if !has_meta(&"ai_sync_id"):
         return
     var syncId: int = get_meta(&"ai_sync_id")
-    CoopManager.aiState.request_ai_damage_from_client.rpc_id(1, syncId, hitbox, damage)
+    CoopManager.aiState.request_ai_damage_from_client.rpc_id(1, syncId, hitbox, scaledDamage)
 
 const _AIStateScript: GDScript = preload("res://mod/network/ai_state.gd")
 

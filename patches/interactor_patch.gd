@@ -21,7 +21,14 @@ func Interact():
 
     if target.is_in_group(&"Item"):
         gameData.interaction = true
+        var syncId: String = target.get_meta(&"sync_id", "") if target.has_meta(&"sync_id") else ""
         target.Interact()
+        # queue_free() marker tells us base Interact consumed the pickup; broadcast sync_id removal.
+        if !syncId.is_empty() && target.is_queued_for_deletion():
+            if CoopManager.isHost:
+                CoopManager.worldState.on_synced_item_picked_up(syncId)
+            else:
+                CoopManager.worldState.request_item_consumed.rpc_id(1, syncId)
         return
 
     if target.is_in_group(&"Transition"):

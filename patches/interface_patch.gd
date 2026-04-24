@@ -161,6 +161,7 @@ func Complete(data: Resource) -> void:
     if CoopManager.isHost:
         super.Complete(data)
         if data is TaskData && is_instance_valid(trader):
+            @warning_ignore("confusable_local_declaration")
             var scene: Node = get_tree().current_scene
             if is_instance_valid(scene):
                 CoopManager.worldState.sync_trader_task_complete.rpc(scene.get_path_to(trader), data.name)

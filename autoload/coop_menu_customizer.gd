@@ -190,7 +190,6 @@ func _row_button(btnText: String) -> Button:
 func _on_host_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    CoopManager._pendingHostUseSteam = true
     var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
@@ -201,7 +200,6 @@ func _on_host_pressed(menu: Node) -> void:
 func _on_host_ip_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    CoopManager._pendingHostUseSteam = false
     var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()

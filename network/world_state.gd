@@ -43,7 +43,7 @@ func _scene_node(path: String) -> Node:
 
 ## Item sync: unique sync_id on each dropped item.
 ## Drops are broadcast by interface_patch.Drop() calling broadcast_item_drop().
-## Pickups are broadcast by pickup_patch.Interact() calling on_synced_item_picked_up().
+## Pickups are broadcast by interactor_patch Item branch calling on_synced_item_picked_up() / request_item_consumed().
 var syncedItems: Dictionary = { }
 var syncIdCounter: int = 0
 var trackingItems: bool = false
@@ -92,13 +92,9 @@ func broadcast_item_drop(pickup: Node) -> void:
         var syncId: String = "drop_%d" % syncIdCounter
         pickup.set_meta(&"sync_id", syncId)
         syncedItems[syncId] = pickup
-        apply_pickup_patch(pickup)
-        pickup.CoopManager = CoopManager
         droppedItemHistory.append({&"id": syncId, &"slot": packedSlot, &"pos": pos, &"rot": rot})
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     else:
-        apply_pickup_patch(pickup)
-        pickup.CoopManager = CoopManager
         pendingDrops.append(pickup)
         request_item_drop.rpc_id(1, packedSlot, pos, rot)
 
@@ -132,9 +128,6 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
     # World items stay frozen at host's settled position; dropped items get physics
     if !syncId.begins_with("world_") && pickup.has_method(&"Unfreeze"):
         pickup.Unfreeze()
-    # Swap to patched script, preserving exports
-    apply_pickup_patch(pickup)
-    pickup.CoopManager = CoopManager
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
 
@@ -195,8 +188,6 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
         pickup.UpdateAttachments()
     if pickup.has_method(&"Unfreeze"):
         pickup.Unfreeze()
-    apply_pickup_patch(pickup)
-    pickup.CoopManager = CoopManager
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
     droppedItemHistory.append({&"id": syncId, &"slot": packedSlot, &"pos": pos, &"rot": rot})
@@ -588,8 +579,6 @@ func register_scene_items() -> void:
         var syncId: String = "world_%d" % syncIdCounter
         node.set_meta(&"sync_id", syncId)
         syncedItems[syncId] = node
-        apply_pickup_patch(node)
-        node.CoopManager = CoopManager
         var packedSlot: Dictionary = CoopManager.slotSerializer.pack(slotData)
         var pos: Vector3 = node.global_position
         var rot: Vector3 = node.global_rotation
@@ -597,18 +586,6 @@ func register_scene_items() -> void:
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     CoopManager._log("register_scene_items: registered=%d skipped=%d total_in_group=%d" % [
         itemCount, skippedCount, itemCount + skippedCount])
-
-
-func apply_pickup_patch(pickup: Node) -> void:
-    var saved_slotData: SlotData = pickup.slotData
-    var saved_mesh: MeshInstance3D = pickup.mesh
-    var saved_collision: CollisionShape3D = pickup.collision
-    pickup.set_script(CoopManager.PickupPatchScript)
-    pickup.slotData = saved_slotData
-    pickup.mesh = saved_mesh
-    pickup.collision = saved_collision
-    pickup.interface = _interface
-
 
 
 @rpc("any_peer", "call_remote", "reliable")

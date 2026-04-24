@@ -27,7 +27,7 @@ func _apply_host_snapshot(delta: float) -> void:
     var snap: Dictionary = CoopManager.vehicleState.get_snapshot(_relPath)
     if snap.is_empty():
         return
-    var blend: float = clamp(delta * LERP_SPEED, 0.0, 1.0)
+    var blend: float = clampf(delta * LERP_SPEED, 0.0, 1.0)
     global_transform.origin = global_transform.origin.lerp(snap.pos, blend)
     var targetBasis: Basis = Basis(snap.rot as Quaternion)
     global_transform.basis = global_transform.basis.slerp(targetBasis, blend)
