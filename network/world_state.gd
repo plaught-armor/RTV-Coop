@@ -457,8 +457,7 @@ func sync_bed_sleep(bedPath: String, duration: int) -> void:
     var bed: Node = _scene_node(bedPath)
     if !is_instance_valid(bed):
         return
-    gameData.isSleeping = true
-    gameData.freeze = true
+    _cm.gameState.apply_sleep_start()
     if bed.has_method(&"PlayTransition"):
         bed.PlayTransition()
     if bed.has_method(&"PlaySleep"):
@@ -466,11 +465,7 @@ func sync_bed_sleep(bedPath: String, duration: int) -> void:
     await get_tree().create_timer(float(duration), false).timeout
     if !is_instance_valid(self):
         return
-    gameData.energy -= 20.0
-    gameData.hydration -= 20.0
-    gameData.mental += 20.0
-    gameData.isSleeping = false
-    gameData.freeze = false
+    _cm.gameState.apply_sleep_end()
     Loader.Message("You slept " + str(duration) + " hours", Color.GREEN)
 
 
@@ -1331,25 +1326,15 @@ func broadcast_interact_toggle(nodePath: String) -> void:
 func request_cat_state(catFound: bool, catDead: bool, catHydration: float) -> void:
     if !_cm.isHost:
         return
-    if gameData.catDead:
+    if !_cm.gameState.apply_cat_state_host(catFound, catDead, catHydration):
         return
-    if catFound:
-        gameData.catFound = true
-    if catDead:
-        gameData.catDead = true
-    var clamped: float = clampf(catHydration, 0.0, 100.0)
-    gameData.cat = minf(gameData.cat, clamped) if gameData.catFound else clamped
     broadcast_cat_state.rpc(gameData.catFound, gameData.catDead, gameData.cat)
 
 
 ## Host pushes authoritative cat state; monotonic (found/dead latch true).
 @rpc("authority", "call_remote", "reliable")
 func broadcast_cat_state(catFound: bool, catDead: bool, catHydration: float) -> void:
-    if catFound:
-        gameData.catFound = true
-    if catDead:
-        gameData.catDead = true
-    gameData.cat = catHydration
+    _cm.gameState.apply_cat_state_client(catFound, catDead, catHydration)
 
 
 ## Host CASA airdrop landed — spawn hotspot + play bounce sound locally.

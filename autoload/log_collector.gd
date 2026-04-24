@@ -68,7 +68,6 @@ func _run_snapshot(snapDir: String, sources: PackedStringArray, info: Dictionary
 
 func _on_snapshot_done(snapDir: String, copied: int) -> void:
     var absDir: String = ProjectSettings.globalize_path(snapDir)
-    if is_instance_valid(_cm) && _cm.DEBUG:
-        print("[logs] snapshot: %s (%d files)" % [absDir, copied])
+    print("[logs] snapshot: %s (%d files)" % [absDir, copied])
     OS.shell_open(absDir)
     logs_collected.emit(absDir, copied)

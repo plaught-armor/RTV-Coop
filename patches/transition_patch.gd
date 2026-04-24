@@ -27,8 +27,8 @@ func Interact() -> void:
         return
     # Client's savePath already points at coop dir; mirror is only needed for host/solo.
     if _cm.is_session_active() && _cm.isHost:
-        _cm.mirror_user_to_world()
+        _cm.saveMirror.mirror_user_to_world()
     elif !_cm.is_session_active():
-        _cm.mirror_user_to_solo()
+        _cm.saveMirror.mirror_user_to_solo()
     if _cm.DEBUG:
         print("[TX] Interact end")

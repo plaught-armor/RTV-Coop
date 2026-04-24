@@ -25,7 +25,7 @@ func maybe_customize(scene: Node) -> void:
         return
     _customize(scene)
     if !_cm.is_session_active() && !_cm._wasInCoop:
-        _cm.mirror_user_to_solo()
+        _cm.saveMirror.mirror_user_to_solo()
     _cm._wasInCoop = false
 
 

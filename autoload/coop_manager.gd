@@ -40,10 +40,12 @@ var slotSerializer: RefCounted = preload("res://mod/network/slot_serializer.gd")
 var HeadlessMapScript: Script = preload("res://mod/network/headless_map.gd")
 # Cached before take_over_path to avoid circular extends after path redirect.
 var PickupPatchScript: Script = preload("res://mod/patches/pickup_patch.gd")
+var AIPatchScript: Script = preload("res://mod/patches/ai_patch.gd")
 var appearance: RefCounted = preload("res://mod/network/appearance.gd").new()
 var perf: RefCounted = preload("res://mod/network/perf.gd").new()
 var logCollector: RefCounted = preload("res://mod/autoload/log_collector.gd").new()
 var saveMirror: RefCounted = preload("res://mod/autoload/save_mirror.gd").new()
+var gameState: RefCounted = preload("res://mod/autoload/coop_game_state.gd").new()
 var _interactRouter: RefCounted = preload("res://mod/autoload/coop_interact_router.gd").new()
 var MenuCustomizerScript: Script = preload("res://mod/autoload/coop_menu_customizer.gd")
 var menuCustomizer: Node = null
@@ -87,6 +89,7 @@ func _ready() -> void:
     register_patches()
     loader = get_node_or_null(PATH_LOADER_ABS)
     saveMirror.init_manager(self)
+    gameState.init_manager(self)
 
     _spawn_network_children()
     _spawn_coop_ui()
@@ -212,6 +215,14 @@ func register_patches() -> void:
     var registry: RefCounted = preload("res://mod/autoload/patch_registry.gd").new()
     var count: int = registry.register_all()
     _log("Patches registered (%d)" % count)
+
+
+# AISpawner preloads AI body scenes at parse time, caching them with the original
+# AI.gd script. Puppet rigs need the patched script to pick up puppetMode.
+func ensure_ai_patch_script(ai: Node) -> void:
+    var s: Script = ai.get_script()
+    if s == null || s.resource_path == "res://Scripts/AI.gd":
+        ai.set_script(AIPatchScript)
 
 
 ## Starts ENet server + optional Steam lobby; world/save setup deferred until finalize_host.
@@ -378,6 +389,18 @@ func free_peer_slot(idx: int) -> void:
 
 func peer_idx(godotId: int) -> int:
     return peerIdxByGodotId.get(godotId, -1)
+
+
+func cache_peer_equipment(godotId: int, weaponName: String) -> void:
+    cachedEquipment[alloc_peer_slot(godotId)] = weaponName
+
+
+func cache_peer_appearance(godotId: int, appearance: Dictionary) -> void:
+    cachedAppearances[alloc_peer_slot(godotId)] = appearance
+
+
+func cache_peer_attachments(godotId: int, names: Array) -> void:
+    cachedAttachments[alloc_peer_slot(godotId)] = names
 
 
 func active_peer_idxs() -> PackedInt32Array:
@@ -856,35 +879,10 @@ func _get_current_map_name() -> String:
     return path.get_file().get_basename()
 
 
-# Thin wrappers over save_mirror.gd preserve the _cm.X() API used by callers.
-func set_active_world(activeWorldId: String) -> void:
-    saveMirror.set_active_world(activeWorldId)
-
-
-func get_active_world() -> String:
-    return saveMirror.get_active_world()
-
-
-func clear_active_world() -> void:
-    saveMirror.clear_active_world()
-
-
-func mirror_user_to_world() -> void:
-    saveMirror.mirror_user_to_world()
-
-
-func mirror_world_to_user(forWorldId: String) -> void:
-    saveMirror.mirror_world_to_user(forWorldId)
-
-
 func migrate_solo_saves_if_needed() -> void:
     var migrated: int = saveMirror.migrate_solo_saves_if_needed()
     if migrated > 0:
         _log("Migrated %d solo save files to %s" % [migrated, saveMirror.SOLO_SAVES_DIR])
-
-
-func mirror_user_to_solo() -> void:
-    saveMirror.mirror_user_to_solo()
 
 
 func mirror_solo_to_user() -> void:

@@ -506,7 +506,7 @@ func receive_equipment(weaponName: String) -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cachedEquipment[_cm.alloc_peer_slot(peerId)] = weaponName
+        _cm.cache_peer_equipment(peerId, weaponName)
         return
     if remoteNode.has_method(&"set_active_weapon"):
         remoteNode.set_active_weapon(weaponName)
@@ -532,7 +532,7 @@ func receive_appearance(body: String, materialPath: String) -> void:
     var sanitized: Dictionary = _cm.appearance.sanitize({"body": body, "material": materialPath})
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cachedAppearances[_cm.alloc_peer_slot(peerId)] = sanitized
+        _cm.cache_peer_appearance(peerId, sanitized)
         return
     if remoteNode.has_method(&"set_appearance"):
         remoteNode.set_appearance(sanitized.body, sanitized.material)
@@ -641,7 +641,7 @@ func receive_attachments(names: Array[StringName]) -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
     var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cachedAttachments[_cm.alloc_peer_slot(peerId)] = names
+        _cm.cache_peer_attachments(peerId, names)
         return
     if remoteNode.has_method(&"set_active_attachments"):
         remoteNode.set_active_attachments(names)

@@ -1058,7 +1058,7 @@ func on_create_world_confirmed() -> void:
     _free_dialog(newWorldPanel)
     newWorldPanel = null
 
-    _cm.set_active_world(worldId)
+    _cm.saveMirror.set_active_world(worldId)
     # IP path: server already running from show_host_ip_dialog, just finalize.
     # Steam path: start server + finalize in one call.
     if _cm.is_session_active():
@@ -1068,7 +1068,7 @@ func on_create_world_confirmed() -> void:
         if !_cm.is_session_active() || !_cm.isHost:
             _cm._log("[coop_ui] host_game failed — cleaning up world dir %s" % worldDir)
             _remove_dir_recursive(worldDir)
-            _cm.clear_active_world()
+            _cm.saveMirror.clear_active_world()
             return
 
     # Save paths are up now, so the picker can write appearance.json. Defer
@@ -1094,7 +1094,7 @@ func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
         return
     _cm.wipe_user_saves()
     loader.NewGame(newWorldDifficulty, newWorldSeason)
-    _cm.mirror_user_to_world()
+    _cm.saveMirror.mirror_user_to_world()
     loader.LoadScene("Cabin")
 
 
@@ -1102,7 +1102,7 @@ func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
 ## session we started pre-picker, delete the empty world dir, and return to
 func _on_host_picker_cancel(worldId: String, worldDir: String) -> void:
     _cm.disconnect_session()
-    _cm.clear_active_world()
+    _cm.saveMirror.clear_active_world()
     _remove_dir_recursive(worldDir)
     _cm._log("[coop_ui] world creation cancelled in picker (%s)" % worldId)
     show_world_picker()
@@ -1435,11 +1435,11 @@ func _on_lobby_back() -> void:
 func on_world_selected(worldId: String) -> void:
     hide_world_picker()
     _update_world_last_played(worldId)
-    _cm.set_active_world(worldId)
+    _cm.saveMirror.set_active_world(worldId)
 
     # Mirror the world dir into user:// so vanilla Loader picks up its saves.
     _cm.wipe_user_saves()
-    _cm.mirror_world_to_user(worldId)
+    _cm.saveMirror.mirror_world_to_user(worldId)
 
     if _cm.is_session_active():
         _cm.finalize_host()

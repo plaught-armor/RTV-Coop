@@ -2,14 +2,6 @@
 extends Node3D
 
 
-# AISpawner.gd preloads AI_Bandit/Guard/Military/Punisher.tscn at class-parse time,
-# caching PackedScenes with the ORIGINAL AI.gd script ref before take_over_path
-# runs. Puppet rigs spawned from these cached scenes need an explicit set_script
-# to pick up ai_patch.gd (puppetMode var, Initialize override).
-const _AIPatchScript: Script = preload("res://mod/patches/ai_patch.gd")
-const _AIOriginalPath: String = "res://Scripts/AI.gd"
-
-
 # Rotates the AI rig child 180deg around Y so its +Z-facing skeleton matches
 # the sending Controller's -Z forward. Applied before add_child so the weapon
 # grip transforms (authored in this rotated frame) render correctly.
@@ -167,11 +159,7 @@ func _spawn_puppet_rig(body: String) -> bool:
     if ai == null:
         return false
 
-    # Force patched script if scene was cached with original AI.gd before
-    # take_over_path ran (AISpawner.gd preloads AI body scenes at parse time).
-    var currentScript: Script = ai.get_script()
-    if currentScript == null || currentScript.resource_path == _AIOriginalPath:
-        ai.set_script(_AIPatchScript)
+    _cm.ensure_ai_patch_script(ai)
 
     # Mark as puppet BEFORE add_child so AI._ready / Initialize see the flag
     # and skip their normal setup paths.
