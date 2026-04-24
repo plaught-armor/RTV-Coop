@@ -15,6 +15,8 @@ const ROUTES: Dictionary[String, Array] = {
     "res://Scripts/Trader.gd":        [&"host_trader_interact",    &"request_trader_open"],
     "res://Scripts/Switch.gd":        [&"host_switch_interact",    &"request_switch_interact"],
     "res://Scripts/Fire.gd":          [&"host_fire_interact",      &"request_fire_interact"],
+    "res://Scripts/Radio.gd":         [&"host_interact_toggle",    &"request_interact_toggle"],
+    "res://Scripts/Television.gd":    [&"host_interact_toggle",    &"request_interact_toggle"],
 }
 
 

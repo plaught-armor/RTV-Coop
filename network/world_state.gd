@@ -1301,7 +1301,19 @@ func broadcast_instrument_stop(peerId: int) -> void:
     _stop_remote_instrument(peerId)
 
 
-## Client requests host to toggle a node's Interact (Radio/TV). Host runs super
+## Host-local toggle path used by coop_interact_router when host presses Interact
+## on a Radio/Television. Runs vanilla Interact, then broadcasts so every peer
+## stays in sync.
+func host_interact_toggle(target: Node) -> void:
+    if !is_instance_valid(target) || !target.has_method(&"Interact"):
+        return
+    target.Interact()
+    if !is_instance_valid(_currentScene):
+        return
+    broadcast_interact_toggle.rpc(String(_currentScene.get_path_to(target)))
+
+
+## Client requests host to toggle a node's Interact (Radio/TV). Host runs it
 ## then broadcasts so every peer stays in sync.
 @rpc("any_peer", "call_remote", "reliable")
 func request_interact_toggle(nodePath: String) -> void:
@@ -1310,9 +1322,9 @@ func request_interact_toggle(nodePath: String) -> void:
     if !is_valid_path(nodePath):
         return
     var node: Node = _scene_node(nodePath)
-    if !is_instance_valid(node) || !node.has_method(&"coop_remote_interact"):
+    if !is_instance_valid(node) || !node.has_method(&"Interact"):
         return
-    node.coop_remote_interact()
+    node.Interact()
     broadcast_interact_toggle.rpc(nodePath)
 
 
@@ -1320,9 +1332,9 @@ func request_interact_toggle(nodePath: String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func broadcast_interact_toggle(nodePath: String) -> void:
     var node: Node = _scene_node(nodePath)
-    if !is_instance_valid(node) || !node.has_method(&"coop_remote_interact"):
+    if !is_instance_valid(node) || !node.has_method(&"Interact"):
         return
-    node.coop_remote_interact()
+    node.Interact()
 
 
 ## Client asks host to accept its cat-state delta. Host applies + rebroadcasts.
