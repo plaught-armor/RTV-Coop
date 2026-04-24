@@ -3,11 +3,7 @@
 ## an async command API for Steam operations (user info, ownership, lobbies).
 extends Node
 
-var _cm: Node
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 
@@ -162,7 +158,7 @@ func on_initial_user(response: Dictionary) -> void:
     _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
     # Cache our own avatar
     if !localSteamID.is_empty():
-        _cm.fetch_avatar(localSteamID)
+        CoopManager.fetch_avatar(localSteamID)
     # Check if launched via Steam invite
     check_launch_invite(on_launch_invite_checked)
 
@@ -388,10 +384,10 @@ func on_invite_received(response: Dictionary) -> void:
     var lobbyID: String = data.get(&"lobby_id", "")
     if lobbyID.is_empty():
         return
-    if _cm.is_session_active():
+    if CoopManager.is_session_active():
         return
     _log("Steam invite received — joining lobby %s" % lobbyID)
-    _cm.coopUI.on_lobby_join_pressed(lobbyID)
+    CoopManager.coopUI.on_lobby_join_pressed(lobbyID)
 
 
 func on_launch_invite_checked(response: Dictionary) -> void:
@@ -402,7 +398,7 @@ func on_launch_invite_checked(response: Dictionary) -> void:
     if lobbyID.is_empty():
         return
     _log("Launch invite detected — joining lobby %s" % lobbyID)
-    _cm.coopUI.on_lobby_join_pressed(lobbyID)
+    CoopManager.coopUI.on_lobby_join_pressed(lobbyID)
 
 
 func set_rich_presence(key: String, value: String) -> void:
@@ -536,5 +532,5 @@ func get_steam_lib_user_path() -> String:
 
 
 func _log(msg: String) -> void:
-    if _cm == null || _cm.DEBUG:
+    if CoopManager == null || CoopManager.DEBUG:
         print("[SteamBridge] %s" % msg)

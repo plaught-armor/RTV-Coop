@@ -4,15 +4,11 @@ extends Node
 const _AI_CONTAINER_PATHS: Array[NodePath] = [^"A_Pool", ^"B_Pool", ^"Agents"]
 const _AI_POOL_PATHS: Array[NodePath] = [^"A_Pool", ^"B_Pool"]
 
-var _cm: Node
 var _controller: Node = null
 var _character: Node = null
 var _spawner: Node = null
 var _agentsNode: Node = null
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func refresh_scene_cache() -> void:
@@ -292,11 +288,11 @@ func _assign_sync_ids_from_spawner(spawner: Node) -> Array[Node]:
 
 
 func _physics_process(_delta: float) -> void:
-    _cm.perf.tick()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    CoopManager.perf.tick()
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
 
-    if _cm.isHost:
+    if CoopManager.isHost:
         _host_tick()
     else:
         _client_interpolate()
@@ -319,11 +315,11 @@ func _host_tick() -> void:
     if frame % (SEND_EVERY_N_TICKS * 100) == 0:
         _log("_host_tick: broadcasting %d AI" % batch[0].size())
     # Same-map peers only: off-map clients get AI via headless_map; overlap corrupts indexing.
-    var localPid: int = _cm.localPeerId
-    for peerId: int in _cm.peerGodotIds:
+    var localPid: int = CoopManager.localPeerId
+    for peerId: int in CoopManager.peerGodotIds:
         if peerId == -1 || peerId == localPid:
             continue
-        if !_cm.is_peer_on_same_map(peerId):
+        if !CoopManager.is_peer_on_same_map(peerId):
             continue
         receive_ai_batch.rpc_id(peerId, batch[0], batch[1], batch[2], batch[3], batch[4])
 
@@ -331,7 +327,7 @@ func _host_tick() -> void:
 # Returns [ids, positions, rotations, speeds_strafes, packed].
 # packed = state(0..7) | flags(8..23) | health(24..31). speeds_strafes = speedI8 | (strafeI8<<8).
 func pack_ai_batch(agentsNode: Node) -> Array:
-    var _pt: int = _cm.perf.start()
+    var _pt: int = CoopManager.perf.start()
     var ids: PackedInt32Array = []
     var positions: PackedVector3Array = []
     var rotations: PackedFloat32Array = []
@@ -371,7 +367,7 @@ func pack_ai_batch(agentsNode: Node) -> Array:
                 f |= AIFlag.PISTOL
         packed.append(state | ((f & 0xFFFF) << 8) | ((health & 0xFF) << 24))
 
-    _cm.perf.stop("pack_ai_batch", _pt)
+    CoopManager.perf.stop("pack_ai_batch", _pt)
     if ids.is_empty():
         return []
     return [ids, positions, rotations, speedsStrafes, packed]
@@ -384,7 +380,7 @@ func receive_ai_batch(
     speedsStrafes: PackedInt32Array,
     packed: PackedInt32Array,
 ) -> void:
-    var _pt: int = _cm.perf.start()
+    var _pt: int = CoopManager.perf.start()
     if Engine.get_physics_frames() % 600 == 0:
         _log("receive_ai_batch: %d ids, slotCount=%d" % [ids.size(), slotCount])
     var now: float = Time.get_ticks_msec() / 1000.0
@@ -403,7 +399,7 @@ func receive_ai_batch(
             (p >> 24) & 0xFF,
             (p >> 8) & 0xFFFF,
         )
-    _cm.perf.stop("receive_ai_batch", _pt)
+    CoopManager.perf.stop("receive_ai_batch", _pt)
 
 ## Reusable scratch to avoid RefCounted alloc per AI per tick.
 var _interpSnap: AISnapshot = AISnapshot.new(0.0, Vector3.ZERO, 0.0, 0, 0.0, 0.0, 0, 0)
@@ -446,7 +442,7 @@ func _log_interp_fill_stats() -> void:
 
 
 func _apply_interpolated(idx: int, node: Node, buf: AIBuffer, count: int, renderTime: float) -> void:
-    var _pt: int = _cm.perf.start()
+    var _pt: int = CoopManager.perf.start()
     var from: AISnapshot = buf.newest()
     var to: AISnapshot = from
     for j: int in range(1, count):
@@ -470,14 +466,14 @@ func _apply_interpolated(idx: int, node: Node, buf: AIBuffer, count: int, render
     _interpSnap.health = to.health
     _interpSnap.flags = to.flags
     _apply_snapshot(idx, node, _interpSnap)
-    _cm.perf.stop("apply_interpolated", _pt)
+    CoopManager.perf.stop("apply_interpolated", _pt)
 
 
 ## Skips animator writes when state + speed match last apply (most 60Hz ticks repeat).
 func _apply_snapshot(idx: int, node: Node, snap: AISnapshot) -> void:
-    var _pt: int = _cm.perf.start()
+    var _pt: int = CoopManager.perf.start()
     if (snap.flags & AIFlag.DEAD) != 0:
-        _cm.perf.stop("apply_snapshot", _pt)
+        CoopManager.perf.stop("apply_snapshot", _pt)
         return
     node.global_position = snap.position
     node.global_rotation.y = snap.rotation_y
@@ -537,7 +533,7 @@ func _apply_snapshot(idx: int, node: Node, snap: AISnapshot) -> void:
             animator[BLEND_RIFLE_COMBAT] = snap.strafe
             animator[BLEND_RIFLE_HUNT] = snap.move_speed
 
-    _cm.perf.stop("apply_snapshot", _pt)
+    CoopManager.perf.stop("apply_snapshot", _pt)
 
 
 func _activate_on_client(idx: int, node: Node) -> void:
@@ -666,7 +662,7 @@ const MAX_CLIENT_DAMAGE: float = 500.0
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_ai_damage_from_client(syncId: int, hitbox: String, damage: float) -> void:
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
     if syncId < 0 || syncId >= slotCount:
         return
@@ -705,7 +701,7 @@ func receive_explosion_damage() -> void:
 
 
 func send_full_state(peerId: int) -> void:
-    if !_cm.isHost:
+    if !CoopManager.isHost:
         return
     if !is_instance_valid(_agentsNode):
         if _get_spawner() == null:
@@ -755,7 +751,7 @@ func _get_spawner() -> Node:
 
 
 func _log(msg: String) -> void:
-    if is_instance_valid(_cm):
-        _cm._log("[AIState] %s" % msg)
+    if is_instance_valid(CoopManager):
+        CoopManager._log("[AIState] %s" % msg)
     else:
         print("[AIState] %s" % msg)

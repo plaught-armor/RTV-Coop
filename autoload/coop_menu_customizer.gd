@@ -11,11 +11,7 @@ const PATH_MENU_BTN_NEW: NodePath = ^"Main/Buttons/New"
 const PATH_MENU_BTN_LOAD: NodePath = ^"Main/Buttons/Load"
 
 
-var _cm: Node
 
-
-func init_manager(cm: Node) -> void:
-    _cm = cm
 
 
 ## Called from CoopManager.on_scene_changed — only customizes the Menu scene.
@@ -24,9 +20,9 @@ func maybe_customize(scene: Node) -> void:
     if scenePath != "res://Scenes/Menu.tscn":
         return
     _customize(scene)
-    if !_cm.is_session_active() && !_cm._wasInCoop:
-        _cm.saveMirror.mirror_user_to_solo()
-    _cm._wasInCoop = false
+    if !CoopManager.is_session_active() && !CoopManager._wasInCoop:
+        CoopManager.saveMirror.mirror_user_to_solo()
+    CoopManager._wasInCoop = false
 
 
 func _customize(menu: Node) -> void:
@@ -37,7 +33,7 @@ func _customize(menu: Node) -> void:
     var newButton: Button = menu.get_node_or_null(PATH_MENU_BTN_NEW)
     var loadButton: Button = menu.get_node_or_null(PATH_MENU_BTN_LOAD)
     if newButton == null || loadButton == null:
-        _cm._log("[menu] customize aborted: buttons missing")
+        CoopManager._log("[menu] customize aborted: buttons missing")
         return
 
     newButton.text = "Singleplayer"
@@ -55,18 +51,18 @@ func _customize(menu: Node) -> void:
     loadButton.pressed.connect(_on_multiplayer_pressed.bind(menu))
 
     _build_submenu(menu)
-    _cm._log("[menu] customized: Singleplayer/Multiplayer active")
+    CoopManager._log("[menu] customized: Singleplayer/Multiplayer active")
 
 
 func _on_singleplayer_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
     # Guard against wipe_user_saves() destroying active session state.
-    if _cm.is_session_active():
-        _cm._log("[menu] Singleplayer pressed during active session — ignored")
+    if CoopManager.is_session_active():
+        CoopManager._log("[menu] Singleplayer pressed during active session — ignored")
         return
-    _cm.saveMirror.wipe_user_saves()
-    _cm.saveMirror.mirror_solo_to_user()
+    CoopManager.saveMirror.wipe_user_saves()
+    CoopManager.saveMirror.mirror_solo_to_user()
     var main: Node = menu.get_node_or_null(PATH_MENU_MAIN)
     var modes: Node = menu.get_node_or_null(PATH_MENU_MODES)
     if main != null:
@@ -194,23 +190,23 @@ func _row_button(btnText: String) -> Button:
 func _on_host_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    _cm._pendingHostUseSteam = true
+    CoopManager._pendingHostUseSteam = true
     var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
-    if is_instance_valid(_cm.coopUI):
-        _cm.coopUI.show_lobby(true)
+    if is_instance_valid(CoopManager.coopUI):
+        CoopManager.coopUI.show_lobby(true)
 
 
 func _on_host_ip_pressed(menu: Node) -> void:
     if menu.has_method(&"PlayClick"):
         menu.PlayClick()
-    _cm._pendingHostUseSteam = false
+    CoopManager._pendingHostUseSteam = false
     var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
-    if is_instance_valid(_cm.coopUI):
-        _cm.coopUI.show_lobby(false)
+    if is_instance_valid(CoopManager.coopUI):
+        CoopManager.coopUI.show_lobby(false)
 
 
 func _on_show_direct_join(menu: Node) -> void:
@@ -219,8 +215,8 @@ func _on_show_direct_join(menu: Node) -> void:
     var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
-    if is_instance_valid(_cm.coopUI):
-        _cm.coopUI.show_direct_join_dialog()
+    if is_instance_valid(CoopManager.coopUI):
+        CoopManager.coopUI.show_direct_join_dialog()
 
 
 func _on_browse_pressed(menu: Node) -> void:
@@ -229,12 +225,12 @@ func _on_browse_pressed(menu: Node) -> void:
     var submenu: Node = menu.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu != null:
         submenu.hide()
-    if is_instance_valid(_cm.coopUI):
-        _cm.coopUI.show_lobby_browser()
+    if is_instance_valid(CoopManager.coopUI):
+        CoopManager.coopUI.show_lobby_browser()
 
 
 func _on_logs_pressed() -> void:
-    _cm.logCollector.collect()
+    CoopManager.logCollector.collect()
 
 
 func _on_back_pressed(menu: Node) -> void:

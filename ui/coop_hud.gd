@@ -1,7 +1,6 @@
 ## Top-right HUD overlay showing keybind hints, players, and ping; F12 toggles.
 extends VBoxContainer
 
-var _cm: Node
 
 
 
@@ -22,8 +21,7 @@ const SLEEP_LABEL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.95)
 const SLEEP_OUTLINE_COLOR: Color = Color(0.0, 0.0, 0.0, 0.9)
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
+func _ready() -> void:
     anchor_left = 1.0
     anchor_right = 1.0
     anchor_top = 0.0
@@ -46,7 +44,7 @@ func _build_sleep_overlay() -> void:
     sleepOverlay = CanvasLayer.new()
     sleepOverlay.layer = 90
     sleepOverlay.visible = false
-    _cm.add_child(sleepOverlay)
+    CoopManager.add_child(sleepOverlay)
 
     sleepLabel = Label.new()
     sleepLabel.add_theme_font_size_override(&"font_size", 22)
@@ -73,7 +71,7 @@ func _input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
     _update_sleep_overlay()
-    if !is_instance_valid(_cm) || !hudVisible:
+    if !is_instance_valid(CoopManager) || !hudVisible:
         if visible:
             visible = false
         return
@@ -94,7 +92,7 @@ func _process(delta: float) -> void:
 
     update_hints()
 
-    if !_cm.isActive:
+    if !CoopManager.isActive:
         hide_all_player_labels()
         return
 
@@ -108,13 +106,13 @@ func _process(delta: float) -> void:
 
 
 func update_hints() -> void:
-    if _cm.isActive:
+    if CoopManager.isActive:
         hintsLabel.text = ""
-    elif !_cm.DEBUG && !_cm.steamBridge.is_ready():
-        var bridgeState: int = _cm.steamBridge.state
-        if bridgeState == _cm.steamBridge.State.CONNECTED:
+    elif !CoopManager.DEBUG && !CoopManager.steamBridge.is_ready():
+        var bridgeState: int = CoopManager.steamBridge.state
+        if bridgeState == CoopManager.steamBridge.State.CONNECTED:
             hintsLabel.text = "Steam: verifying..."
-        elif bridgeState == _cm.steamBridge.State.CONNECTING:
+        elif bridgeState == CoopManager.steamBridge.State.CONNECTING:
             hintsLabel.text = "Steam: connecting..."
         else:
             hintsLabel.text = "Steam: offline"
@@ -129,8 +127,8 @@ func update_pings() -> void:
     var enet: ENetMultiplayerPeer = peer as ENetMultiplayerPeer
 
     peerPings.clear()
-    var localPid: int = _cm.localPeerId
-    for peerId: int in _cm.peerGodotIds:
+    var localPid: int = CoopManager.localPeerId
+    for peerId: int in CoopManager.peerGodotIds:
         if peerId == -1 || peerId == localPid:
             continue
         var enetPeer: ENetPacketPeer = enet.get_peer(peerId)
@@ -147,31 +145,31 @@ func update_player_labels() -> void:
     idx += 1
     var localAvatar: TextureRect = localRow.get_child(0)
     var localLabel: Label = localRow.get_child(1)
-    var localName: String = _cm.get_local_name()
-    localLabel.text = "%s (Host)" % localName if _cm.isHost else localName
+    var localName: String = CoopManager.get_local_name()
+    localLabel.text = "%s (Host)" % localName if CoopManager.isHost else localName
     var localTex: ImageTexture = null
-    if _cm.avatarCache.has(_cm.steamBridge.localSteamID):
-        localTex = _cm.avatarCache[_cm.steamBridge.localSteamID]
+    if CoopManager.avatarCache.has(CoopManager.steamBridge.localSteamID):
+        localTex = CoopManager.avatarCache[CoopManager.steamBridge.localSteamID]
     if localTex != null:
         localAvatar.texture = localTex
         localAvatar.show()
     else:
         localAvatar.hide()
 
-    var localPid: int = _cm.localPeerId
-    for peerId: int in _cm.peerGodotIds:
+    var localPid: int = CoopManager.localPeerId
+    for peerId: int in CoopManager.peerGodotIds:
         if peerId == -1 || peerId == localPid:
             continue
         var row: HBoxContainer = get_pooled_row(idx)
         idx += 1
         var avatar: TextureRect = row.get_child(0)
         var label: Label = row.get_child(1)
-        var peerName: String = _cm.get_peer_name(peerId)
+        var peerName: String = CoopManager.get_peer_name(peerId)
         var ping: int = -1
         if peerPings.has(peerId):
             ping = peerPings[peerId]
         label.text = "%s: %dms" % [peerName, ping] if ping >= 0 else "%s: ..." % peerName
-        var tex: ImageTexture = _cm.get_peer_avatar(peerId)
+        var tex: ImageTexture = CoopManager.get_peer_avatar(peerId)
         if tex != null:
             avatar.texture = tex
             avatar.show()
@@ -218,11 +216,11 @@ func hide_all_player_labels() -> void:
 func _update_sleep_overlay() -> void:
     if !is_instance_valid(sleepOverlay) || !is_instance_valid(sleepLabel):
         return
-    if !is_instance_valid(_cm) || !_cm.isActive:
+    if !is_instance_valid(CoopManager) || !CoopManager.isActive:
         sleepOverlay.visible = false
         return
-    var readyIds: Array = _cm.get_meta(&"coop_sleep_ready_ids", []) as Array
-    var total: int = int(_cm.get_meta(&"coop_sleep_total", 0))
+    var readyIds: Array = CoopManager.get_meta(&"coop_sleep_ready_ids", []) as Array
+    var total: int = int(CoopManager.get_meta(&"coop_sleep_total", 0))
     if total <= 1 || readyIds.is_empty():
         sleepOverlay.visible = false
         return

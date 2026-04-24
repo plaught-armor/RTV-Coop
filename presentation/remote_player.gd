@@ -34,7 +34,6 @@ const FALLBACK_PISTOL_GRIP: Transform3D = Transform3D(
 const GRIP_OVERRIDES: Dictionary[StringName, Transform3D] = {}
 
 
-var _cm: Node
 
 
 var targetPosition: Vector3 = Vector3.ZERO
@@ -120,9 +119,8 @@ const COOP_HIT_LAYER: int = 1 << 19
 @onready var nameLabel: Label3D = $NameLabel
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
-    _moveFlag = _cm.PlayerStateScript.MoveFlag
+func _ready() -> void:
+    _moveFlag = CoopManager.PlayerStateScript.MoveFlag
     nameLabel.text = displayName
     targetPosition = global_position
 
@@ -135,7 +133,7 @@ func init_manager(manager: Node) -> void:
     _create_collision_body()
     add_to_group("CoopRemote")
 
-    var defaults: Dictionary = _cm.appearance.get_defaults()
+    var defaults: Dictionary = CoopManager.appearance.get_defaults()
     set_appearance(defaults.body, defaults.material)
 
 
@@ -155,7 +153,7 @@ func _spawn_puppet_rig(body: String) -> bool:
     if ai == null:
         return false
 
-    _cm.ensure_ai_patch_script(ai)
+    CoopManager.ensure_ai_patch_script(ai)
 
     # Mark as puppet BEFORE add_child so AI._ready / Initialize see the flag
     # and skip their normal setup paths.
@@ -348,7 +346,7 @@ func _ensure_hand_slots() -> void:
 ## rig. Uses the authored hand-slot transform from another AI rig if available,
 func _attach_dynamic_weapon(weapons: Node, weaponName: String) -> void:
     var path: String = "res://Items/Weapons/%s/%s.tscn" % [weaponName, weaponName]
-    if !_cm.appearance.is_visually_allowed(path):
+    if !CoopManager.appearance.is_visually_allowed(path):
         return
     if !ResourceLoader.exists(path):
         return
@@ -432,7 +430,7 @@ func _is_valid_weapon_name(weapon_name: String) -> bool:
 
 
 func set_appearance(body: String, materialPath: String) -> void:
-    if !_cm.appearance.is_valid({"body": body, "material": materialPath}):
+    if !CoopManager.appearance.is_valid({"body": body, "material": materialPath}):
         return
 
     # Body change → free old rig + load new. Material change only → keep rig,
@@ -571,7 +569,7 @@ func _start_ragdoll() -> void:
 
 
 func _physics_process(delta: float) -> void:
-    if !is_instance_valid(_cm) || isDead:
+    if !is_instance_valid(CoopManager) || isDead:
         return
     global_position = targetPosition
     rotation.y = targetRotationY
@@ -703,9 +701,9 @@ func spawn_bullet_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: Stri
 
 
 func play_knife_attack(isSlash: bool) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
-    var audioEvent: AudioEvent = _cm.audioLibrary.knifeSlash if isSlash else _cm.audioLibrary.knifeStab
+    var audioEvent: AudioEvent = CoopManager.audioLibrary.knifeSlash if isSlash else CoopManager.audioLibrary.knifeStab
     if audioEvent == null || audioEvent.audioClips.is_empty():
         return
     if !is_instance_valid(audioPlayer):

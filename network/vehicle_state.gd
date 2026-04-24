@@ -10,7 +10,6 @@ var TRACKED_SCRIPTS: PackedStringArray = [
     "res://Scripts/RocketHelicopter.gd",
 ]
 
-var _cm: Node
 var _currentScene: Node = null
 
 # relPath -> { pos, rot: Quaternion, turret: float, seq: int }
@@ -20,9 +19,6 @@ var _snapshots: Dictionary = {}
 const SEND_EVERY_N_TICKS: int = 12
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
-
 
 func refresh_scene_cache() -> void:
     _currentScene = get_tree().current_scene
@@ -30,7 +26,7 @@ func refresh_scene_cache() -> void:
 
 
 func _physics_process(_delta: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active() || !_cm.isHost:
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active() || !CoopManager.isHost:
         return
     if Engine.get_physics_frames() % SEND_EVERY_N_TICKS != 0:
         return

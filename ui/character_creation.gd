@@ -16,7 +16,6 @@ const PATH_SKELETON: NodePath = ^"Armature/Skeleton3D"
 const PATH_MESH: NodePath = ^"Mesh"
 const PATH_ANIMATIONS: NodePath = ^"Animations"
 
-var _cm: Node = null
 var _onConfirm: Callable = Callable()
 var _onCancel: Callable = Callable()
 
@@ -39,8 +38,7 @@ var _previewBodyName: String = ""
 var _previewMesh: MeshInstance3D = null
 
 
-func init(cm: Node, onConfirm: Callable, onCancel: Callable = Callable()) -> void:
-    _cm = cm
+func init(onConfirm: Callable, onCancel: Callable = Callable()) -> void:
     _onConfirm = onConfirm
     _onCancel = onCancel
     _group_options()
@@ -52,7 +50,7 @@ func init(cm: Node, onConfirm: Callable, onCancel: Callable = Callable()) -> voi
     if gameTheme != null:
         theme = gameTheme
     _build_ui()
-    var current: Dictionary = _cm.saveMirror.load_local_appearance()
+    var current: Dictionary = CoopManager.saveMirror.load_local_appearance()
     _selectedBody = current.get("body", _bodyOrder[0])
     _selectedMaterial = current.get("material", "")
     if !_byBody.has(_selectedBody):
@@ -64,7 +62,7 @@ func init(cm: Node, onConfirm: Callable, onCancel: Callable = Callable()) -> voi
 
 
 func _group_options() -> void:
-    for opt: Dictionary in _cm.appearance.OPTIONS:
+    for opt: Dictionary in CoopManager.appearance.OPTIONS:
         var body: String = opt.body
         if !_byBody.has(body):
             _byBody[body] = []
@@ -339,7 +337,7 @@ func _apply_preview(body: String, materialPath: String) -> void:
 
 func _on_confirm_pressed() -> void:
     var entry: Dictionary = {"body": _selectedBody, "material": _selectedMaterial}
-    _cm.saveMirror.save_local_appearance(entry)
+    CoopManager.saveMirror.save_local_appearance(entry)
     _close()
     if _onConfirm.is_valid():
         _onConfirm.call(entry)

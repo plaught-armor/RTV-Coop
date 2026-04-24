@@ -1,7 +1,6 @@
 ## Player position, rotation, and movement-flag sync over ENet.
 extends Node
 
-var _cm: Node
 
 const RIG_MANAGER_PATH: NodePath = ^"Core/Camera/Manager"
 const RIG_ATTACHMENTS: StringName = &"attachments"
@@ -12,9 +11,6 @@ const PATH_DATABASE: NodePath = ^"Database"
 var _cachedRigManager: Node = null
 var _cachedSceneId: int = 0
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func _get_rig_manager() -> Node:
@@ -141,7 +137,7 @@ const EQUIPMENT_CHECK_TICKS: int = 60
 ## since the last send. Forces a keepalive every FORCE_KEEPALIVE_TICKS
 ## gated frames so a long-stationary player still refreshes the peer's
 func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
 
     if Engine.get_physics_frames() % SEND_EVERY_N_TICKS != 0:
@@ -172,10 +168,10 @@ func broadcast_position(position: Vector3, rot: Vector3, flags: int) -> void:
 func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
     # If peer is on a different map, forward to headless map instead
-    if !_cm.is_peer_on_same_map(peerId):
-        if _cm.isHost:
+    if !CoopManager.is_peer_on_same_map(peerId):
+        if CoopManager.isHost:
             var camPos: Vector3 = position + Vector3(0, 1.6, 0)
-            _cm.forward_position_to_headless(peerId, position, camPos, rot, flags)
+            CoopManager.forward_position_to_headless(peerId, position, camPos, rot, flags)
         return
     var buf: PeerBuffer = null
 
@@ -194,7 +190,7 @@ func receive_position(seq: int, position: Vector3, rot: Vector3, flags: int) -> 
 
 ## Interpolates buffered snapshots for each remote peer and applies them to
 func _physics_process(_delta: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
 
     if Engine.get_physics_frames() % EQUIPMENT_CHECK_TICKS == 0:
@@ -214,7 +210,7 @@ func _physics_process(_delta: float) -> void:
     for peerId: int in peerBuffers:
         buf = peerBuffers[peerId]
         count = buf.count
-        remoteNode = _cm.get_remote_player_node(peerId)
+        remoteNode = CoopManager.get_remote_player_node(peerId)
         if remoteNode == null:
             continue
 
@@ -333,14 +329,14 @@ func _audio_path(id: int) -> String:
 
 
 func broadcast_footstep(audioPath: String) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_footstep.rpc(_audio_id(audioPath))
 
 
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_footstep(audioId: int) -> void:
-    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     var path: String = _audio_path(audioId)
@@ -349,14 +345,14 @@ func receive_footstep(audioId: int) -> void:
 
 
 func broadcast_fire_event(fireAudio: String, tailAudio: String, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurface: String = "") -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_fire_event.rpc(_audio_id(fireAudio), _audio_id(tailAudio), showFlash, hitPoint, hitNormal, _surface_id(hitSurface))
 
 
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_fire_event(fireAudioId: int, tailAudioId: int, showFlash: bool, hitPoint: Vector3 = Vector3.ZERO, hitNormal: Vector3 = Vector3.ZERO, hitSurfaceId: int = 0) -> void:
-    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     remoteNode.play_fire_event(_audio_path(fireAudioId), _audio_path(tailAudioId), showFlash)
@@ -366,7 +362,7 @@ func receive_fire_event(fireAudioId: int, tailAudioId: int, showFlash: bool, hit
 
 ## Broadcasts health to all remote peers. Called from [method _physics_process] at ~0.5 Hz.
 func broadcast_vitals() -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     if Engine.get_physics_frames() % VITALS_EVERY_N_TICKS != 0:
         return
@@ -376,14 +372,14 @@ func broadcast_vitals() -> void:
 
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_vitals(health: int) -> void:
-    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     remoteNode.set_meta(&"health", health)
 
 
 func broadcast_death() -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_death.rpc()
 
@@ -391,7 +387,7 @@ func broadcast_death() -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func receive_death() -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
-    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
     if remoteNode == null:
         return
     clear_peer(peerId)
@@ -402,32 +398,32 @@ func receive_death() -> void:
 ## Broadcasts a knife attack audio event to all remote peers.
 ## [param isSlash]: true for slash, false for stab.
 func broadcast_knife_attack(isSlash: bool, _attackId: int) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_knife_attack.rpc(isSlash)
 
 
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_knife_attack(isSlash: bool) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
-    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     remoteNode.play_knife_attack(isSlash)
 
 
 func broadcast_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurface: String, isFlesh: bool, attackId: int) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_knife_hit.rpc(hitPoint, hitNormal, _surface_id(hitSurface), isFlesh, attackId)
 
 
 @rpc("any_peer", "call_remote", "unreliable")
 func receive_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurfaceId: int, isFlesh: bool, attackId: int) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
-    var remoteNode: Node3D = _cm.get_remote_player_node(multiplayer.get_remote_sender_id())
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(multiplayer.get_remote_sender_id())
     if remoteNode == null:
         return
     remoteNode.spawn_knife_impact(hitPoint, hitNormal, _surface_name(hitSurfaceId), isFlesh, attackId)
@@ -439,7 +435,7 @@ func _is_valid_grenade_path(scenePath: String) -> bool:
 
 ## Broadcasts a grenade throw to all remote peers. Called by grenade_rig_patch
 func broadcast_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     if grenadeScene.is_empty():
         return
@@ -482,14 +478,14 @@ func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: 
 ## [param weaponName] is the base-game file stem (e.g. [code]"AKM"[/code]);
 ## empty string means unarmed. Called from [method _physics_process] when the
 func broadcast_equipment(weaponName: String) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_equipment.rpc(weaponName)
 
 
 ## Targeted variant used when a new peer spawns. Keeps the new peer in sync
 func send_equipment_to(peerId: int, weaponName: String) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_equipment.rpc_id(peerId, weaponName)
 
@@ -499,14 +495,14 @@ func send_equipment_to(peerId: int, weaponName: String) -> void:
 ## length here before dispatching. Cached for spawn-order races.
 @rpc("any_peer", "call_remote", "reliable")
 func receive_equipment(weaponName: String) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
     if weaponName.length() > 32:
         return
     var peerId: int = multiplayer.get_remote_sender_id()
-    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cache_peer_equipment(peerId, weaponName)
+        CoopManager.cache_peer_equipment(peerId, weaponName)
         return
     if remoteNode.has_method(&"set_active_weapon"):
         remoteNode.set_active_weapon(weaponName)
@@ -515,7 +511,7 @@ func receive_equipment(weaponName: String) -> void:
 ## Sends our chosen appearance to [param peerId]. Used by
 ## [code]coop_manager.spawn_remote_player[/code] so a newly-spawned peer can
 func send_appearance_to(peerId: int, body: String, materialPath: String) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_appearance.rpc_id(peerId, body, materialPath)
 
@@ -526,13 +522,13 @@ func send_appearance_to(peerId: int, body: String, materialPath: String) -> void
 ## [method coop_manager.spawn_remote_player] can apply it after instantiation.
 @rpc("any_peer", "call_remote", "reliable")
 func receive_appearance(body: String, materialPath: String) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
     var peerId: int = multiplayer.get_remote_sender_id()
-    var sanitized: Dictionary = _cm.appearance.sanitize({"body": body, "material": materialPath})
-    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    var sanitized: Dictionary = CoopManager.appearance.sanitize({"body": body, "material": materialPath})
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cache_peer_appearance(peerId, sanitized)
+        CoopManager.cache_peer_appearance(peerId, sanitized)
         return
     if remoteNode.has_method(&"set_appearance"):
         remoteNode.set_appearance(sanitized.body, sanitized.material)
@@ -616,14 +612,14 @@ func _read_current_attachments() -> Array[StringName]:
 
 ## Broadcasts the current attachment [StringName]s to all peers. Empty list =
 func broadcast_attachments(names: Array[StringName]) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_attachments.rpc(names)
 
 
 ## Targeted variant used when a new peer spawns. Mirrors [method send_equipment_to]
 func send_attachments_to(peerId: int, names: Array[StringName]) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
         return
     receive_attachments.rpc_id(peerId, names)
 
@@ -633,15 +629,15 @@ func send_attachments_to(peerId: int, names: Array[StringName]) -> void:
 ## remote rigs (clients render host-authoritative hits). Cached for late-spawn.
 @rpc("any_peer", "call_remote", "reliable")
 func receive_attachments(names: Array[StringName]) -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
     if names.size() > 16:
         push_warning("[player_state] Dropping attachment list from peer %d — size %d exceeds cap 16" % [multiplayer.get_remote_sender_id(), names.size()])
         return
     var peerId: int = multiplayer.get_remote_sender_id()
-    var remoteNode: Node3D = _cm.get_remote_player_node(peerId)
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
     if remoteNode == null:
-        _cm.cache_peer_attachments(peerId, names)
+        CoopManager.cache_peer_attachments(peerId, names)
         return
     if remoteNode.has_method(&"set_active_attachments"):
         remoteNode.set_active_attachments(names)

@@ -10,7 +10,6 @@ const PATH_A_POOL: NodePath = ^"A_Pool"
 const PATH_B_POOL: NodePath = ^"B_Pool"
 const PATH_AGENTS: NodePath = ^"Agents"
 
-var _cm: Node
 var mapPath: String = ""
 var viewport: SubViewport = null
 var mapScene: Node = null
@@ -40,9 +39,6 @@ var _patchMapReady: bool = false
 
 var _realGameData: Resource = preload("res://Resources/GameData.tres")
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 ## Caller must await setup_finished.
@@ -103,7 +99,6 @@ func _finalize_setup() -> void:
 
     _inject_proxy_gamedata()
     _cache_ai_spawner_refs()
-    _inject_coop_manager()
     _setupComplete = true
     _log("SubViewport ready for %s" % mapPath)
     setup_finished.emit(true)
@@ -173,16 +168,16 @@ func _physics_process(_delta: float) -> void:
         return
     if !is_instance_valid(_aiAgents) || _aiAgents.get_child_count() == 0:
         return
-    if !is_instance_valid(_cm) || _cm.aiState == null:
+    if !is_instance_valid(CoopManager) || CoopManager.aiState == null:
         return
 
-    var batch: Array = _cm.aiState.pack_ai_batch(_aiAgents)
+    var batch: Array = CoopManager.aiState.pack_ai_batch(_aiAgents)
     if batch.is_empty():
         return
 
     # Send to each client on this map individually (not .rpc() which goes to all peers).
     for peerId: int in clientPeers:
-        _cm.aiState.receive_ai_batch.rpc_id(
+        CoopManager.aiState.receive_ai_batch.rpc_id(
             peerId, batch[0], batch[1], batch[2], batch[3], batch[4]
         )
 
@@ -240,19 +235,6 @@ func _walk_and_inject(node: Node) -> void:
         node.gameData = proxyGameData
     for child: Node in node.get_children():
         _walk_and_inject(child)
-
-
-func _inject_coop_manager() -> void:
-    if mapScene == null || _cm == null:
-        return
-    _walk_and_inject_cm(mapScene)
-
-
-func _walk_and_inject_cm(node: Node) -> void:
-    if "_cm" in node:
-        node._cm = _cm
-    for child: Node in node.get_children():
-        _walk_and_inject_cm(child)
 
 
 func _register_ai_sync_ids() -> void:

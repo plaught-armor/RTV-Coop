@@ -124,34 +124,28 @@ func _spawn_network_children() -> void:
     playerState = PlayerStateScript_.new()
     playerState.name = "PlayerState"
     add_child(playerState)
-    playerState.init_manager(self)
 
     worldState = WorldStateScript.new()
     worldState.name = "WorldState"
     add_child(worldState)
-    worldState.init_manager(self)
 
     aiState = AIStateScript.new()
     aiState.name = "AIState"
     add_child(aiState)
-    aiState.init_manager(self)
 
     var VehicleStateScript: Script = preload("res://mod/network/vehicle_state.gd")
     vehicleState = VehicleStateScript.new()
     vehicleState.name = "VehicleState"
     add_child(vehicleState)
-    vehicleState.init_manager(self)
 
     steamBridge = SteamBridgeScript.new()
     steamBridge.name = "SteamBridge"
     add_child(steamBridge)
-    steamBridge.init_manager(self)
     steamBridge.launch()
 
     menuCustomizer = MenuCustomizerScript.new()
     menuCustomizer.name = "MenuCustomizer"
     add_child(menuCustomizer)
-    menuCustomizer.init_manager(self)
 
 
 func _spawn_coop_ui() -> void:
@@ -164,12 +158,10 @@ func _spawn_coop_ui() -> void:
     coopUI = CoopUIScript.new()
     coopUI.name = "CoopUI"
     uiLayer.add_child(coopUI)
-    coopUI.init_manager(self)
 
     var coopHUD: VBoxContainer = CoopHUDScript.new()
     coopHUD.name = "CoopHUD"
     uiLayer.add_child(coopHUD)
-    coopHUD.init_manager(self)
 
 
 func _connect_multiplayer_signals() -> void:
@@ -626,7 +618,6 @@ func spawn_remote_player(peerId: int) -> void:
     remote.set_meta(&"peer_id", peerId)
     remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
     mapNode.add_child(remote)
-    remote.init_manager(self)
     var peerDisplayName: String = get_peer_name(peerId)
     remote.displayName = peerDisplayName
     remoteNodes[idx] = remote
@@ -1104,7 +1095,6 @@ func _update_headless_maps(peerId: int, oldMap: String, newMap: String) -> void:
             var hmap: Node = HeadlessMapScript.new()
             hmap.name = "Headless_%s" % newMap.get_file().get_basename()
             add_child(hmap)
-            hmap.init_manager(self)
             if !hmap.setup(newMap):
                 hmap.queue_free()
                 return

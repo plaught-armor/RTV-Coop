@@ -3,7 +3,6 @@
 ## Primary UI is Steam lobby browser. ENet direct-connect shown only in DEBUG mode.
 extends Control
 
-var _cm: Node
 
 
 
@@ -72,8 +71,7 @@ var pendingHostUseSteam: bool = true
 var playerList: VBoxContainer = null
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
+func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     mouse_filter = Control.MOUSE_FILTER_IGNORE
     build_ui()
@@ -88,7 +86,7 @@ func _input(event: InputEvent) -> void:
         return
     if !is_in_gameplay():
         return
-    if event.keycode == KEY_F11 && is_instance_valid(_cm) && _cm.DEBUG:
+    if event.keycode == KEY_F11 && is_instance_valid(CoopManager) && CoopManager.DEBUG:
         show_direct_join_dialog()
 
 
@@ -174,14 +172,14 @@ func build_ui() -> void:
 
 
 func _process(_delta: float) -> void:
-    if !panelVisible || _cm == null:
+    if !panelVisible || CoopManager == null:
         return
     var currentState: int = 0
     var currentPeerCount: int = 0
-    if _cm.isActive:
+    if CoopManager.isActive:
         # Remote peer count excludes our own slot in peerGodotIds.
-        currentPeerCount = maxi(0, _cm.active_peer_count() - 1)
-        currentState = 1 if _cm.isHost else 2
+        currentPeerCount = maxi(0, CoopManager.active_peer_count() - 1)
+        currentState = 1 if CoopManager.isHost else 2
 
     if currentState == lastConnectionState && currentPeerCount == lastPeerCount:
         return
@@ -205,31 +203,31 @@ func _process(_delta: float) -> void:
 func update_player_list() -> void:
     var idx: int = 0
 
-    if _cm.isActive:
+    if CoopManager.isActive:
         var localRow: HBoxContainer = get_pooled_player_row(idx)
         idx += 1
         var localAvatar: TextureRect = localRow.get_child(0)
         var localLabel: Label = localRow.get_child(1)
-        localLabel.text = "%s (You)" % _cm.get_local_name()
+        localLabel.text = "%s (You)" % CoopManager.get_local_name()
         var localTex: ImageTexture = null
-        if _cm.avatarCache.has(_cm.steamBridge.localSteamID):
-            localTex = _cm.avatarCache[_cm.steamBridge.localSteamID]
+        if CoopManager.avatarCache.has(CoopManager.steamBridge.localSteamID):
+            localTex = CoopManager.avatarCache[CoopManager.steamBridge.localSteamID]
         if localTex != null:
             localAvatar.texture = localTex
             localAvatar.show()
         else:
             localAvatar.hide()
 
-        var localPid: int = _cm.localPeerId
-        for peerId: int in _cm.peerGodotIds:
+        var localPid: int = CoopManager.localPeerId
+        for peerId: int in CoopManager.peerGodotIds:
             if peerId == -1 || peerId == localPid:
                 continue
             var row: HBoxContainer = get_pooled_player_row(idx)
             idx += 1
             var avatar: TextureRect = row.get_child(0)
             var label: Label = row.get_child(1)
-            label.text = _cm.get_peer_name(peerId)
-            var tex: ImageTexture = _cm.get_peer_avatar(peerId)
+            label.text = CoopManager.get_peer_name(peerId)
+            var tex: ImageTexture = CoopManager.get_peer_avatar(peerId)
             if tex != null:
                 avatar.texture = tex
                 avatar.show()
@@ -278,7 +276,7 @@ func is_in_gameplay() -> bool:
 
 
 func on_host_pressed() -> void:
-    if _cm.is_session_active():
+    if CoopManager.is_session_active():
         return
     pendingHostUseSteam = true
     show_world_picker()
@@ -286,13 +284,13 @@ func on_host_pressed() -> void:
 
 
 func on_disconnect_pressed() -> void:
-    _cm.disconnect_session()
+    CoopManager.disconnect_session()
 
 
 func _on_collect_logs_pressed() -> void:
-    if !is_instance_valid(_cm):
+    if !is_instance_valid(CoopManager):
         return
-    _cm.logCollector.collect()
+    CoopManager.logCollector.collect()
 
 
 ## Shows a themed, menu-specific lobby browser (separate from the F10 in-game
@@ -332,9 +330,9 @@ func hide_lobby_browser() -> void:
 
 
 func on_refresh_lobbies() -> void:
-    if !_cm.steamBridge.is_ready():
+    if !CoopManager.steamBridge.is_ready():
         return
-    _cm.steamBridge.list_lobbies(on_lobby_list_received)
+    CoopManager.steamBridge.list_lobbies(on_lobby_list_received)
 
 
 func on_lobby_list_received(response: Dictionary) -> void:
@@ -369,7 +367,7 @@ func on_lobby_list_received(response: Dictionary) -> void:
 
 
 func on_lobby_join_pressed(lobbyID: String) -> void:
-    _cm.steamBridge.join_lobby(lobbyID, on_lobby_joined)
+    CoopManager.steamBridge.join_lobby(lobbyID, on_lobby_joined)
 
 
 func on_lobby_joined(response: Dictionary) -> void:
@@ -379,22 +377,22 @@ func on_lobby_joined(response: Dictionary) -> void:
     var hostSteamID: String = data.get(&"host_steam_id", "")
     var lobbyID: String = data.get(&"lobby_id", "")
     if hostSteamID.is_empty():
-        _cm._log("Lobby has no host Steam ID")
+        CoopManager._log("Lobby has no host Steam ID")
         return
     # Steam invite_poll can fire JoinRequested multiple times for the same lobby —
     # gate so we only start one P2P tunnel per accepted invite.
-    if _cm.currentLobbyID == lobbyID && _cm.isActive:
-        _cm._log("Lobby join callback re-fired for %s — already connected, ignoring" % lobbyID)
+    if CoopManager.currentLobbyID == lobbyID && CoopManager.isActive:
+        CoopManager._log("Lobby join callback re-fired for %s — already connected, ignoring" % lobbyID)
         return
-    _cm.currentLobbyID = lobbyID
-    _cm._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
+    CoopManager.currentLobbyID = lobbyID
+    CoopManager._log("Lobby joined — starting P2P tunnel to host %s" % hostSteamID)
     # Lobby joined successfully — close the browser so it doesn't sit on top of
     # the character picker and (later) the in-game scene.
     if menuLobbyBrowser != null:
         hide_lobby_browser()
     if !lobbyID.is_empty():
-        _cm.steamBridge.get_lobby_data(lobbyID, "state", _on_host_state_received)
-    _cm.steamBridge.start_p2p_client(hostSteamID, _cm.on_p2p_tunnel_ready)
+        CoopManager.steamBridge.get_lobby_data(lobbyID, "state", _on_host_state_received)
+    CoopManager.steamBridge.start_p2p_client(hostSteamID, CoopManager.on_p2p_tunnel_ready)
 
 
 func _on_host_state_received(response: Dictionary) -> void:
@@ -402,20 +400,20 @@ func _on_host_state_received(response: Dictionary) -> void:
         return
     var data: Dictionary = response.get(&"data", {}) as Dictionary
     var hostState: String = data.get(&"value", "")
-    _cm._log("Host lobby state: %s" % hostState)
+    CoopManager._log("Host lobby state: %s" % hostState)
     if hostState == "in_game":
-        _cm.pendingAutoJoin = true
+        CoopManager.pendingAutoJoin = true
 
 
 func on_invite_pressed() -> void:
-    if !_cm.steamBridge.is_ready():
+    if !CoopManager.steamBridge.is_ready():
         return
-    if !_cm.isActive:
+    if !CoopManager.isActive:
         return
     friendsVisible = !friendsVisible
     friendScroll.visible = friendsVisible
     if friendsVisible:
-        _cm.steamBridge.get_friends(on_friends_received)
+        CoopManager.steamBridge.get_friends(on_friends_received)
 
 
 func on_friends_received(response: Dictionary) -> void:
@@ -472,14 +470,14 @@ func _friend_display_styling(inGame: bool, state: int) -> Dictionary:
 ## Reveals a cached texture when available, otherwise requests a fetch and hides
 func _apply_friend_avatar(avatar: TextureRect, steamID: String) -> void:
     var cached: Texture2D = null
-    if _cm.avatarCache.has(steamID):
-        cached = _cm.avatarCache[steamID]
+    if CoopManager.avatarCache.has(steamID):
+        cached = CoopManager.avatarCache[steamID]
     if cached != null:
         avatar.texture = cached
         avatar.show()
         return
     if !steamID.is_empty():
-        _cm.fetch_avatar(steamID)
+        CoopManager.fetch_avatar(steamID)
     avatar.texture = null
     avatar.hide()
 
@@ -492,14 +490,14 @@ func _rebind_friend_invite(btn: Button, steamID: String, friendName: String) -> 
 
 
 func on_invite_friend_pressed(steamID: String, friendName: String) -> void:
-    _cm.steamBridge.invite_friend(steamID, on_invite_sent.bind(friendName))
+    CoopManager.steamBridge.invite_friend(steamID, on_invite_sent.bind(friendName))
 
 
 func on_invite_sent(response: Dictionary, friendName: String) -> void:
     if response.get(&"ok", false):
-        _cm._log("Invite sent to %s" % friendName)
+        CoopManager._log("Invite sent to %s" % friendName)
     else:
-        _cm._log("Invite failed: %s" % response.get(&"error", "unknown"))
+        CoopManager._log("Invite failed: %s" % response.get(&"error", "unknown"))
 
 
 func get_pooled_friend_row(idx: int) -> HBoxContainer:
@@ -533,15 +531,15 @@ func get_pooled_friend_row(idx: int) -> HBoxContainer:
 
 ## Reads the display name for the currently active co-op world from meta.cfg.
 func _get_active_world_name() -> String:
-    if _cm == null || _cm.worldId.is_empty():
+    if CoopManager == null || CoopManager.worldId.is_empty():
         return ""
-    var cfgPath: String = COOP_DIR + _cm.worldId + "/" + META_FILE
+    var cfgPath: String = COOP_DIR + CoopManager.worldId + "/" + META_FILE
     if !FileAccess.file_exists(cfgPath):
-        return _cm.worldId
+        return CoopManager.worldId
     var cfg: ConfigFile = ConfigFile.new()
     if cfg.load(cfgPath) != OK:
-        return _cm.worldId
-    return cfg.get_value("world", "name", _cm.worldId)
+        return CoopManager.worldId
+    return cfg.get_value("world", "name", CoopManager.worldId)
 
 
 ## Creates an opaque dark stylebox so dialog panels don't show the panel behind them.
@@ -1041,8 +1039,8 @@ func _update_selection_colors() -> void:
 func on_create_world_confirmed() -> void:
     print("[coop_ui] on_create_world_confirmed called")
     # Steam gate only when hosting via Steam — IP mode doesn't need it.
-    if pendingHostUseSteam && (!_cm.steamBridge.is_ready() || !_cm.steamBridge.ownsGame):
-        _cm._log("[coop_ui] Create aborted — Steam not ready, try again in a moment")
+    if pendingHostUseSteam && (!CoopManager.steamBridge.is_ready() || !CoopManager.steamBridge.ownsGame):
+        CoopManager._log("[coop_ui] Create aborted — Steam not ready, try again in a moment")
         return
 
     var worldName: String = newWorldNameInput.text.strip_edges()
@@ -1058,17 +1056,17 @@ func on_create_world_confirmed() -> void:
     _free_dialog(newWorldPanel)
     newWorldPanel = null
 
-    _cm.saveMirror.set_active_world(worldId)
+    CoopManager.saveMirror.set_active_world(worldId)
     # IP path: server already running from show_host_ip_dialog, just finalize.
     # Steam path: start server + finalize in one call.
-    if _cm.is_session_active():
-        _cm.finalize_host()
+    if CoopManager.is_session_active():
+        CoopManager.finalize_host()
     else:
-        _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
-        if !_cm.is_session_active() || !_cm.isHost:
-            _cm._log("[coop_ui] host_game failed — cleaning up world dir %s" % worldDir)
+        CoopManager.host_game(CoopManager.DEFAULT_PORT, pendingHostUseSteam)
+        if !CoopManager.is_session_active() || !CoopManager.isHost:
+            CoopManager._log("[coop_ui] host_game failed — cleaning up world dir %s" % worldDir)
             _remove_dir_recursive(worldDir)
-            _cm.saveMirror.clear_active_world()
+            CoopManager.saveMirror.clear_active_world()
             return
 
     # Save paths are up now, so the picker can write appearance.json. Defer
@@ -1085,26 +1083,26 @@ func on_create_world_confirmed() -> void:
 func show_character_picker(onConfirm: Callable, onCancel: Callable) -> void:
     var picker: Control = load("res://mod/ui/character_creation.gd").new()
     add_child(picker)
-    picker.init(_cm, onConfirm, onCancel)
+    picker.init(onConfirm, onCancel)
 
 
 func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
     var loader: Node = get_node_or_null(PATH_LOADER_ABS)
     if loader == null:
         return
-    _cm.saveMirror.wipe_user_saves()
+    CoopManager.saveMirror.wipe_user_saves()
     loader.NewGame(newWorldDifficulty, newWorldSeason)
-    _cm.saveMirror.mirror_user_to_world()
+    CoopManager.saveMirror.mirror_user_to_world()
     loader.LoadScene("Cabin")
 
 
 ## Back out of world creation from inside the picker: tear down the host
 ## session we started pre-picker, delete the empty world dir, and return to
 func _on_host_picker_cancel(worldId: String, worldDir: String) -> void:
-    _cm.disconnect_session()
-    _cm.saveMirror.clear_active_world()
+    CoopManager.disconnect_session()
+    CoopManager.saveMirror.clear_active_world()
     _remove_dir_recursive(worldDir)
-    _cm._log("[coop_ui] world creation cancelled in picker (%s)" % worldId)
+    CoopManager._log("[coop_ui] world creation cancelled in picker (%s)" % worldId)
     show_world_picker()
 
 
@@ -1160,7 +1158,7 @@ func show_direct_join_dialog() -> void:
     vbox.add_child(portLabel)
 
     djPortInput = LineEdit.new()
-    djPortInput.placeholder_text = str(_cm.DEFAULT_PORT)
+    djPortInput.placeholder_text = str(CoopManager.DEFAULT_PORT)
     djPortInput.mouse_filter = Control.MOUSE_FILTER_STOP
     djPortInput.custom_minimum_size = Vector2(0, 32)
     vbox.add_child(djPortInput)
@@ -1182,7 +1180,7 @@ func _on_direct_join_connect() -> void:
     var addr: String = djAddressInput.text.strip_edges() if djAddressInput != null else ""
     if addr.is_empty():
         addr = "127.0.0.1"
-    var port: int = _cm.DEFAULT_PORT
+    var port: int = CoopManager.DEFAULT_PORT
     if djPortInput != null && !djPortInput.text.strip_edges().is_empty():
         port = int(djPortInput.text.strip_edges())
     _free_dialog(directJoinPanel)
@@ -1191,7 +1189,7 @@ func _on_direct_join_connect() -> void:
     # ENet handshakes; a scene change will kill it on successful connect, and
     # on failure it lets them retry without restarting the client.
     _show_mp_submenu_if_on_menu()
-    _cm.join_game(addr, port, true)
+    CoopManager.join_game(addr, port, true)
 
 
 func _on_direct_join_back() -> void:
@@ -1206,13 +1204,13 @@ func _on_direct_join_back() -> void:
 func show_lobby(useSteam: bool) -> void:
     _lobbyUseSteam = useSteam
     pendingHostUseSteam = useSteam
-    var port: int = _cm.DEFAULT_PORT
+    var port: int = CoopManager.DEFAULT_PORT
 
-    if !_cm.is_session_active():
-        if !_cm.start_hosting(port, useSteam):
+    if !CoopManager.is_session_active():
+        if !CoopManager.start_hosting(port, useSteam):
             return
 
-    var steamName: String = _cm.steamBridge.localSteamName if _cm.steamBridge.is_ready() else ""
+    var steamName: String = CoopManager.steamBridge.localSteamName if CoopManager.steamBridge.is_ready() else ""
     var subtitle: String = ("Steam: %s" % steamName if !steamName.is_empty() else "Steam lobby") if useSteam else "Direct connect"
     lobbyPanel = _make_menu_dialog_panel("Lobby", subtitle)
     add_child(lobbyPanel)
@@ -1227,7 +1225,7 @@ func show_lobby(useSteam: bool) -> void:
         addrBox.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
         vbox.add_child(addrBox)
 
-        for addr: String in _cm.get_sharable_addresses():
+        for addr: String in CoopManager.get_sharable_addresses():
             var text: String = "%s:%d" % [addr, port]
             var label: Label = Label.new()
             label.text = text
@@ -1241,13 +1239,13 @@ func show_lobby(useSteam: bool) -> void:
             addrBox.add_child(copyBtn)
 
     # Session settings (host-only). Daylight/night Simulation rate multipliers
-    # fall through to _cm.set_setting which broadcasts to all peers via
+    # fall through to CoopManager.set_setting which broadcasts to all peers via
     # world_state.broadcast_settings. Sliders cover 0.1×..10× — lets the host
     # compress a full day cycle to ~3 min or slow night pacing for sneaking.
     # Gate on isHost even though show_lobby's call sites are both host entries
     # today — defensive so future non-host refactors can't re-open this path
     # and flood request_setting_change on every slider tick.
-    if _cm.isHost:
+    if CoopManager.isHost:
         var settingsHeader: Label = Label.new()
         settingsHeader.text = "Session Settings"
         settingsHeader.add_theme_font_size_override("font_size", 14)
@@ -1302,7 +1300,7 @@ func _on_lobby_copy_text(copyText: String) -> void:
 
 ## Builds a labeled HSlider row bound to a [member CoopManager.settings] key.
 ## Value range mirrors the simulation_patch clamp (0.1×..10×). Label on the
-## right updates live as the host drags. Slider → _cm.set_setting broadcasts
+## right updates live as the host drags. Slider → CoopManager.set_setting broadcasts
 func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> void:
     var row: HBoxContainer = HBoxContainer.new()
     row.add_theme_constant_override("separation", 8)
@@ -1318,7 +1316,7 @@ func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> 
     slider.min_value = 0.1
     slider.max_value = 10.0
     slider.step = 0.1
-    slider.value = float(_cm.get_setting(key, 1.0))
+    slider.value = float(CoopManager.get_setting(key, 1.0))
     slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     slider.custom_minimum_size = Vector2(160, 0)
     row.add_child(slider)
@@ -1334,8 +1332,8 @@ func _build_rate_slider(parent: VBoxContainer, caption: String, key: String) -> 
 func _on_rate_slider_changed(value: float, key: String, valueLabel: Label) -> void:
     if is_instance_valid(valueLabel):
         valueLabel.text = "%.1fx" % value
-    if is_instance_valid(_cm) && _cm.has_method(&"set_setting"):
-        _cm.set_setting(key, value)
+    if is_instance_valid(CoopManager) && CoopManager.has_method(&"set_setting"):
+        CoopManager.set_setting(key, value)
 
 
 func _sort_worlds_by_last_played(a: Dictionary, b: Dictionary) -> bool:
@@ -1347,27 +1345,27 @@ func _update_lobby_players() -> void:
         return
     for child: Node in _lobbyPlayerList.get_children():
         child.queue_free()
-    if !_cm.isActive:
+    if !CoopManager.isActive:
         return
     var hostLabel: Label = Label.new()
-    var hostName: String = _cm.get_peer_name(_cm.localPeerId)
+    var hostName: String = CoopManager.get_peer_name(CoopManager.localPeerId)
     hostLabel.text = "%s (Host)" % hostName
     hostLabel.add_theme_font_size_override("font_size", 13)
     _lobbyPlayerList.add_child(hostLabel)
-    var localPid: int = _cm.localPeerId
-    for peerId: int in _cm.peerGodotIds:
+    var localPid: int = CoopManager.localPeerId
+    for peerId: int in CoopManager.peerGodotIds:
         if peerId == -1 || peerId == localPid:
             continue
         var peerLabel: Label = Label.new()
-        peerLabel.text = _cm.get_peer_name(peerId)
+        peerLabel.text = CoopManager.get_peer_name(peerId)
         peerLabel.add_theme_font_size_override("font_size", 13)
         _lobbyPlayerList.add_child(peerLabel)
 
 
 func _refresh_lobby_friends() -> void:
-    if !_lobbyUseSteam || !_cm.steamBridge.is_ready():
+    if !_lobbyUseSteam || !CoopManager.steamBridge.is_ready():
         return
-    _cm.steamBridge.get_friends(on_lobby_friends_received)
+    CoopManager.steamBridge.get_friends(on_lobby_friends_received)
 
 
 func on_lobby_friends_received(response: Dictionary) -> void:
@@ -1402,14 +1400,14 @@ func on_lobby_friends_received(response: Dictionary) -> void:
 
 
 func _on_lobby_invite(steamID: String) -> void:
-    _cm.steamBridge.invite_friend(steamID, _on_lobby_invite_result)
+    CoopManager.steamBridge.invite_friend(steamID, _on_lobby_invite_result)
 
 
 func _on_lobby_invite_result(response: Dictionary) -> void:
     if response.get(&"ok", false):
-        _cm._log("Invite sent")
+        CoopManager._log("Invite sent")
     else:
-        _cm._log("Invite failed: %s" % response.get(&"error", "unknown"))
+        CoopManager._log("Invite failed: %s" % response.get(&"error", "unknown"))
 
 
 func _on_lobby_select_world() -> void:
@@ -1421,8 +1419,8 @@ func _on_lobby_select_world() -> void:
 
 
 func _on_lobby_back() -> void:
-    if _cm.is_session_active():
-        _cm.disconnect_session()
+    if CoopManager.is_session_active():
+        CoopManager.disconnect_session()
     _free_dialog(lobbyPanel)
     lobbyPanel = null
     _lobbyPlayerList = null
@@ -1435,16 +1433,16 @@ func _on_lobby_back() -> void:
 func on_world_selected(worldId: String) -> void:
     hide_world_picker()
     _update_world_last_played(worldId)
-    _cm.saveMirror.set_active_world(worldId)
+    CoopManager.saveMirror.set_active_world(worldId)
 
     # Mirror the world dir into user:// so vanilla Loader picks up its saves.
-    _cm.saveMirror.wipe_user_saves()
-    _cm.saveMirror.mirror_world_to_user(worldId)
+    CoopManager.saveMirror.wipe_user_saves()
+    CoopManager.saveMirror.mirror_world_to_user(worldId)
 
-    if _cm.is_session_active():
-        _cm.finalize_host()
+    if CoopManager.is_session_active():
+        CoopManager.finalize_host()
     else:
-        _cm.host_game(_cm.DEFAULT_PORT, pendingHostUseSteam)
+        CoopManager.host_game(CoopManager.DEFAULT_PORT, pendingHostUseSteam)
 
     # Resume from the most recently visited shelter (or Cabin if none).
     var loader: Node = get_node_or_null(PATH_LOADER_ABS)
