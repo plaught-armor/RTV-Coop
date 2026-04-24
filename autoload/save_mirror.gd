@@ -4,7 +4,7 @@ extends RefCounted
 
 const COOP_WORLDS_DIR: String = "user://coop/"
 const SOLO_SAVES_DIR: String = "user://solo/"
-const COOP_WORLD_SAVES: PackedStringArray = [
+var COOP_WORLD_SAVES: PackedStringArray = [
     "World.tres", "Cabin.tres", "Attic.tres", "Classroom.tres",
     "Tent.tres", "Bunker.tres", "Traders.tres",
 ]

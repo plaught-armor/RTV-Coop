@@ -433,6 +433,10 @@ func receive_knife_hit(hitPoint: Vector3, hitNormal: Vector3, hitSurfaceId: int,
     remoteNode.spawn_knife_impact(hitPoint, hitNormal, _surface_name(hitSurfaceId), isFlesh, attackId)
 
 
+func _is_valid_grenade_path(scenePath: String) -> bool:
+    return scenePath.begins_with("res://Items/Grenades/") && !(".." in scenePath) && scenePath.ends_with(".tscn")
+
+
 ## Broadcasts a grenade throw to all remote peers. Called by grenade_rig_patch
 func broadcast_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
     if !is_instance_valid(_cm) || !_cm.is_session_active():
@@ -447,6 +451,10 @@ func broadcast_grenade_throw(grenadeScene: String, handleScene: String, throwPos
 ## Paths are pre-validated by the sender in [method broadcast_grenade_throw].
 @rpc("any_peer", "call_remote", "reliable")
 func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
+    if !_is_valid_grenade_path(grenadeScene):
+        return
+    if !handleScene.is_empty() && !_is_valid_grenade_path(handleScene):
+        return
     var grenadePacked: PackedScene = load(grenadeScene) as PackedScene
     if grenadePacked == null:
         return

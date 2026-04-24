@@ -60,6 +60,11 @@ var droppedItemHistory: Array[Dictionary] = []
 ## Client-side queue of local pickups waiting for sync_id confirmation from host.
 var pendingDrops: Array[Node] = []
 
+const DROP_RATE_WINDOW_MS: int = 1000
+const DROP_RATE_LIMIT: int = 10
+const SYNCED_ITEMS_HARD_CAP: int = 500
+var _dropRateBuckets: Dictionary[int, Array] = {}
+
 
 func start_item_tracking() -> void:
     if trackingItems:
@@ -170,6 +175,12 @@ func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> vo
     if !_cm.isHost:
         return
     var dropperId: int = multiplayer.get_remote_sender_id()
+    if !_check_drop_rate(dropperId):
+        reject_item_drop.rpc_id(dropperId)
+        return
+    if syncedItems.size() >= SYNCED_ITEMS_HARD_CAP:
+        reject_item_drop.rpc_id(dropperId)
+        return
     var slotData: SlotData = _slotSerializer.unpack(packedSlot)
     if slotData == null || slotData.itemData == null:
         reject_item_drop.rpc_id(dropperId)
@@ -239,10 +250,15 @@ func _physics_process(_delta: float) -> void:
     if !_cm.isHost:
         return
 
-    if Engine.get_physics_frames() % SIM_SYNC_FRAMES != 0:
+    var frame: int = Engine.get_physics_frames()
+    if frame % SIM_SYNC_FRAMES != 0:
         return
 
-    sync_simulation.rpc(Simulation.time, Simulation.day, Simulation.weather)
+    # Every 8th tick (~32s at 60Hz + 240-frame window) send reliable so drift-from-dropped-packet caps.
+    if frame % (SIM_SYNC_FRAMES * 8) == 0:
+        sync_simulation_reliable.rpc(Simulation.time, Simulation.day, Simulation.weather)
+    else:
+        sync_simulation.rpc(Simulation.time, Simulation.day, Simulation.weather)
 
 
 
@@ -338,7 +354,7 @@ func sync_switch_state(switchPath: String, active: bool) -> void:
 
 ## Ready-set per bed: peers must all mark the same bed before sleep triggers.
 ## Resets when sleep fires or when a peer picks a different bed.
-var _bedReady: Dictionary = {}
+var _bedReady: Dictionary[String, Array] = {}
 
 
 func _expected_peer_count() -> int:
@@ -349,8 +365,8 @@ func _expected_peer_count() -> int:
     return n
 
 
-func _active_peer_ids() -> Array:
-    var out: Array = [_cm.localPeerId]
+func _active_peer_ids() -> Array[int]:
+    var out: Array[int] = [_cm.localPeerId]
     for pid: int in _cm.peerGodotIds:
         if pid != -1:
             out.append(pid)
@@ -358,11 +374,11 @@ func _active_peer_ids() -> Array:
 
 
 func _reset_bed_ready_except(keepPath: String) -> void:
-    var toErase: Array = []
-    for path: Variant in _bedReady.keys():
+    var toErase: Array[String] = []
+    for path: String in _bedReady.keys():
         if path != keepPath:
             toErase.append(path)
-    for path: Variant in toErase:
+    for path: String in toErase:
         _bedReady.erase(path)
 
 
@@ -1021,7 +1037,11 @@ func request_setting_change(key: String, value: Variant) -> void:
         return
     if !_cm.settings.has(key):
         return
-    _cm.set_setting(key, value)
+    var t: int = typeof(value)
+    if t != TYPE_FLOAT && t != TYPE_INT:
+        return
+    var f: float = clampf(float(value), 0.0, 1000.0)
+    _cm.set_setting(key, f)
 
 
 ## Host broadcasts the full settings dict. Simpler than keyed diffs and the
@@ -1114,29 +1134,56 @@ func is_valid_path(nodePath: String) -> bool:
     return !nodePath.is_empty() && !(".." in nodePath) && !nodePath.begins_with("/")
 
 
+func _is_valid_audio_path(clipPath: String) -> bool:
+    if clipPath.is_empty() || !clipPath.begins_with("res://") || ".." in clipPath:
+        return false
+    var lower: String = clipPath.to_lower()
+    return lower.ends_with(".ogg") || lower.ends_with(".wav") || lower.ends_with(".mp3")
+
+
+func _check_drop_rate(peerId: int) -> bool:
+    var now: int = Time.get_ticks_msec()
+    var cutoff: int = now - DROP_RATE_WINDOW_MS
+    var bucket: Array = _dropRateBuckets.get(peerId, [])
+    while !bucket.is_empty() && int(bucket[0]) < cutoff:
+        bucket.pop_front()
+    if bucket.size() >= DROP_RATE_LIMIT:
+        _dropRateBuckets[peerId] = bucket
+        return false
+    bucket.append(now)
+    _dropRateBuckets[peerId] = bucket
+    return true
+
+
 ## Host launched MissileSpawner prepare — clients spawn hidden missile pool so
 ## later broadcast_missile_launch(index) resolves to a real child.
+func _has_execute_launch(n: Node) -> bool:
+    return n.has_method(&"ExecuteLaunch")
+
+
 @rpc("authority", "call_remote", "reliable")
 func broadcast_missile_prepare(spawnerPath: String) -> void:
     var spawner: Node = _scene_node(spawnerPath)
     if spawner == null || !spawner.has_method(&"ExecutePrepareMissiles"):
         return
-    var existing: Array = spawner.get_children().filter(
-        func(n: Node) -> bool: return n.has_method(&"ExecuteLaunch"))
+    var existing: Array = spawner.get_children().filter(_has_execute_launch)
     if existing.is_empty():
         spawner.ExecutePrepareMissiles(true)
 
 
 ## Host launched one missile from the pool. Client mirrors visibility + launch.
+## [param poolIndex] is the index into the FILTERED pool (ExecuteLaunch-capable children)
+## so unrelated siblings added by the base game don't desync the mapping.
 @rpc("authority", "call_remote", "reliable")
-func broadcast_missile_launch(spawnerPath: String, childIndex: int) -> void:
+func broadcast_missile_launch(spawnerPath: String, poolIndex: int) -> void:
     var spawner: Node = _scene_node(spawnerPath)
     if spawner == null:
         return
-    if childIndex < 0 || childIndex >= spawner.get_child_count():
+    var pool: Array = spawner.get_children().filter(_has_execute_launch)
+    if poolIndex < 0 || poolIndex >= pool.size():
         return
-    var child: Node = spawner.get_child(childIndex)
-    if !is_instance_valid(child) || !child.has_method(&"ExecuteLaunch"):
+    var child: Node = pool[poolIndex]
+    if !is_instance_valid(child):
         return
     spawner.launched = true
     if child is Node3D:
@@ -1202,7 +1249,7 @@ func _stop_remote_instrument(peerId: int) -> void:
 
 func _play_remote_instrument(peerId: int, clipPath: String) -> void:
     _stop_remote_instrument(peerId)
-    if clipPath.is_empty():
+    if !_is_valid_audio_path(clipPath):
         return
     var idx: int = _cm.peer_idx(peerId)
     if idx < 0 || idx >= _cm.remoteNodes.size():
@@ -1226,6 +1273,8 @@ func _play_remote_instrument(peerId: int, clipPath: String) -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func request_instrument_play(clipPath: String) -> void:
     if !_cm.isHost:
+        return
+    if !_is_valid_audio_path(clipPath):
         return
     var sender: int = multiplayer.get_remote_sender_id()
     broadcast_instrument_play.rpc(sender, clipPath)
@@ -1259,6 +1308,8 @@ func broadcast_instrument_stop(peerId: int) -> void:
 func request_interact_toggle(nodePath: String) -> void:
     if !_cm.isHost:
         return
+    if !is_valid_path(nodePath):
+        return
     var node: Node = _scene_node(nodePath)
     if !is_instance_valid(node) || !node.has_method(&"coop_remote_interact"):
         return
@@ -1280,11 +1331,14 @@ func broadcast_interact_toggle(nodePath: String) -> void:
 func request_cat_state(catFound: bool, catDead: bool, catHydration: float) -> void:
     if !_cm.isHost:
         return
+    if gameData.catDead:
+        return
     if catFound:
         gameData.catFound = true
     if catDead:
         gameData.catDead = true
-    gameData.cat = catHydration
+    var clamped: float = clampf(catHydration, 0.0, 100.0)
+    gameData.cat = minf(gameData.cat, clamped) if gameData.catFound else clamped
     broadcast_cat_state.rpc(gameData.catFound, gameData.catDead, gameData.cat)
 
 

@@ -660,11 +660,19 @@ func receive_ai_voice(syncId: int, voiceType: int) -> void:
                 node.PlayDamage()
 
 
+const HITBOX_ALLOWLIST: Array[String] = ["Head", "Torso", "Leg_L", "Leg_R"]
+const MAX_CLIENT_DAMAGE: float = 500.0
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func request_ai_damage_from_client(syncId: int, hitbox: String, damage: float) -> void:
     if !_cm.isHost:
         return
     if syncId < 0 || syncId >= slotCount:
+        return
+    if !HITBOX_ALLOWLIST.has(hitbox):
+        return
+    if damage <= 0.0 || damage > MAX_CLIENT_DAMAGE:
         return
     var node: Node = aiNodes[syncId]
     if !is_instance_valid(node):

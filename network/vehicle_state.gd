@@ -13,7 +13,7 @@ var TRACKED_SCRIPTS: PackedStringArray = [
 var _cm: Node
 var _currentScene: Node = null
 
-# relPath -> { pos, rot: Quaternion, turret: float }
+# relPath -> { pos, rot: Quaternion, turret: float, seq: int }
 var _snapshots: Dictionary = {}
 
 # 120Hz / 12 = 10Hz; matches ai_state.gd cadence for consistent bandwidth profile.
@@ -40,6 +40,7 @@ func _physics_process(_delta: float) -> void:
 
 
 func _broadcast_vehicle_snapshots() -> void:
+    var seq: int = Engine.get_physics_frames()
     for vehicle: Node3D in _collect_vehicles(_currentScene):
         var relPath: String = String(_currentScene.get_path_to(vehicle))
         var rotQuat: Quaternion = vehicle.global_transform.basis.get_rotation_quaternion()
@@ -47,7 +48,7 @@ func _broadcast_vehicle_snapshots() -> void:
         var tower: Node = vehicle.get_node_or_null(^"Chassis/Tower")
         if is_instance_valid(tower) && tower is Node3D:
             turretRot = (tower as Node3D).rotation.y
-        sync_vehicle_snapshot.rpc(relPath, vehicle.global_transform.origin, rotQuat, turretRot)
+        sync_vehicle_snapshot.rpc(relPath, vehicle.global_transform.origin, rotQuat, turretRot, seq)
 
 
 func _collect_vehicles(root: Node) -> Array[Node3D]:
@@ -68,11 +69,16 @@ func _walk_for_vehicles(node: Node, out: Array[Node3D]) -> void:
 
 
 @rpc("authority", "call_remote", "unreliable")
-func sync_vehicle_snapshot(relPath: String, pos: Vector3, rotQuat: Quaternion, turretRot: float) -> void:
+func sync_vehicle_snapshot(relPath: String, pos: Vector3, rotQuat: Quaternion, turretRot: float, seq: int = 0) -> void:
+    var prev: Dictionary = _snapshots.get(relPath, {})
+    var prevSeq: int = int(prev.get(&"seq", -1))
+    if seq != 0 && seq <= prevSeq:
+        return
     _snapshots[relPath] = {
         &"pos": pos,
         &"rot": rotQuat,
         &"turret": turretRot,
+        &"seq": seq,
     }
 
 

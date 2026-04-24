@@ -13,6 +13,7 @@ const _AIOriginalPath: String = "res://Scripts/AI.gd"
 # Rotates the AI rig child 180deg around Y so its +Z-facing skeleton matches
 # the sending Controller's -Z forward. Applied before add_child so the weapon
 # grip transforms (authored in this rotated frame) render correctly.
+# Transform3D basis args are column-major (basis.x / basis.y / basis.z axes).
 const PUPPET_TRANSFORM: Transform3D = Transform3D(
     Vector3(-1, 0, 0),
     Vector3(0, 1, 0),
@@ -21,13 +22,14 @@ const PUPPET_TRANSFORM: Transform3D = Transform3D(
 )
 
 # Fallback grips for weapons no AI scene placed (HK416/MK18/MP7/etc).
-# Basis columns authored against PUPPET_TRANSFORM-rotated skeleton.
+# Basis columns authored against PUPPET_TRANSFORM-rotated skeleton (column-major).
 const FALLBACK_RIFLE_GRIP: Transform3D = Transform3D(
     Vector3(-0.168531, 0.17101, 0.97075),
     Vector3(0.983905, -0.0301536, 0.176127),
     Vector3(0.0593909, 0.984808, -0.163175),
     Vector3(0.1, 0.12, 0.03)
 )
+# column-major basis, same layout as FALLBACK_RIFLE_GRIP.
 const FALLBACK_PISTOL_GRIP: Transform3D = Transform3D(
     Vector3(0.174912, 0.0847189, 0.980934),
     Vector3(0.982636, 0.047607, -0.179328),
@@ -109,12 +111,12 @@ const BODY_SCENES: Dictionary[String, String] = {
 }
 
 # Collision + Flash kept for hit reg + muzzle flash.
-const SCENE_TRASH: Array[String] = ["Detector", "Raycasts", "Poles", "Gizmo", "Agent"]
-const SKEL_TRASH: Array[String] = [
-    "Container", "Eyes", "Backpacks",
-    "HB_Head", "HB_Torso",
-    "HB_Leg_Upper_L", "HB_Leg_Lower_L",
-    "HB_Leg_Upper_R", "HB_Leg_Lower_R",
+const SCENE_TRASH: Array[NodePath] = [^"Detector", ^"Raycasts", ^"Poles", ^"Gizmo", ^"Agent"]
+const SKEL_TRASH: Array[NodePath] = [
+    ^"Container", ^"Eyes", ^"Backpacks",
+    ^"HB_Head", ^"HB_Torso",
+    ^"HB_Leg_Upper_L", ^"HB_Leg_Lower_L",
+    ^"HB_Leg_Upper_R", ^"HB_Leg_Lower_R",
 ]
 
 const ANIM_RIFLE_IDLE: StringName = &"Rifle_Idle"
@@ -193,8 +195,8 @@ func _spawn_puppet_rig(body: String) -> bool:
 
     # Strip AFTER add_child so AI script's @onready vars resolve first; stripping
     # earlier raises "Node not found" on Agent/Detector/Raycasts/Poles/Gizmo.
-    for trash: String in SCENE_TRASH:
-        var n: Node = ai.get_node_or_null(NodePath(trash))
+    for trash: NodePath in SCENE_TRASH:
+        var n: Node = ai.get_node_or_null(trash)
         if n != null:
             n.get_parent().remove_child(n)
             n.queue_free()
@@ -212,8 +214,8 @@ func _spawn_puppet_rig(body: String) -> bool:
     animTree = ai.get(&"animator") as AnimationTree
     # Skeleton-level trash strip (container, eyes, backpacks, hit boxes).
     if skeleton != null:
-        for trash: String in SKEL_TRASH:
-            var n: Node = skeleton.get_node_or_null(NodePath(trash))
+        for trash: NodePath in SKEL_TRASH:
+            var n: Node = skeleton.get_node_or_null(trash)
             if n != null:
                 n.get_parent().remove_child(n)
                 n.queue_free()

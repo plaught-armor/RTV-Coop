@@ -49,10 +49,10 @@ func _build_sleep_overlay() -> void:
     _cm.add_child(sleepOverlay)
 
     sleepLabel = Label.new()
-    sleepLabel.add_theme_font_size_override("font_size", 22)
-    sleepLabel.add_theme_color_override("font_color", SLEEP_LABEL_COLOR)
-    sleepLabel.add_theme_color_override("font_outline_color", SLEEP_OUTLINE_COLOR)
-    sleepLabel.add_theme_constant_override("outline_size", 5)
+    sleepLabel.add_theme_font_size_override(&"font_size", 22)
+    sleepLabel.add_theme_color_override(&"font_color", SLEEP_LABEL_COLOR)
+    sleepLabel.add_theme_color_override(&"font_outline_color", SLEEP_OUTLINE_COLOR)
+    sleepLabel.add_theme_constant_override(&"outline_size", 5)
     sleepLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     sleepLabel.anchor_left = 0.0
     sleepLabel.anchor_right = 1.0
