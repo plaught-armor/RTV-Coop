@@ -32,6 +32,9 @@ var vehicleState: Node = null
 var steamBridge: Node = null
 var loader: Node = null
 var coopUI: Control = null
+# Written by coop_menu_customizer, read by settings_patch. Dynamic access only.
+@warning_ignore("unused_private_class_variable")
+var _pendingHostUseSteam: bool = true
 
 var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
 var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
