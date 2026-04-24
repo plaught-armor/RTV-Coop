@@ -43,7 +43,6 @@ const PATCHES: Array[String] = [
     "res://Scripts/RocketGrad.gd",    "res://mod/patches/rocket_grad_patch.gd",
     "res://Scripts/RocketHelicopter.gd", "res://mod/patches/rocket_helicopter_patch.gd",
     "res://Scripts/MissileSpawner.gd", "res://mod/patches/missile_spawner_patch.gd",
-    "res://Scripts/Instrument.gd",    "res://mod/patches/instrument_patch.gd",
 ]
 
 
