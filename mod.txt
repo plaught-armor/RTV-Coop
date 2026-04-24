@@ -1,7 +1,7 @@
 [mod]
 name="Road to Vostok Co-op"
 id="rtv-coop"
-version="0.1.0"
+version="0.2.0"
 
 [autoload]
 CoopManager="res://mod/autoload/coop_manager.gd"
