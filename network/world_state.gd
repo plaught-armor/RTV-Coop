@@ -828,8 +828,12 @@ func sync_trader_task_complete(traderPath: String, taskName: String) -> void:
     var trader: Node = _scene_node(traderPath)
     if !is_instance_valid(trader):
         return
-    if trader.has_method(&"apply_task_complete"):
-        trader.apply_task_complete(taskName)
+    if trader.tasksCompleted.has(taskName):
+        return
+    trader.tasksCompleted.append(taskName)
+    if trader.has_method(&"PlayTraderTask"):
+        trader.PlayTraderTask()
+    Loader.Message("Task Completed: " + taskName, Color.GREEN)
 
 
 ## Full tasksCompleted snapshot for one trader — sent to each peer on join so

@@ -88,7 +88,7 @@ func Cat() -> void:
         _cm.worldState.broadcast_event.rpc("Cat", PackedInt32Array([wellIndex]))
 
 
-# Trader events: host via ActivateTraderEvent super; clients skip and receive via trader_patch.
+# Trader events: host via ActivateTraderEvent super; clients receive via world_state trader sync RPCs.
 
 
 func _spawn_pathed_vehicle(scene: PackedScene, pathIndex: int, pathDirection: int) -> void:

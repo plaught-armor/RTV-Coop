@@ -162,9 +162,17 @@ func _execute_client_trade(traderPath: String, requestedIndices: PackedInt32Arra
 
 
 ## Client-side defer: hide inputs + stash rewards; host ACK triggers finalize_pending_task.
+## Host path runs super (vanilla trader save) then broadcasts to peers.
 func Complete(data: Resource) -> void:
-    if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
+    if !_ensure_cm() || !_cm.is_session_active():
         super.Complete(data)
+        return
+    if _cm.isHost:
+        super.Complete(data)
+        if data is TaskData && is_instance_valid(trader):
+            var scene: Node = get_tree().current_scene
+            if is_instance_valid(scene):
+                _cm.worldState.sync_trader_task_complete.rpc(scene.get_path_to(trader), data.name)
         return
     if !(data is TaskData):
         super.Complete(data)
@@ -189,7 +197,9 @@ func Complete(data: Resource) -> void:
         &"taskData": inputTarget.taskData,
     }
 
-    trader.CompleteTask(inputTarget.taskData)
+    var scene: Node = get_tree().current_scene
+    if is_instance_valid(scene):
+        _cm.worldState.request_trader_task_complete.rpc_id(1, scene.get_path_to(trader), taskName)
     ResetInput()
 
 
