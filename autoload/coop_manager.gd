@@ -258,7 +258,7 @@ func start_hosting(port: int = DEFAULT_PORT, useSteam: bool = true) -> bool:
 
 func finalize_host() -> void:
     worldState.start_item_tracking()
-    _setup_save_paths()
+    saveMirror.setup_save_paths()
     _update_rich_presence()
 
 
@@ -335,9 +335,9 @@ func disconnect_session() -> void:
     _wasInCoop = true
 
     # Wipe for host AND client: client user:// may hold stale transition writes.
-    wipe_user_saves()
-    clear_active_world()
-    _reset_save_paths()
+    saveMirror.wipe_user_saves()
+    saveMirror.clear_active_world()
+    saveMirror.reset_save_paths()
     steamBridge.leave_lobby()
     steamBridge.clear_rich_presence()
     _log("Disconnected (was host: %s)" % str(wasHost))
@@ -626,7 +626,7 @@ func spawn_remote_player(peerId: int) -> void:
     if !cachedAppearance.is_empty():
         _apply_cached_appearance(cachedAppearance, remote)
         cachedAppearances[idx] = {}
-    var myAppearance: Dictionary = load_local_appearance()
+    var myAppearance: Dictionary = saveMirror.load_local_appearance()
     playerState.send_appearance_to(peerId, myAppearance.body, myAppearance.material)
 
     # Attachments must apply before equipment so set_active_weapon picks them up.
@@ -885,18 +885,6 @@ func migrate_solo_saves_if_needed() -> void:
         _log("Migrated %d solo save files to %s" % [migrated, saveMirror.SOLO_SAVES_DIR])
 
 
-func mirror_solo_to_user() -> void:
-    saveMirror.mirror_solo_to_user()
-
-
-func wipe_user_saves() -> void:
-    saveMirror.wipe_user_saves()
-
-
-func collect_logs() -> void:
-    logCollector.collect()
-
-
 func _is_on_menu() -> bool:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
@@ -972,73 +960,6 @@ func sync_game_start(sceneName: String) -> void:
 
 
 ## Host only. worldId must be set by the world picker UI first.
-func _setup_save_paths() -> void:
-    if worldId.is_empty():
-        worldId = "world_%d" % Time.get_unix_time_from_system()
-    var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else "local"
-    _apply_save_paths("user://coop/%s/" % worldId, "user://coop/%s/players/%s/" % [worldId, localSteamId])
-
-
-## Uses patched savePath var when present; falls back to meta if loader_patch didn't apply.
-func _apply_save_paths(sp: String, pp: String) -> void:
-    if !is_instance_valid(loader):
-        return
-    if "savePath" in loader:
-        loader.savePath = sp
-        loader.playerSavePath = pp
-    else:
-        loader.set_meta(&"savePath", sp)
-        loader.set_meta(&"playerSavePath", pp)
-    DirAccess.make_dir_recursive_absolute(sp)
-    DirAccess.make_dir_recursive_absolute(pp)
-    _log("Save paths: world=%s player=%s" % [sp, pp])
-
-
-func _get_save_path() -> String:
-    if !is_instance_valid(loader):
-        return "user://"
-    if "savePath" in loader:
-        return loader.savePath
-    return loader.get_meta(&"savePath", "user://")
-
-
-func _get_player_save_path() -> String:
-    if !is_instance_valid(loader):
-        return "user://"
-    if "playerSavePath" in loader:
-        return loader.playerSavePath
-    return loader.get_meta(&"playerSavePath", "user://")
-
-
-func load_local_appearance() -> Dictionary:
-    var dir: String = _get_player_save_path()
-    var entry: Variant = appearance.load_from(dir)
-    if entry == null:
-        return appearance.get_defaults()
-    return entry
-
-
-func has_local_appearance() -> bool:
-    var dir: String = _get_player_save_path()
-    return FileAccess.file_exists(appearance.file_path(dir))
-
-
-func save_local_appearance(entry: Dictionary) -> bool:
-    var dir: String = _get_player_save_path()
-    return appearance.save_to(dir, entry)
-
-
-func _sanitize_path_component(component: String) -> bool:
-    if component.is_empty():
-        return false
-    if component.find("..") != -1 || component.find("/") != -1 || component.find("\\") != -1:
-        return false
-    return true
-
-
-func _reset_save_paths() -> void:
-    worldId = ""
-    _apply_save_paths("user://", "user://")
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -1049,7 +970,7 @@ func _request_world_id() -> void:
     # Send difficulty/season so client matches on fresh save.
     var diff: int = 1
     var season: int = 1
-    var worldPath: String = _get_save_path() + "World.tres"
+    var worldPath: String = saveMirror.get_save_path() + "World.tres"
     if FileAccess.file_exists(worldPath):
         var world: Resource = load(worldPath)
         if world != null:
@@ -1064,12 +985,12 @@ func _request_world_id() -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int) -> void:
-    if !_sanitize_path_component(hostWorldId):
+    if !saveMirror.sanitize_path_component(hostWorldId):
         _log("Invalid worldId from host: %s" % hostWorldId)
         return
     worldId = hostWorldId
     var localSteamId: String = steamBridge.localSteamID if steamBridge.is_ready() else str(localPeerId)
-    _apply_save_paths("user://coop/%s/" % worldId, "user://coop/%s/players/%s/" % [worldId, localSteamId])
+    saveMirror.apply_save_paths("user://coop/%s/" % worldId, "user://coop/%s/players/%s/" % [worldId, localSteamId])
     set_meta(&"new_world_difficulty", hostDifficulty)
     set_meta(&"new_world_season", hostSeason)
     _log("Client new_world meta: diff=%d season=%d" % [hostDifficulty, hostSeason])
@@ -1087,16 +1008,16 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
 ## Gates scene load behind the character-creation picker so client confirms before entry.
 func _client_start_load() -> void:
     if !is_instance_valid(coopUI):
-        if !has_local_appearance():
-            save_local_appearance(appearance.get_defaults())
+        if !saveMirror.has_local_appearance():
+            saveMirror.save_local_appearance(appearance.get_defaults())
         _auto_load_game()
         return
     coopUI.show_character_picker(_on_client_picker_confirm, _on_client_picker_cancel)
 
 
 func _on_client_picker_confirm(_entry: Dictionary = {}) -> void:
-    if !has_local_appearance():
-        save_local_appearance(appearance.get_defaults())
+    if !saveMirror.has_local_appearance():
+        saveMirror.save_local_appearance(appearance.get_defaults())
     _auto_load_game()
 
 
@@ -1110,7 +1031,7 @@ func send_character_to_host() -> void:
         return
     if !is_instance_valid(loader):
         return
-    var charPath: String = _get_player_save_path() + "Character.tres"
+    var charPath: String = saveMirror.get_player_save_path() + "Character.tres"
     if !FileAccess.file_exists(charPath):
         return
     var fileData: PackedByteArray = FileAccess.get_file_as_bytes(charPath)
@@ -1165,7 +1086,7 @@ func _receive_host_character(fileData: PackedByteArray = PackedByteArray()) -> v
     if fileData.is_empty():
         _log("No stored character on host — starting fresh")
         return
-    var dir: String = _get_player_save_path()
+    var dir: String = saveMirror.get_player_save_path()
     if !DirAccess.dir_exists_absolute(dir):
         DirAccess.make_dir_recursive_absolute(dir)
     var filePath: String = dir + "Character.tres"

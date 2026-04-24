@@ -65,8 +65,8 @@ func _on_singleplayer_pressed(menu: Node) -> void:
     if _cm.is_session_active():
         _cm._log("[menu] Singleplayer pressed during active session — ignored")
         return
-    _cm.wipe_user_saves()
-    _cm.mirror_solo_to_user()
+    _cm.saveMirror.wipe_user_saves()
+    _cm.saveMirror.mirror_solo_to_user()
     var main: Node = menu.get_node_or_null(PATH_MENU_MAIN)
     var modes: Node = menu.get_node_or_null(PATH_MENU_MODES)
     if main != null:
@@ -234,7 +234,7 @@ func _on_browse_pressed(menu: Node) -> void:
 
 
 func _on_logs_pressed() -> void:
-    _cm.collect_logs()
+    _cm.logCollector.collect()
 
 
 func _on_back_pressed(menu: Node) -> void:

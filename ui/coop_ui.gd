@@ -292,7 +292,7 @@ func on_disconnect_pressed() -> void:
 func _on_collect_logs_pressed() -> void:
     if !is_instance_valid(_cm):
         return
-    _cm.collect_logs()
+    _cm.logCollector.collect()
 
 
 ## Shows a themed, menu-specific lobby browser (separate from the F10 in-game
@@ -1092,7 +1092,7 @@ func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
     var loader: Node = get_node_or_null(PATH_LOADER_ABS)
     if loader == null:
         return
-    _cm.wipe_user_saves()
+    _cm.saveMirror.wipe_user_saves()
     loader.NewGame(newWorldDifficulty, newWorldSeason)
     _cm.saveMirror.mirror_user_to_world()
     loader.LoadScene("Cabin")
@@ -1438,7 +1438,7 @@ func on_world_selected(worldId: String) -> void:
     _cm.saveMirror.set_active_world(worldId)
 
     # Mirror the world dir into user:// so vanilla Loader picks up its saves.
-    _cm.wipe_user_saves()
+    _cm.saveMirror.wipe_user_saves()
     _cm.saveMirror.mirror_world_to_user(worldId)
 
     if _cm.is_session_active():

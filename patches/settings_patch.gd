@@ -887,7 +887,7 @@ func _on_mp_disconnect() -> void:
 func _on_mp_logs() -> void:
     if !is_instance_valid(_cm):
         return
-    _cm.collect_logs()
+    _cm.logCollector.collect()
 
 
 func _on_copy_ip_text(copyText: String) -> void:

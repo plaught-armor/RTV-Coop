@@ -52,7 +52,7 @@ func init(cm: Node, onConfirm: Callable, onCancel: Callable = Callable()) -> voi
     if gameTheme != null:
         theme = gameTheme
     _build_ui()
-    var current: Dictionary = _cm.load_local_appearance()
+    var current: Dictionary = _cm.saveMirror.load_local_appearance()
     _selectedBody = current.get("body", _bodyOrder[0])
     _selectedMaterial = current.get("material", "")
     if !_byBody.has(_selectedBody):
@@ -339,7 +339,7 @@ func _apply_preview(body: String, materialPath: String) -> void:
 
 func _on_confirm_pressed() -> void:
     var entry: Dictionary = {"body": _selectedBody, "material": _selectedMaterial}
-    _cm.save_local_appearance(entry)
+    _cm.saveMirror.save_local_appearance(entry)
     _close()
     if _onConfirm.is_valid():
         _onConfirm.call(entry)

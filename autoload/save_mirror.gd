@@ -180,3 +180,72 @@ func _run_copy_jobs(jobs: Array) -> void:
         if f != null:
             f.store_buffer(bytes)
             f.close()
+
+
+func setup_save_paths() -> void:
+    if _cm.worldId.is_empty():
+        _cm.worldId = "world_%d" % Time.get_unix_time_from_system()
+    var localSteamId: String = _cm.steamBridge.localSteamID if _cm.steamBridge.is_ready() else "local"
+    apply_save_paths("user://coop/%s/" % _cm.worldId, "user://coop/%s/players/%s/" % [_cm.worldId, localSteamId])
+
+
+## Uses patched savePath var when present; falls back to meta if loader_patch didn't apply.
+func apply_save_paths(sp: String, pp: String) -> void:
+    if !is_instance_valid(_cm.loader):
+        return
+    if "savePath" in _cm.loader:
+        _cm.loader.savePath = sp
+        _cm.loader.playerSavePath = pp
+    else:
+        _cm.loader.set_meta(&"savePath", sp)
+        _cm.loader.set_meta(&"playerSavePath", pp)
+    DirAccess.make_dir_recursive_absolute(sp)
+    DirAccess.make_dir_recursive_absolute(pp)
+    _cm._log("Save paths: world=%s player=%s" % [sp, pp])
+
+
+func get_save_path() -> String:
+    if !is_instance_valid(_cm.loader):
+        return "user://"
+    if "savePath" in _cm.loader:
+        return _cm.loader.savePath
+    return _cm.loader.get_meta(&"savePath", "user://")
+
+
+func get_player_save_path() -> String:
+    if !is_instance_valid(_cm.loader):
+        return "user://"
+    if "playerSavePath" in _cm.loader:
+        return _cm.loader.playerSavePath
+    return _cm.loader.get_meta(&"playerSavePath", "user://")
+
+
+func load_local_appearance() -> Dictionary:
+    var dir: String = get_player_save_path()
+    var entry: Variant = _cm.appearance.load_from(dir)
+    if entry == null:
+        return _cm.appearance.get_defaults()
+    return entry
+
+
+func has_local_appearance() -> bool:
+    var dir: String = get_player_save_path()
+    return FileAccess.file_exists(_cm.appearance.file_path(dir))
+
+
+func save_local_appearance(entry: Dictionary) -> bool:
+    var dir: String = get_player_save_path()
+    return _cm.appearance.save_to(dir, entry)
+
+
+func sanitize_path_component(component: String) -> bool:
+    if component.is_empty():
+        return false
+    if component.find("..") != -1 || component.find("/") != -1 || component.find("\\") != -1:
+        return false
+    return true
+
+
+func reset_save_paths() -> void:
+    _cm.worldId = ""
+    apply_save_paths("user://", "user://")
