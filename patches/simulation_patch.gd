@@ -1,5 +1,6 @@
 ## Patch for Simulation.gd — applies host-auth day/night rate multipliers on top of vanilla tick.
 extends "res://Scripts/Simulation.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node
 

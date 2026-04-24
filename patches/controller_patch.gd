@@ -1,6 +1,8 @@
 ## Patch for Controller.gd — adds network broadcast hooks and flattens Movement/input helpers.
 extends "res://Scripts/Controller.gd"
 
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
+
 var _cm: Node
 
 var audioPool: Array[AudioStreamPlayer] = []
@@ -8,8 +10,11 @@ const AUDIO_POOL_INITIAL: int = 8
 var wasFiring: bool = false
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
+func _ensure_cm() -> bool:
+    if is_instance_valid(_cm):
+        return true
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 
 func _ready() -> void:
@@ -52,7 +57,7 @@ func play_pooled(audioEvent: AudioEvent) -> void:
     player.play()
 
 func _input(event: InputEvent) -> void:
-    if !is_instance_valid(_cm):
+    if !_ensure_cm():
         return
     if _cm.gd.freeze || _cm.gd.isCaching || _cm.gd.vehicle:
         return
@@ -77,7 +82,7 @@ func _input(event: InputEvent) -> void:
 func Movement(delta: float) -> void:
     super.Movement(delta)
 
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         return
 
     _cm.playerState.broadcast_position(
@@ -94,7 +99,7 @@ func Movement(delta: float) -> void:
 
 
 func Inertia(delta: float) -> void:
-    if !is_instance_valid(_cm):
+    if !_ensure_cm():
         super.Inertia(delta)
         return
     if _cm.gd.isWalking || _cm.gd.isRunning:
@@ -110,7 +115,7 @@ func Inertia(delta: float) -> void:
         inertia = lerpf(inertia, 1.0, delta * 2.0)
 
 func SurfaceDetection(delta: float) -> void:
-    if !is_instance_valid(_cm):
+    if !_ensure_cm():
         super.SurfaceDetection(delta)
         return
     scanTimer += delta
@@ -128,7 +133,7 @@ func SurfaceDetection(delta: float) -> void:
     _cm.gd.leanRBlocked = right.is_colliding()
 
 func ResolveFootstep(isLanding: bool) -> AudioEvent:
-    if !is_instance_valid(_cm):
+    if !_ensure_cm():
         return audioLibrary.footstepGenericLand if isLanding else audioLibrary.footstepGeneric
     match _cm.gd.surface:
         &"Grass":
@@ -165,7 +170,7 @@ func play_footstep_and_broadcast(isLanding: bool) -> void:
 
 
 func PlayFootstep() -> void:
-    if !is_instance_valid(_cm):
+    if !_ensure_cm():
         super.PlayFootstep()
         return
     if character.heavyGear && randi_range(1, 2) == 1:
@@ -174,7 +179,7 @@ func PlayFootstep() -> void:
 
 
 func PlayFootstepJump() -> void:
-    if !is_instance_valid(_cm):
+    if !_ensure_cm():
         super.PlayFootstepJump()
         return
     PlayMovementCloth()
@@ -184,7 +189,7 @@ func PlayFootstepJump() -> void:
 
 
 func PlayFootstepLand() -> void:
-    if !is_instance_valid(_cm):
+    if !_ensure_cm():
         super.PlayFootstepLand()
         return
     PlayMovementCloth()

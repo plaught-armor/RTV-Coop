@@ -1,6 +1,7 @@
 ## Patch for CatRescue.gd — broadcasts catFound after rescue pickup so peers
 ## all light up the cat vital simultaneously.
 extends "res://Scripts/CatRescue.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 

@@ -1,5 +1,6 @@
 ## Patch for Helicopter.gd — host-authoritative; clients lerp snapshots from vehicle_state.gd.
 extends "res://Scripts/Helicopter.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 var _relPath: String = ""

@@ -1,5 +1,6 @@
 ## Patch for Television.gd — routes Interact() toggle through host.
 extends "res://Scripts/Television.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 

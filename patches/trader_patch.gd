@@ -1,11 +1,9 @@
 ## Patch for Trader.gd — host-authoritative task completion (client requests, host broadcasts).
 extends "res://Scripts/Trader.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func _ensure_cm() -> bool:

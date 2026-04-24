@@ -1,6 +1,7 @@
 ## Patch for Radio.gd — routes Interact() toggle through host so every peer
 ## hears the same station (or silence) at the same moment.
 extends "res://Scripts/Radio.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 

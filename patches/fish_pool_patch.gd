@@ -1,5 +1,6 @@
 ## Patch for FishPool.gd — path-seeded RNG for deterministic spawns; all-peer distance check.
 extends "res://Scripts/FishPool.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 
 var _cm: Node

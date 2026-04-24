@@ -1,5 +1,6 @@
 ## Patch for Explosion.gd — co-op splash damage (host-authoritative, remote player detection).
 extends "res://Scripts/Explosion.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node
 const COOP_HIT_LAYER: int = 1 << 19

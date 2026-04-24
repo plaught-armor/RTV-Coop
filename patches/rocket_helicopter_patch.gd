@@ -1,6 +1,7 @@
 ## Patch for RocketHelicopter.gd — host runs physics + collision, broadcasts
 ## explosion; clients lerp snapshot.
 extends "res://Scripts/RocketHelicopter.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 var _relPath: String = ""

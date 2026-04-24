@@ -1,6 +1,7 @@
 ## Patch for CatFeeder.gd — broadcasts gameData.cat change after feeding so
 ## peers see the same cat hydration / death state.
 extends "res://Scripts/CatFeeder.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 

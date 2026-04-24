@@ -4,7 +4,16 @@ extends "res://Scripts/AI.gd"
 const PATH_AI: NodePath = ^"AI"
 
 
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
+
 var _cm: Node
+
+
+func _ensure_cm() -> bool:
+    if is_instance_valid(_cm):
+        return true
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 # -1 = host's local player; otherwise a remote peer ID.
 var targetPeerId: int = -1
@@ -17,26 +26,15 @@ var puppetMode: bool = false
 const COOP_HIT_LAYER: int = 1 << 19
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
-    if fire != null:
-        fire.collision_mask |= COOP_HIT_LAYER
-    if LOS != null:
-        LOS.collision_mask |= COOP_HIT_LAYER
-
-
 func _ready() -> void:
     super._ready()
     if puppetMode:
         set_physics_process(false)
         set_process(false)
-    if _cm == null:
-        var root: Node = get_tree().root if get_tree() != null else null
-        if root != null:
-            for child: Node in root.get_children():
-                if child.has_meta(&"is_coop_manager"):
-                    _cm = child
-                    break
+    if fire != null:
+        fire.collision_mask |= COOP_HIT_LAYER
+    if LOS != null:
+        LOS.collision_mask |= COOP_HIT_LAYER
 
 
 # Walks up instead of /root/Map so AI in headless SubViewports finds its map too.
@@ -105,7 +103,7 @@ func _find_map_ancestor() -> Node:
 func _physics_process(delta: float) -> void:
     if puppetMode:
         return
-    if is_instance_valid(_cm) && _cm.is_session_active():
+    if _ensure_cm() && _cm.is_session_active():
         if !_cm.isHost:
             return
         # Skip gameData.isDead so AI stays active for surviving remotes after host dies.
@@ -149,7 +147,7 @@ func _all_players_dead() -> bool:
     return true
 
 func Parameters(delta: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.Parameters(delta)
         return
     var _pt: int = _cm.perf.start()
@@ -195,7 +193,7 @@ func Parameters(delta: float) -> void:
     _cm.perf.stop("ai.Parameters", _pt)
 
 func Sensor(delta: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.Sensor(delta)
         return
     var _pt: int = _cm.perf.start()
@@ -232,7 +230,7 @@ func _get_target_camera_position() -> Vector3:
 
 func LOSCheck(target: Vector3) -> void:
     var _pt: int = _cm.perf.start()
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         _cm.perf.stop("ai.LOSCheck", _pt)
         super.LOSCheck(target)
         return
@@ -264,7 +262,7 @@ func LOSCheck(target: Vector3) -> void:
     _cm.perf.stop("ai.LOSCheck", _pt)
 
 func Hearing() -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.Hearing()
         return
 
@@ -289,7 +287,7 @@ func Hearing() -> void:
             return
 
 func FireDetection(delta: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.FireDetection(delta)
         return
     var _pt: int = _cm.perf.start()
@@ -338,7 +336,7 @@ func FireDetection(delta: float) -> void:
     _cm.perf.stop("ai.FireDetection", _pt)
 
 func Raycast() -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.Raycast()
         return
 
@@ -375,7 +373,7 @@ func Raycast() -> void:
         PlayFlyby()
 
 func Fire(delta: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.Fire(delta)
         return
 
@@ -421,7 +419,7 @@ func Fire(delta: float) -> void:
 
 ## Host applies damage locally; client routes to host via RPC.
 func WeaponDamage(hitbox: String, damage: float) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.WeaponDamage(hitbox, damage)
         return
     if _cm.isHost:
@@ -459,7 +457,7 @@ func PlayFootstep() -> void:
 
 
 func _broadcast_voice(voiceType: int) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active() || !_cm.isHost:
+    if !_ensure_cm() || !_cm.is_session_active() || !_cm.isHost:
         return
     if !has_meta(&"ai_sync_id"):
         return
@@ -467,7 +465,7 @@ func _broadcast_voice(voiceType: int) -> void:
 
 
 func Death(direction: Vector3, force: float) -> void:
-    if is_instance_valid(_cm) && _cm.is_session_active() && _cm.isHost:
+    if _ensure_cm() && _cm.is_session_active() && _cm.isHost:
         if has_meta(&"ai_sync_id"):
             var syncId: int = get_meta(&"ai_sync_id")
             _cm.aiState.broadcast_ai_death(syncId, direction, force)
@@ -489,7 +487,7 @@ func Interactor(delta: float) -> void:
 
     if !is_instance_valid(doorBefore):
         return
-    if !is_instance_valid(_cm) || !_cm.is_session_active() || !_cm.isHost:
+    if !_ensure_cm() || !_cm.is_session_active() || !_cm.isHost:
         return
     if doorBefore.isOpen:
         var doorPath: String = get_tree().current_scene.get_path_to(doorBefore)

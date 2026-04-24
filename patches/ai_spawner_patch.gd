@@ -1,11 +1,8 @@
 ## Patch for AISpawner.gd — host-auth spawning; clients build pools but suppress spawns.
 extends "res://Scripts/AISpawner.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node
-
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func _ready() -> void:

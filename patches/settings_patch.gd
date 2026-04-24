@@ -1,5 +1,6 @@
 ## Patch for Settings.gd — regroups pause UI into vertical tabs and adds a Multiplayer tab.
 extends "res://Scripts/Settings.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node
 # var (not const): Godot #61274 makes const Array[Array] inner arrays shared mutable refs.
@@ -13,9 +14,6 @@ var TAB_GROUPS: Array[Array] = [
     ["Effects", ["Shadows", "Water", "AO", "Color"]],
 ]
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func _ensure_cm() -> bool:

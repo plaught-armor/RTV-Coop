@@ -1,5 +1,6 @@
 ## Patch for EventSystem.gd — host-auth event rolls; clients receive spawns via world_state RPC.
 extends "res://Scripts/EventSystem.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 
 const PATH_WELL_BOTTOM: NodePath = ^"Bottom"

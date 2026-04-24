@@ -1,5 +1,6 @@
 ## Patch for KnifeRig.gd — broadcasts slash/stab audio and hit decals to remotes.
 extends "res://Scripts/KnifeRig.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node
 

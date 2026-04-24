@@ -1,6 +1,7 @@
 ## Patch for CASA.gd — host authoritative airdrop plane; clients lerp pose +
 ## run parachute cosmetic locally.
 extends "res://Scripts/CASA.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 var _relPath: String = ""

@@ -1,6 +1,7 @@
 ## Patch for Instrument.gd — edge-detects local audioPlayer start/stop and
 ## broadcasts a 3D audio clip so remote players hear it on the puppet body.
 extends "res://Scripts/Instrument.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node = null
 var _audioWasPlaying: bool = false

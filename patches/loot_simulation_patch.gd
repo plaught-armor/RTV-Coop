@@ -1,23 +1,20 @@
 ## Patch for LootSimulation.gd — host-authoritative loot; clients suppress generation and receive via RPC.
 extends "res://Scripts/LootSimulation.gd"
 
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
+
 var _cm: Node
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
+func _ensure_cm() -> bool:
+    if is_instance_valid(_cm):
+        return true
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 
 func _ready() -> void:
-    # LootSimulation._ready runs before inject_manager; lazy lookup is the fallback.
-    if _cm == null:
-        var root: Node = get_tree().root if get_tree() != null else null
-        if root != null:
-            for child: Node in root.get_children():
-                if child.has_meta(&"is_coop_manager"):
-                    _cm = child
-                    break
-    if _cm == null || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super._ready()
         return
 

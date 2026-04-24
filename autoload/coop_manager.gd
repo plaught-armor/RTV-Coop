@@ -58,10 +58,6 @@ var worldId: String = ""
 const SCENE_CHECK_FRAMES: int = 60
 
 const PATH_CONTROLLER: NodePath = ^"Core/Controller"
-const PATH_INTERACTOR: NodePath = ^"Core/Controller/Camera/Interactor"
-const PATH_CHARACTER: NodePath = ^"Core/Controller/Character"
-const PATH_INTERFACE: NodePath = ^"Core/UI/Interface"
-const PATH_SETTINGS: NodePath = ^"Core/UI/Settings"
 const PATH_AI: NodePath = ^"AI"
 const PATH_CORE: NodePath = ^"Core"
 const PATH_LOADER_ABS: NodePath = ^"/root/Loader"
@@ -99,7 +95,7 @@ func _ready() -> void:
     # don't get clobbered when the player hosts a coop world.
     migrate_solo_saves_if_needed()
 
-    inject_manager.call_deferred()
+    _maybe_customize_menu.call_deferred(get_tree().current_scene)
     _register_ai_pools.call_deferred()
     _log("Initialized (debug: %s)" % str(DEBUG))
 
@@ -677,7 +673,7 @@ func on_scene_changed() -> void:
     # Menu-to-game transition skips the back-button free path.
     if is_instance_valid(coopUI) && coopUI.has_method(&"free_all_dialogs"):
         coopUI.free_all_dialogs()
-    inject_manager()
+    _maybe_customize_menu(get_tree().current_scene)
     if worldState != null:
         worldState.refresh_scene_cache()
     if aiState != null:
@@ -753,80 +749,6 @@ func notify_scene_loaded() -> void:
     if is_peer_on_same_map(peerId):
         worldState.send_full_state(peerId)
         aiState.send_full_state(peerId)
-
-
-func inject_manager() -> void:
-    var scene: Node = get_tree().current_scene
-    _log("inject_manager: scene=%s" % (scene.scene_file_path if is_instance_valid(scene) else "<null>"))
-    if !is_instance_valid(scene):
-        return
-
-    _inject_controller_tree(scene)
-    _inject_interactables_and_traders()
-    _inject_items_and_transitions()
-    _inject_ai(scene)
-    _maybe_customize_menu(scene)
-
-
-func _inject_controller_tree(scene: Node) -> void:
-    var controller: Node = scene.get_node_or_null(PATH_CONTROLLER)
-    if controller != null && controller.has_method(&"init_manager"):
-        controller.init_manager(self)
-
-    var interactor: Node = scene.get_node_or_null(PATH_INTERACTOR)
-    if interactor == null:
-        for node: Node in scene.find_children("*", "RayCast3D", true, false):
-            if node.get_script() != null && node.get_script().resource_path == "res://mod/patches/interactor_patch.gd":
-                interactor = node
-                break
-    if interactor != null && interactor.has_method(&"init_manager"):
-        interactor.init_manager(self)
-        if DEBUG:
-            print("[coop] inject_manager: Interactor patched at %s" % interactor.get_path())
-
-    var character: Node = scene.get_node_or_null(PATH_CHARACTER)
-    if character != null && character.has_method(&"init_manager"):
-        character.init_manager(self)
-
-    var iface: Node = scene.get_node_or_null(PATH_INTERFACE)
-    if iface != null && iface.has_method(&"init_manager"):
-        iface.init_manager(self)
-
-    var ui_settings: Node = scene.get_node_or_null(PATH_SETTINGS)
-    if ui_settings != null && ui_settings.has_method(&"init_manager"):
-        ui_settings.init_manager(self)
-
-
-func _inject_interactables_and_traders() -> void:
-    for node: Node in get_tree().get_nodes_in_group(&"Interactable"):
-        var obj: Node = node.owner if node.owner != null else node
-        if obj.has_method(&"init_manager"):
-            obj.init_manager(self)
-
-    for node: Node in get_tree().get_nodes_in_group(&"Trader"):
-        if node.has_method(&"init_manager"):
-            node.init_manager(self)
-
-
-func _inject_items_and_transitions() -> void:
-    for node: Node in get_tree().get_nodes_in_group(&"Item"):
-        if node.has_method(&"init_manager"):
-            node.init_manager(self)
-
-    for node: Node in get_tree().get_nodes_in_group(&"Transition"):
-        var obj: Node = node.owner if node.owner != null else node
-        if obj.has_method(&"init_manager"):
-            obj.init_manager(self)
-
-
-func _inject_ai(scene: Node) -> void:
-    var spawner: Node = scene.get_node_or_null(PATH_AI)
-    if spawner != null && spawner.has_method(&"init_manager"):
-        spawner.init_manager(self)
-
-    for node: Node in get_tree().get_nodes_in_group(&"AI"):
-        if node.has_method(&"init_manager"):
-            node.init_manager(self)
 
 
 # ModLoader runs past Menu.tscn load, so we modify the live instance instead of patching.

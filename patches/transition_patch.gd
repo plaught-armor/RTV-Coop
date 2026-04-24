@@ -1,11 +1,9 @@
 ## Patch for Transition.gd — independent map transitions; mirrors user://*.tres into per-world dir.
 extends "res://Scripts/Transition.gd"
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 
 var _cm: Node
 
-
-func init_manager(manager: Node) -> void:
-    _cm = manager
 
 
 func _ready() -> void:

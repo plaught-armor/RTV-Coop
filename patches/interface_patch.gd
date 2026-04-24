@@ -1,6 +1,7 @@
 ## Patch for Interface.gd — broadcasts drops; defers client task completion until host ACK.
 extends "res://Scripts/Interface.gd"
 
+const _CML: GDScript = preload("res://mod/autoload/coop_manager_locator.gd")
 const PATH_MAP: NodePath = ^"/root/Map"
 
 var _cm: Node
@@ -10,12 +11,15 @@ var _cm: Node
 var _pendingTasks: Dictionary = {}
 
 
-func init_manager(manager: Node) -> void:
-    _cm = manager
+func _ensure_cm() -> bool:
+    if is_instance_valid(_cm):
+        return true
+    _cm = _CML.find(get_tree())
+    return _cm != null
 
 
 func Drop(target: Node) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.Drop(target)
         return
 
@@ -101,7 +105,7 @@ func _instantiate_pickup(file: PackedScene, map: Node, transform: Dictionary, dr
 
 
 func CompleteDeal() -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active():
+    if !_ensure_cm() || !_cm.is_session_active():
         super.CompleteDeal()
         return
     if !is_instance_valid(trader):
@@ -159,7 +163,7 @@ func _execute_client_trade(traderPath: String, requestedIndices: PackedInt32Arra
 
 ## Client-side defer: hide inputs + stash rewards; host ACK triggers finalize_pending_task.
 func Complete(data: Resource) -> void:
-    if !is_instance_valid(_cm) || !_cm.is_session_active() || _cm.isHost:
+    if !_ensure_cm() || !_cm.is_session_active() || _cm.isHost:
         super.Complete(data)
         return
     if !(data is TaskData):
