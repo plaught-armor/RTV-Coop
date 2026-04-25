@@ -18,6 +18,10 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Compute version
+        id: ver
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
       - name: Build steam_helper (Linux)
         run: |
           cd steam_helper
@@ -31,8 +35,40 @@ jobs:
       - name: Build .vmz
         run: go run build.go rtv-coop release no-deploy
 
+      - name: Rename .vmz with version
+        run: mv rtv-coop.vmz rtv-coop-${{ steps.ver.outputs.version }}.vmz
+
+      - name: Fetch latest RTV Mod Loader release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p _bundle/mods
+          gh release download --repo plaught-armor/RTV-Mod-Loader \
+            --pattern modloader.gd \
+            --pattern override.cfg \
+            --dir _bundle
+          cp rtv-coop-${{ steps.ver.outputs.version }}.vmz _bundle/mods/rtv-coop.vmz
+
+      - name: Build setup bundle
+        run: |
+          cd _bundle
+          zip -r ../rtv-coop-setup-${{ steps.ver.outputs.version }}.zip .
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: rtv-coop.vmz
+          files: |
+            rtv-coop-${{ steps.ver.outputs.version }}.vmz
+            rtv-coop-setup-${{ steps.ver.outputs.version }}.zip
           generate_release_notes: true
+          body: |
+            ## Downloads
+
+            | File | Use |
+            |------|-----|
+            | `rtv-coop-setup-${{ steps.ver.outputs.version }}.zip` | **First-time install.** Bundle ships RTV Mod Loader + co-op mod + `override.cfg`. Extract directly into the game install directory. |
+            | `rtv-coop-${{ steps.ver.outputs.version }}.vmz` | **Mod update only.** Replace existing `mods/rtv-coop.vmz`. Use this if you already have RTV Mod Loader installed. |
+
+            See [INSTALLATION.md](https://github.com/plaught-armor/RTV-Coop/blob/main/INSTALLATION.md) for full instructions and Linux/Proton paths.
+
+            ---

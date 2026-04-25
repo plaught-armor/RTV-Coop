@@ -1,19 +1,43 @@
 # Co-op Mod Installation
 
+Two install paths — pick one:
+
+- **First-time install** (no RTV Mod Loader yet): use `rtv-coop-setup-X.Y.Z.zip`
+- **Mod update only** (RTV Mod Loader already installed): use `rtv-coop-X.Y.Z.vmz`
+
 ## Prerequisites
 
 - [Road to Vostok](https://store.steampowered.com/app/1963610/Road_to_Vostok/) installed via Steam
-- [RTV Mod Loader](https://github.com/plaught-armor/RTV-Mod-Loader) installed (see its README for setup)
 - Steam running
 
-## Install
+## First-time install (`rtv-coop-setup-X.Y.Z.zip`)
 
-1. Download `rtv-coop.vmz` from [Releases](https://github.com/plaught-armor/RTV-Coop/releases)
-2. Place it in the `mods` folder in your game install directory:
-   - **Windows:** `C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok\mods\`
-   - **Linux:** `~/.local/share/Steam/steamapps/common/Road to Vostok/mods/`
+The setup bundle ships RTV Mod Loader + the co-op mod together — no separate ML install needed.
+
+1. Download `rtv-coop-setup-X.Y.Z.zip` from [Releases](https://github.com/plaught-armor/RTV-Coop/releases)
+2. Extract directly into your game install directory (overwriting any existing `modloader.gd` / `override.cfg`):
+   - **Windows:** `C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok\`
+   - **Linux:** `~/.local/share/Steam/steamapps/common/Road to Vostok/`
 3. Launch the game through Steam
 4. The main menu shows **Singleplayer** and **Multiplayer** buttons
+
+The bundle places:
+
+```
+Road to Vostok/
+├─ modloader.gd
+├─ override.cfg
+└─ mods/
+   └─ rtv-coop.vmz
+```
+
+## Mod update only (`rtv-coop-X.Y.Z.vmz`)
+
+1. Download `rtv-coop-X.Y.Z.vmz` from [Releases](https://github.com/plaught-armor/RTV-Coop/releases)
+2. Replace `rtv-coop.vmz` in the `mods` folder of your game install directory:
+   - **Windows:** `C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok\mods\`
+   - **Linux:** `~/.local/share/Steam/steamapps/common/Road to Vostok/mods/`
+3. Re-launch the game through Steam
 
 ## Verify
 
@@ -28,11 +52,11 @@ If the Multiplayer submenu shows `Steam: offline` or the Invite Friends list is 
 
 ## Updating
 
-Replace `rtv-coop.vmz` in the `mods` folder with the new version and relaunch.
+Use `rtv-coop-X.Y.Z.vmz` (see "Mod update only" above) — replace existing `mods/rtv-coop.vmz` and relaunch.
 
 ## Uninstalling
 
-Delete `rtv-coop.vmz` from the `mods` folder.
+Delete `rtv-coop.vmz` from the `mods` folder. To remove RTV Mod Loader entirely, also delete `modloader.gd` and `override.cfg` from the game folder.
 
 ## Logs
 

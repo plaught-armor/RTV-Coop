@@ -36,13 +36,27 @@ A co-op multiplayer mod for [Road to Vostok](https://store.steampowered.com/app/
 
 > See [INSTALLATION.md](INSTALLATION.md) for detailed step-by-step instructions including RTV Mod Loader setup and Linux/Proton paths.
 
-### Quick Start
+### Releases
 
-1. Install the [RTV Mod Loader](https://github.com/plaught-armor/RTV-Mod-Loader)
-2. Download `rtv-coop.vmz` from [Releases](https://github.com/plaught-armor/RTV-Coop/releases)
-3. Place it in the `mods/` folder (see [INSTALLATION.md](INSTALLATION.md) for your platform's path)
-4. Launch the game through Steam
-5. The main menu should show **Singleplayer** and **Multiplayer** buttons
+Each tagged release ships two artifacts on [Releases](https://github.com/plaught-armor/RTV-Coop/releases):
+
+| File | Use |
+|------|-----|
+| `rtv-coop-X.Y.Z.vmz` | mod only — drop into existing `mods/` (you already have RTV Mod Loader) |
+| `rtv-coop-setup-X.Y.Z.zip` | full bundle — `modloader.gd` + `override.cfg` + `mods/rtv-coop.vmz`. Drop into game folder for first-time install |
+
+### Quick Start (first install)
+
+1. Download `rtv-coop-setup-X.Y.Z.zip` from [Releases](https://github.com/plaught-armor/RTV-Coop/releases)
+2. Extract into game folder (see [INSTALLATION.md](INSTALLATION.md) for your platform's path)
+3. Launch the game through Steam
+4. Main menu shows **Singleplayer** and **Multiplayer** buttons
+
+### Quick Start (mod update only)
+
+1. Download `rtv-coop-X.Y.Z.vmz` from [Releases](https://github.com/plaught-armor/RTV-Coop/releases)
+2. Replace existing `mods/rtv-coop.vmz` in game folder
+3. Re-launch
 
 ---
 
