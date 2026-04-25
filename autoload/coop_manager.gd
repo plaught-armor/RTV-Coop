@@ -55,24 +55,33 @@ var coopUI: Control = null
 @warning_ignore("unused_private_class_variable")
 var _pendingHostUseSteam: bool = true
 
-var remotePlayerScene: PackedScene = preload("res://mod/presentation/remote_player.tscn")
-var PlayerStateScript: Script = preload("res://mod/network/player_state.gd")
+# NOTE: scripts that reference the `CoopManager` autoload identifier MUST be
+# loaded at runtime (load() in _ready), not at parse time (preload()). When
+# ModLoader injects this autoload via add_child, the identifier is not in the
+# editor's project setting registry — so any preload() of a CoopManager-using
+# script fails to compile, returning null, and `.new()` produces null subsystems.
+# Editor runs work because project.godot has the autoload entry; production
+# .vmz runs do not. Lazy-load via _init_lazy_subsystems below.
+var remotePuppetScene: PackedScene = null
+var remoteCapsuleScene: PackedScene = null
+var PlayerStateScript: Script = null
 var slotSerializer: RefCounted = preload("res://mod/network/slot_serializer.gd").new()
-var HeadlessMapScript: Script = preload("res://mod/network/headless_map.gd")
+var HeadlessMapScript: Script = null
 # Cached before take_over_path to avoid circular extends after path redirect.
-var AIPatchScript: Script = preload("res://mod/patches/ai_patch.gd")
+var AIPatchScript: Script = null
 var appearance: RefCounted = preload("res://mod/network/appearance.gd").new()
 var perf: RefCounted = preload("res://mod/network/perf.gd").new()
 var logCollector: RefCounted = preload("res://mod/autoload/log_collector.gd").new()
-var saveMirror: RefCounted = preload("res://mod/autoload/save_mirror.gd").new()
+var saveMirror: RefCounted = null
 var gameState: RefCounted = preload("res://mod/autoload/coop_game_state.gd").new()
 var _interactRouter: RefCounted = preload("res://mod/autoload/coop_interact_router.gd").new()
-var layoutsHook: RefCounted = preload("res://mod/network/layouts_hook.gd").new()
-var simulationHook: RefCounted = preload("res://mod/network/simulation_hook.gd").new()
-var catStateHook: RefCounted = preload("res://mod/network/cat_state_hook.gd").new()
-var deathStateHook: RefCounted = preload("res://mod/network/death_state_hook.gd").new()
-var instrumentHook: RefCounted = preload("res://mod/network/instrument_hook.gd").new()
-var MenuCustomizerScript: Script = preload("res://mod/autoload/coop_menu_customizer.gd")
+var layoutsHook: RefCounted = null
+var simulationHook: RefCounted = null
+var catStateHook: RefCounted = null
+var deathStateHook: RefCounted = null
+var instrumentHook: RefCounted = null
+var mineSpawnerHook: RefCounted = null
+var MenuCustomizerScript: Script = null
 var menuCustomizer: Node = null
 # Host-set display name for non-Steam (Direct IP) sessions. Persisted at user://coop/name.txt.
 var coopCustomName: String = ""
@@ -105,7 +114,7 @@ func _ready() -> void:
     # Editor autoloads via project.godot -> /root/CoopManager.
     # Exported build autoloads via ModLoader -> /root/RTVModLoader/CoopManager.
     # RPC uses NodePath across peers, so force /root/CoopManager on both sides.
-    _normalize_autoload_path.call_deferred()
+    _normalize_autoload_path()
     set_meta(&"is_coop_manager", true)
     # Vanilla Settings.gd pauses get_tree() which would also halt host-side RPC
     # dispatch + state ticks here. ALWAYS keeps network alive so peers don't
@@ -114,11 +123,13 @@ func _ready() -> void:
     if DEBUG:
         force_windowed()
 
+    _init_lazy_subsystems()
     register_patches()
     _load_custom_name()
     loader = get_node_or_null(PATH_LOADER_ABS)
     layoutsHook.connect_tree.call_deferred()
     instrumentHook.connect_tree.call_deferred()
+    mineSpawnerHook.connect_tree.call_deferred()
 
     _spawn_network_children()
     _spawn_coop_ui()
@@ -141,11 +152,33 @@ func _normalize_autoload_path() -> void:
     name = "CoopManager"
 
 
+# Loads scripts that reference the CoopManager autoload identifier. Must run
+# AFTER _normalize_autoload_path so /root/CoopManager exists when the parser
+# resolves bare identifiers in these dependent scripts. Production .vmz runs
+# do not have CoopManager in the project autoload registry, so parse-time
+# preload() of these scripts returns null; runtime load() succeeds because
+# the autoload Node exists at /root by then.
+func _init_lazy_subsystems() -> void:
+    remotePuppetScene = load("res://mod/presentation/remote_player_puppet.tscn")
+    remoteCapsuleScene = load("res://mod/presentation/remote_player_capsule.tscn")
+    PlayerStateScript = load("res://mod/network/player_state.gd")
+    HeadlessMapScript = load("res://mod/network/headless_map.gd")
+    AIPatchScript = load("res://mod/patches/ai_patch.gd")
+    saveMirror = load("res://mod/autoload/save_mirror.gd").new()
+    layoutsHook = load("res://mod/network/layouts_hook.gd").new()
+    simulationHook = load("res://mod/network/simulation_hook.gd").new()
+    catStateHook = load("res://mod/network/cat_state_hook.gd").new()
+    deathStateHook = load("res://mod/network/death_state_hook.gd").new()
+    instrumentHook = load("res://mod/network/instrument_hook.gd").new()
+    mineSpawnerHook = load("res://mod/network/mine_spawner_hook.gd").new()
+    MenuCustomizerScript = load("res://mod/autoload/coop_menu_customizer.gd")
+
+
 func _spawn_network_children() -> void:
-    var PlayerStateScript_: Script = preload("res://mod/network/player_state.gd")
-    var WorldStateScript: Script = preload("res://mod/network/world_state.gd")
-    var AIStateScript: Script = preload("res://mod/network/ai_state.gd")
-    var SteamBridgeScript: Script = preload("res://mod/network/steam_bridge.gd")
+    var PlayerStateScript_: Script = load("res://mod/network/player_state.gd")
+    var WorldStateScript: Script = load("res://mod/network/world_state.gd")
+    var AIStateScript: Script = load("res://mod/network/ai_state.gd")
+    var SteamBridgeScript: Script = load("res://mod/network/steam_bridge.gd")
 
     playerState = PlayerStateScript_.new()
     playerState.name = "PlayerState"
@@ -162,7 +195,7 @@ func _spawn_network_children() -> void:
     aiState.process_mode = Node.PROCESS_MODE_ALWAYS
     add_child(aiState)
 
-    var VehicleStateScript: Script = preload("res://mod/network/vehicle_state.gd")
+    var VehicleStateScript: Script = load("res://mod/network/vehicle_state.gd")
     vehicleState = VehicleStateScript.new()
     vehicleState.name = "VehicleState"
     vehicleState.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -184,8 +217,8 @@ func _spawn_coop_ui() -> void:
     uiLayer.name = "CoopUILayer"
     uiLayer.layer = 100
     add_child(uiLayer)
-    var CoopUIScript: Script = preload("res://mod/ui/coop_ui.gd")
-    var CoopHUDScript: Script = preload("res://mod/ui/coop_hud.gd")
+    var CoopUIScript: Script = load("res://mod/ui/coop_ui.gd")
+    var CoopHUDScript: Script = load("res://mod/ui/coop_hud.gd")
     coopUI = CoopUIScript.new()
     coopUI.name = "CoopUI"
     uiLayer.add_child(coopUI)
@@ -521,6 +554,7 @@ func on_lobby_created(response: Dictionary) -> void:
         _log("Lobby creation failed: %s" % response.get(&"error", "unknown"))
         return
     var lobbyID: String = response.get(&"data", { }).get(&"lobby_id", "")
+    currentLobbyID = lobbyID
     _log("Steam lobby created: %s" % lobbyID)
     _update_lobby_data()
 
@@ -551,8 +585,8 @@ func get_local_name() -> String:
     return "Player_%d" % localPeerId
 
 
-func set_custom_name(name: String) -> void:
-    var trimmed: String = name.strip_edges().substr(0, 32)
+func set_custom_name(custom: String) -> void:
+    var trimmed: String = custom.strip_edges().substr(0, 32)
     coopCustomName = trimmed
     _save_custom_name()
     # Rebroadcast to peers if already in a session so their player list updates.
@@ -678,7 +712,9 @@ func spawn_remote_player(peerId: int) -> void:
     playerState.clear_peer(peerId)
 
     var idx: int = alloc_peer_slot(peerId)
-    var remote: Node3D = remotePlayerScene.instantiate()
+    var cachedAppearance: Dictionary = cachedAppearances[idx]
+    var scene: PackedScene = remoteCapsuleScene if cachedAppearance.get("body", "") == "Capsule" else remotePuppetScene
+    var remote: Node3D = scene.instantiate()
     remote.name = "RemotePlayer_%d" % peerId
     remote.set_meta(&"peer_id", peerId)
     # Remote puppet must keep ticking while vanilla Settings pauses the tree,
@@ -691,7 +727,6 @@ func spawn_remote_player(peerId: int) -> void:
     remoteNodes[idx] = remote
     _log("Spawned remote player for peer %d (%s)" % [peerId, peerDisplayName])
 
-    var cachedAppearance: Dictionary = cachedAppearances[idx]
     if !cachedAppearance.is_empty():
         _apply_cached_appearance(cachedAppearance, remote)
         cachedAppearances[idx] = {}
@@ -715,6 +750,40 @@ func _apply_cached_appearance(cached: Dictionary, remote: Node3D) -> void:
     if !is_instance_valid(remote):
         return
     remote.set_appearance(cached.body, cached.material)
+
+
+## Routes a sanitized appearance update for [param peerId] to the right remote
+## node. If the body family changes (puppet ↔ capsule) the existing node
+## doesn't match — re-cache appearance + loadout and despawn so the next
+## [method spawn_remote_player] picks the matching scene.
+func apply_remote_appearance(peerId: int, sanitized: Dictionary) -> void:
+    var idx: int = peer_idx(peerId)
+    if idx < 0:
+        cache_peer_appearance(peerId, sanitized)
+        return
+    var remote: Node3D = remoteNodes[idx]
+    if !is_instance_valid(remote):
+        cache_peer_appearance(peerId, sanitized)
+        return
+    var newIsCapsule: bool = sanitized.get("body", "") == "Capsule"
+    var curIsCapsule: bool = remote.has_method(&"is_capsule_body") && remote.is_capsule_body()
+    if newIsCapsule != curIsCapsule:
+        cache_peer_appearance(peerId, sanitized)
+        var attVar: Variant = remote.get(&"_activeAttachments")
+        if attVar is Array:
+            cachedAttachments[idx] = (attVar as Array).duplicate()
+        var weaponVar: Variant = remote.get(&"activeWeapon")
+        if weaponVar is Node3D && is_instance_valid(weaponVar):
+            var wname: String = String((weaponVar as Node3D).name)
+            if wname == "_coop_dyn":
+                cachedEquipment[idx] = ""
+            else:
+                cachedEquipment[idx] = wname
+        remote.queue_free()
+        remoteNodes[idx] = null
+        spawn_remote_player(peerId)
+        return
+    remote.set_appearance(sanitized.body, sanitized.material)
 
 
 func on_remote_node_exiting(peerId: int) -> void:
@@ -1079,7 +1148,23 @@ func _receive_host_character(fileData: PackedByteArray = PackedByteArray()) -> v
     if !is_instance_valid(loader):
         return
     if fileData.is_empty():
-        _log("No stored character on host — starting fresh")
+        _log("No stored character on host — resetting local for fresh start")
+        # Wipe stale Character.tres in client's coop save dir; otherwise prior session's
+        # inventory carries over via auto-load. ResetCharacter writes a fresh empty save.
+        loader.ResetCharacter()
+        # Difficulty 1 worlds give a starting kit on first LoadCharacter; flip
+        # initialSpawn so the kit-grant logic in _load_initial_kit fires.
+        var diff: int = int(get_meta(&"new_world_difficulty", 1))
+        if diff == 1:
+            var charPath: String = saveMirror.get_player_save_path() + "Character.tres"
+            if FileAccess.file_exists(charPath):
+                var character: Resource = load(charPath)
+                if character != null:
+                    character.initialSpawn = true
+                    if loader.startingKits.size() > 0:
+                        character.startingKit = loader.startingKits.pick_random()
+                    ResourceSaver.save(character, charPath)
+                    _log("Fresh character: initialSpawn=true, kit assigned")
         return
     var dir: String = saveMirror.get_player_save_path()
     if !DirAccess.dir_exists_absolute(dir):

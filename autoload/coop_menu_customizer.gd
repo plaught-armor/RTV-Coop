@@ -4,6 +4,14 @@
 extends Node
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+# Falsified 2026-04-25: neither Engine.register_singleton nor
+# ProjectSettings.set_setting("autoload/X", ...) at runtime makes the parser
+# resolve bare CoopManager. Parser reads autoload registry only at engine
+# init. Shadow-var pattern is the structural floor for runtime-mounted mods.
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 const PATH_MENU_MAIN: NodePath = ^"Main"
 const PATH_MENU_MODES: NodePath = ^"Modes"
 const PATH_MENU_SUBMENU: NodePath = ^"CoopMPSubmenu"

@@ -2,6 +2,10 @@
 extends Node
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 const RIG_MANAGER_PATH: NodePath = ^"Core/Camera/Manager"
 const RIG_ATTACHMENTS: StringName = &"attachments"
 const RIG_DATA: StringName = &"data"
@@ -387,8 +391,10 @@ func broadcast_death() -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func receive_death() -> void:
     var peerId: int = multiplayer.get_remote_sender_id()
+    CoopManager._log("[player_state] receive_death peer=%d" % peerId)
     var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
     if remoteNode == null:
+        CoopManager._log("[player_state] receive_death peer=%d NO_REMOTE" % peerId)
         return
     clear_peer(peerId)
     if remoteNode.has_method(&"die"):
@@ -447,9 +453,13 @@ func broadcast_grenade_throw(grenadeScene: String, handleScene: String, throwPos
 ## Paths are pre-validated by the sender in [method broadcast_grenade_throw].
 @rpc("any_peer", "call_remote", "reliable")
 func receive_grenade_throw(grenadeScene: String, handleScene: String, throwPos: Vector3, throwRotY: float, throwDir: Vector3, basisX: Vector3, force: float) -> void:
+    var senderId: int = multiplayer.get_remote_sender_id()
+    CoopManager._log("[player_state] receive_grenade_throw peer=%d scene=%s pos=%s force=%.2f" % [senderId, grenadeScene, str(throwPos), force])
     if !_is_valid_grenade_path(grenadeScene):
+        CoopManager._log("[player_state] receive_grenade_throw REJECT_GRENADE_PATH=%s" % grenadeScene)
         return
     if !handleScene.is_empty() && !_is_valid_grenade_path(handleScene):
+        CoopManager._log("[player_state] receive_grenade_throw REJECT_HANDLE_PATH=%s" % handleScene)
         return
     var grenadePacked: PackedScene = load(grenadeScene) as PackedScene
     if grenadePacked == null:
@@ -498,10 +508,13 @@ func receive_equipment(weaponName: String) -> void:
     if !is_instance_valid(CoopManager):
         return
     if weaponName.length() > 32:
+        CoopManager._log("[player_state] receive_equipment REJECT len=%d" % weaponName.length())
         return
     var peerId: int = multiplayer.get_remote_sender_id()
+    CoopManager._log("[player_state] receive_equipment peer=%d weapon=%s" % [peerId, weaponName])
     var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
     if remoteNode == null:
+        CoopManager._log("[player_state] receive_equipment peer=%d CACHE (no_remote)" % peerId)
         CoopManager.cache_peer_equipment(peerId, weaponName)
         return
     if remoteNode.has_method(&"set_active_weapon"):
@@ -526,12 +539,8 @@ func receive_appearance(body: String, materialPath: String) -> void:
         return
     var peerId: int = multiplayer.get_remote_sender_id()
     var sanitized: Dictionary = CoopManager.appearance.sanitize({"body": body, "material": materialPath})
-    var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
-    if remoteNode == null:
-        CoopManager.cache_peer_appearance(peerId, sanitized)
-        return
-    if remoteNode.has_method(&"set_appearance"):
-        remoteNode.set_appearance(sanitized.body, sanitized.material)
+    CoopManager._log("[player_state] receive_appearance peer=%d body=%s material=%s" % [peerId, str(sanitized.body), str(sanitized.material)])
+    CoopManager.apply_remote_appearance(peerId, sanitized)
 
 
 func encode_flags(data: GameData) -> int:
@@ -635,8 +644,10 @@ func receive_attachments(names: Array[StringName]) -> void:
         push_warning("[player_state] Dropping attachment list from peer %d — size %d exceeds cap 16" % [multiplayer.get_remote_sender_id(), names.size()])
         return
     var peerId: int = multiplayer.get_remote_sender_id()
+    CoopManager._log("[player_state] receive_attachments peer=%d count=%d names=%s" % [peerId, names.size(), str(names)])
     var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
     if remoteNode == null:
+        CoopManager._log("[player_state] receive_attachments peer=%d CACHE (no_remote)" % peerId)
         CoopManager.cache_peer_attachments(peerId, names)
         return
     if remoteNode.has_method(&"set_active_attachments"):
