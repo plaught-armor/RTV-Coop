@@ -1,0 +1,124 @@
+name: Bundle Setup
+
+# Builds the setup bundle (mod .vmz + RTV Mod Loader) and uploads it to the
+# target mod release. Single source of truth — called from:
+#   - workflow_call:        mod release.yml after building a fresh .vmz
+#   - repository_dispatch:  ml-released event from RTV-Mod-Loader's release
+#   - workflow_dispatch:    manual rebuild
+#
+# Both mod_tag and ml_tag are explicit inputs. Blank → resolves to latest
+# published release on each repo. Convention: tag both repos per release so
+# the bundle records exact versions in VERSIONS.txt.
+
+on:
+  workflow_call:
+    inputs:
+      mod_tag:
+        description: 'RTV-Coop release tag to attach the bundle to (blank = latest)'
+        required: false
+        type: string
+        default: ''
+      ml_tag:
+        description: 'RTV-Mod-Loader release tag to bundle (blank = latest)'
+        required: false
+        type: string
+        default: ''
+  repository_dispatch:
+    types: [ml-released]
+  workflow_dispatch:
+    inputs:
+      mod_tag:
+        description: 'RTV-Coop release tag to attach the bundle to (blank = latest)'
+        required: false
+        default: ''
+      ml_tag:
+        description: 'RTV-Mod-Loader release tag to bundle (blank = latest)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target tags
+        id: tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_MOD_TAG: ${{ inputs.mod_tag }}
+          INPUT_ML_TAG: ${{ inputs.ml_tag }}
+          DISPATCH_MOD_TAG: ${{ github.event.client_payload.mod_tag }}
+          DISPATCH_ML_TAG: ${{ github.event.client_payload.ml_tag }}
+        run: |
+          MOD_TAG="${INPUT_MOD_TAG:-$DISPATCH_MOD_TAG}"
+          ML_TAG="${INPUT_ML_TAG:-$DISPATCH_ML_TAG}"
+
+          if [ -z "$MOD_TAG" ]; then
+            MOD_TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          if [ -z "$ML_TAG" ]; then
+            ML_TAG=$(gh release list --repo plaught-armor/RTV-Mod-Loader --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+
+          if [ -z "$MOD_TAG" ]; then
+            echo "No mod release found — nothing to attach bundle to."
+            exit 1
+          fi
+          if [ -z "$ML_TAG" ]; then
+            echo "No RTV-Mod-Loader release found — cannot build bundle."
+            exit 1
+          fi
+
+          MOD_VERSION="${MOD_TAG#v}"
+          echo "mod_tag=$MOD_TAG"          >> "$GITHUB_OUTPUT"
+          echo "mod_version=$MOD_VERSION"  >> "$GITHUB_OUTPUT"
+          echo "ml_tag=$ML_TAG"            >> "$GITHUB_OUTPUT"
+          echo "Building bundle: mod=$MOD_TAG ($MOD_VERSION), ml=$ML_TAG"
+
+      - name: Stage bundle root
+        run: mkdir -p _bundle/mods
+
+      - name: Download mod .vmz from target release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ steps.tags.outputs.mod_tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "rtv-coop-${{ steps.tags.outputs.mod_version }}.vmz" \
+            --dir _bundle
+          mv "_bundle/rtv-coop-${{ steps.tags.outputs.mod_version }}.vmz" \
+             "_bundle/mods/rtv-coop.vmz"
+
+      - name: Download RTV Mod Loader release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ steps.tags.outputs.ml_tag }}" \
+            --repo plaught-armor/RTV-Mod-Loader \
+            --pattern modloader.gd \
+            --pattern override.cfg \
+            --dir _bundle
+
+      - name: Stamp VERSIONS.txt
+        run: |
+          cat > _bundle/VERSIONS.txt <<EOF
+          mod=${{ steps.tags.outputs.mod_tag }}
+          modloader=${{ steps.tags.outputs.ml_tag }}
+          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+      - name: Build setup bundle
+        run: |
+          cd _bundle
+          zip -r "../rtv-coop-setup-${{ steps.tags.outputs.mod_version }}.zip" .
+
+      - name: Upload setup bundle to mod release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.tags.outputs.mod_tag }}" \
+            "rtv-coop-setup-${{ steps.tags.outputs.mod_version }}.zip" \
+            --repo "${{ github.repository }}" \
+            --clobber

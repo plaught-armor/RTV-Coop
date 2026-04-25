@@ -11,6 +11,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +23,11 @@ jobs:
 
       - name: Compute version
         id: ver
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build steam_helper (Linux)
         run: |
@@ -38,28 +45,11 @@ jobs:
       - name: Rename .vmz with version
         run: mv rtv-coop.vmz rtv-coop-${{ steps.ver.outputs.version }}.vmz
 
-      - name: Fetch latest RTV Mod Loader release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p _bundle/mods
-          gh release download --repo plaught-armor/RTV-Mod-Loader \
-            --pattern modloader.gd \
-            --pattern override.cfg \
-            --dir _bundle
-          cp rtv-coop-${{ steps.ver.outputs.version }}.vmz _bundle/mods/rtv-coop.vmz
-
-      - name: Build setup bundle
-        run: |
-          cd _bundle
-          zip -r ../rtv-coop-setup-${{ steps.ver.outputs.version }}.zip .
-
-      - name: Create release
+      - name: Create release with .vmz
         uses: softprops/action-gh-release@v2
         with:
           files: |
             rtv-coop-${{ steps.ver.outputs.version }}.vmz
-            rtv-coop-setup-${{ steps.ver.outputs.version }}.zip
           generate_release_notes: true
           body: |
             ## Downloads
@@ -72,3 +62,12 @@ jobs:
             See [INSTALLATION.md](https://github.com/plaught-armor/RTV-Coop/blob/main/INSTALLATION.md) for full instructions and Linux/Proton paths.
 
             ---
+
+  bundle:
+    needs: build
+    uses: ./.github/workflows/bundle-setup.yml
+    with:
+      mod_tag: ${{ needs.build.outputs.tag }}
+      ml_tag: ''
+    permissions:
+      contents: write
