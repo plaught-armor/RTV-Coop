@@ -19,7 +19,6 @@ func register(lib: Object) -> void:
     lib.hook("controller-movement-post", _on_movement_post)
     lib.hook("controller-inertia", _on_inertia)
     lib.hook("controller-surfacedetection", _on_surface_detection)
-    lib.hook("controller-resolvefootstep", _on_resolve_footstep)
     lib.hook("controller-playfootstep", _on_play_footstep)
     lib.hook("controller-playfootstepjump", _on_play_footstep_jump)
     lib.hook("controller-playfootstepland", _on_play_footstep_land)
@@ -152,15 +151,13 @@ func _on_surface_detection(delta: float) -> void:
     CoopManager.gd.leanRBlocked = c.right.is_colliding()
 
 
-func _on_resolve_footstep(isLanding: bool) -> AudioEvent:
-    var c: Controller = _lib._caller as Controller
-    if c == null:
-        CoopManager._log("[controller.trace] _on_resolve_footstep caller-not-Controller type=%s" % str(typeof(_lib._caller)))
-        return null
-    _lib.skip_super()
+## Surface→AudioEvent mapping. Vanilla Controller has no ResolveFootstep helper —
+## this is a mod-side reimpl of the same surface-tag dispatch the vanilla Play*
+## methods do inline. Keep return contract Variant-compatible with vanilla audio fields.
+func _resolve_footstep(c: Controller, isLanding: bool) -> AudioEvent:
     var lib: AudioLibrary = c.audioLibrary
     if lib == null:
-        CoopManager._log("[controller.trace] _on_resolve_footstep audioLibrary NULL")
+        CoopManager._log("[controller.trace] _resolve_footstep audioLibrary NULL")
         return null
     var surf: String = CoopManager.gd.surface as String
     if surf.is_empty():
@@ -196,7 +193,7 @@ func _play_footstep_and_broadcast(c: Controller, isLanding: bool) -> void:
     if CoopManager.gd.isWater:
         audio = c.audioLibrary.footstepWaterLand if isLanding else c.audioLibrary.footstepWater
     else:
-        audio = c.ResolveFootstep(isLanding)
+        audio = _resolve_footstep(c, isLanding)
     if audio == null:
         CoopManager._log("[controller.trace] footstep audio NULL surface=%s isWater=%s isLanding=%s" % [str(CoopManager.gd.surface), str(CoopManager.gd.isWater), str(isLanding)])
         return
