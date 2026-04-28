@@ -46,8 +46,8 @@ func _build_keybind_label() -> void:
     var font: FontFile = load("res://Fonts/Lora-Regular.ttf") as FontFile
     if font != null:
         keybindLabel.add_theme_font_override("font", font)
-    keybindLabel.add_theme_font_size_override("font_size", 12)
-    keybindLabel.add_theme_color_override("font_color", HINT_COLOR)
+    keybindLabel.add_theme_font_size_override(&"font_size", 12)
+    keybindLabel.add_theme_color_override(&"font_color", HINT_COLOR)
     keybindLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     keybindLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     add_child(keybindLabel)
@@ -213,8 +213,8 @@ func get_pooled_row(idx: int) -> HBoxContainer:
     var font: FontFile = load("res://Fonts/Lora-Regular.ttf") as FontFile
     if font != null:
         label.add_theme_font_override("font", font)
-    label.add_theme_font_size_override("font_size", 14)
-    label.add_theme_color_override("font_color", PLAYER_COLOR)
+    label.add_theme_font_size_override(&"font_size", 14)
+    label.add_theme_color_override(&"font_color", PLAYER_COLOR)
     label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     label.mouse_filter = Control.MOUSE_FILTER_IGNORE
     row.add_child(label)

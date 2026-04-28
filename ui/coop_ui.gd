@@ -184,8 +184,8 @@ func _build_dim_overlay() -> void:
     _pausedLabel = Label.new()
     _pausedLabel.name = "PausedLabel"
     _pausedLabel.text = "Game Paused"
-    _pausedLabel.add_theme_font_size_override("font_size", 16)
-    _pausedLabel.add_theme_color_override("font_color", Color(0.85, 0.25, 0.25, 1.0))
+    _pausedLabel.add_theme_font_size_override(&"font_size", 16)
+    _pausedLabel.add_theme_color_override(&"font_color", Color(0.85, 0.25, 0.25, 1.0))
     _pausedLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     _pausedLabel.anchor_left = 0.0
     _pausedLabel.anchor_right = 1.0
@@ -206,20 +206,20 @@ func _build_panel_layout() -> HBoxContainer:
     panel.grow_vertical = Control.GROW_DIRECTION_BOTH
     panel.mouse_filter = Control.MOUSE_FILTER_STOP
     # Kill vanilla PanelContainer grey bg; dim ColorRect behind already darkens scene.
-    panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+    panel.add_theme_stylebox_override(&"panel", StyleBoxEmpty.new())
     add_child(panel)
 
     var margin: MarginContainer = MarginContainer.new()
     margin.name = "Margin"
-    margin.add_theme_constant_override("margin_left", 24)
-    margin.add_theme_constant_override("margin_right", 24)
-    margin.add_theme_constant_override("margin_top", 20)
-    margin.add_theme_constant_override("margin_bottom", 20)
+    margin.add_theme_constant_override(&"margin_left", 24)
+    margin.add_theme_constant_override(&"margin_right", 24)
+    margin.add_theme_constant_override(&"margin_top", 20)
+    margin.add_theme_constant_override(&"margin_bottom", 20)
     panel.add_child(margin)
 
     var columns: HBoxContainer = HBoxContainer.new()
     columns.name = "Columns"
-    columns.add_theme_constant_override("separation", 48)
+    columns.add_theme_constant_override(&"separation", 48)
     margin.add_child(columns)
     return columns
 
@@ -228,7 +228,7 @@ func _build_main_column(columns: HBoxContainer) -> VBoxContainer:
     var mainCol: VBoxContainer = VBoxContainer.new()
     mainCol.name = "MainCol"
     mainCol.custom_minimum_size = Vector2(500, 0)
-    mainCol.add_theme_constant_override("separation", 8)
+    mainCol.add_theme_constant_override(&"separation", 8)
     columns.add_child(mainCol)
     return mainCol
 
@@ -237,7 +237,7 @@ func _build_top_row(mainCol: VBoxContainer) -> void:
     # [ title/subtitle/status (left) ] [ Connected Players (right) ]
     var topRow: HBoxContainer = HBoxContainer.new()
     topRow.name = "TopRow"
-    topRow.add_theme_constant_override("separation", 24)
+    topRow.add_theme_constant_override(&"separation", 24)
     mainCol.add_child(topRow)
 
     var titleBlock: VBoxContainer = VBoxContainer.new()
@@ -248,19 +248,19 @@ func _build_top_row(mainCol: VBoxContainer) -> void:
     var titleLabel: Label = Label.new()
     titleLabel.name = "TitleLabel"
     titleLabel.text = "Multiplayer"
-    titleLabel.add_theme_font_size_override("font_size", 22)
+    titleLabel.add_theme_font_size_override(&"font_size", 22)
     titleBlock.add_child(titleLabel)
 
     _subtitleLabel = Label.new()
     _subtitleLabel.name = "SubtitleLabel"
     _subtitleLabel.text = "Co-op session"
-    _subtitleLabel.add_theme_font_size_override("font_size", 12)
+    _subtitleLabel.add_theme_font_size_override(&"font_size", 12)
     titleBlock.add_child(_subtitleLabel)
 
     statusLabel = Label.new()
     statusLabel.name = "StatusLabel"
     statusLabel.text = "Disconnected"
-    statusLabel.add_theme_font_size_override("font_size", 14)
+    statusLabel.add_theme_font_size_override(&"font_size", 14)
     titleBlock.add_child(statusLabel)
 
     var playersBlock: VBoxContainer = VBoxContainer.new()
@@ -271,7 +271,7 @@ func _build_top_row(mainCol: VBoxContainer) -> void:
     var playersHeader: Label = Label.new()
     playersHeader.name = "ConnectedPlayersLabel"
     playersHeader.text = "Connected Players"
-    playersHeader.add_theme_font_size_override("font_size", 14)
+    playersHeader.add_theme_font_size_override(&"font_size", 14)
     playersBlock.add_child(playersHeader)
 
     playerList = VBoxContainer.new()
@@ -283,35 +283,35 @@ func _build_session_info_row(mainCol: VBoxContainer) -> void:
     # Visible only during session: [ mode+address (left) ] [ Disconnect/Logs (right) ]
     _sessionInfoRow = HBoxContainer.new()
     _sessionInfoRow.name = "SessionInfoRow"
-    _sessionInfoRow.add_theme_constant_override("separation", 12)
+    _sessionInfoRow.add_theme_constant_override(&"separation", 12)
     _sessionInfoRow.visible = false
     mainCol.add_child(_sessionInfoRow)
 
     var infoCol: VBoxContainer = VBoxContainer.new()
     infoCol.name = "InfoCol"
-    infoCol.add_theme_constant_override("separation", 4)
+    infoCol.add_theme_constant_override(&"separation", 4)
     infoCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     _sessionInfoRow.add_child(infoCol)
 
     _modeLabel = Label.new()
     _modeLabel.name = "ModeLabel"
-    _modeLabel.add_theme_font_size_override("font_size", 12)
+    _modeLabel.add_theme_font_size_override(&"font_size", 12)
     infoCol.add_child(_modeLabel)
 
     _addressRow = HBoxContainer.new()
     _addressRow.name = "AddressRow"
-    _addressRow.add_theme_constant_override("separation", 6)
+    _addressRow.add_theme_constant_override(&"separation", 6)
     infoCol.add_child(_addressRow)
 
     var addrPrefix: Label = Label.new()
     addrPrefix.name = "AddrPrefixLabel"
     addrPrefix.text = "Address:"
-    addrPrefix.add_theme_font_size_override("font_size", 12)
+    addrPrefix.add_theme_font_size_override(&"font_size", 12)
     _addressRow.add_child(addrPrefix)
 
     _addressLabel = Label.new()
     _addressLabel.name = "AddressLabel"
-    _addressLabel.add_theme_font_size_override("font_size", 12)
+    _addressLabel.add_theme_font_size_override(&"font_size", 12)
     _addressRow.add_child(_addressLabel)
 
     var addrCopyBtn: Button = Button.new()
@@ -326,7 +326,7 @@ func _build_name_row(mainCol: VBoxContainer) -> void:
     # Display name input (used on Direct IP where Steam name unavailable).
     _nameRow = HBoxContainer.new()
     _nameRow.name = "NameRow"
-    _nameRow.add_theme_constant_override("separation", 8)
+    _nameRow.add_theme_constant_override(&"separation", 8)
     mainCol.add_child(_nameRow)
 
     var nameLabel: Label = Label.new()
@@ -351,7 +351,7 @@ func _build_name_row(mainCol: VBoxContainer) -> void:
 func _build_host_buttons(mainCol: VBoxContainer) -> void:
     _hostRow = HBoxContainer.new()
     _hostRow.name = "HostRow"
-    _hostRow.add_theme_constant_override("separation", 8)
+    _hostRow.add_theme_constant_override(&"separation", 8)
     mainCol.add_child(_hostRow)
 
     var hostSteamBtn: Button = Button.new()
@@ -374,7 +374,7 @@ func _build_host_buttons(mainCol: VBoxContainer) -> void:
 func _build_join_row(mainCol: VBoxContainer) -> void:
     _ipJoinRow = HBoxContainer.new()
     _ipJoinRow.name = "IPJoinRow"
-    _ipJoinRow.add_theme_constant_override("separation", 8)
+    _ipJoinRow.add_theme_constant_override(&"separation", 8)
     mainCol.add_child(_ipJoinRow)
 
     _inlineAddrInput = LineEdit.new()
@@ -406,7 +406,7 @@ func _build_bottom_controls(mainCol: VBoxContainer) -> void:
     # Disconnect + Logs stacked, only visible in active session.
     _bottomControlsCol = VBoxContainer.new()
     _bottomControlsCol.name = "BottomControlsCol"
-    _bottomControlsCol.add_theme_constant_override("separation", 6)
+    _bottomControlsCol.add_theme_constant_override(&"separation", 6)
     _bottomControlsCol.visible = false
     mainCol.add_child(_bottomControlsCol)
 
@@ -437,7 +437,7 @@ func _build_friends_column(columns: HBoxContainer) -> void:
     var friendsHeader: Label = Label.new()
     friendsHeader.name = "FriendsHeaderLabel"
     friendsHeader.text = "Invite Friends"
-    friendsHeader.add_theme_font_size_override("font_size", 16)
+    friendsHeader.add_theme_font_size_override(&"font_size", 16)
     _friendsCol.add_child(friendsHeader)
 
     _friendsCol.add_child(_make_spacer(4))
@@ -806,7 +806,7 @@ func _populate_friend_row(friend: Dictionary, rowIndex: int) -> void:
 
     var styling: Dictionary = _friend_display_styling(inGame, state)
     nameLabel.text = "%s%s" % [friendName, styling.text]
-    nameLabel.add_theme_color_override("font_color", styling.color)
+    nameLabel.add_theme_color_override(&"font_color", styling.color)
 
     var steamID: String = friend.get(&"steam_id", "")
     _apply_friend_avatar(avatar, steamID)
@@ -973,13 +973,13 @@ func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control
     outer.grow_horizontal = Control.GROW_DIRECTION_BOTH
     outer.grow_vertical = Control.GROW_DIRECTION_BOTH
     outer.custom_minimum_size = Vector2(560, 0)
-    outer.add_theme_constant_override("separation", 4)
+    outer.add_theme_constant_override(&"separation", 4)
     wrapper.add_child(outer)
 
     var header: Label = Label.new()
     header.name = "Header"
     header.text = titleText
-    header.add_theme_font_size_override("font_size", 20)
+    header.add_theme_font_size_override(&"font_size", 20)
     header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     outer.add_child(header)
 
@@ -989,7 +989,7 @@ func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control
         subheader.text = subtitleText
         subheader.modulate = Color(1, 1, 1, 0.5)
         subheader.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-        subheader.add_theme_font_size_override("font_size", 12)
+        subheader.add_theme_font_size_override(&"font_size", 12)
         outer.add_child(subheader)
 
     var topSpacer: Control = Control.new()
@@ -999,7 +999,7 @@ func _make_menu_dialog_panel(titleText: String, subtitleText: String) -> Control
     # Content slot — callers append world/lobby lists, action buttons, etc.
     var vbox: VBoxContainer = VBoxContainer.new()
     vbox.name = "VBox"
-    vbox.add_theme_constant_override("separation", 8)
+    vbox.add_theme_constant_override(&"separation", 8)
     outer.add_child(vbox)
 
     var bottomSpacer: Control = Control.new()
@@ -1126,7 +1126,7 @@ func populate_world_list() -> void:
 
     for world: Dictionary in worlds:
         var row: HBoxContainer = HBoxContainer.new()
-        row.add_theme_constant_override("separation", 4)
+        row.add_theme_constant_override(&"separation", 4)
         worldPickerList.add_child(row)
 
         var btn: Button = _make_two_line_row_button(world["name"], _format_world_meta(world))
@@ -1138,8 +1138,8 @@ func populate_world_list() -> void:
         delBtn.text = "×"
         delBtn.custom_minimum_size = Vector2(40, 56)
         delBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-        delBtn.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
-        delBtn.add_theme_font_size_override("font_size", 18)
+        delBtn.add_theme_color_override(&"font_color", Color(0.8, 0.3, 0.3))
+        delBtn.add_theme_font_size_override(&"font_size", 18)
         delBtn.pressed.connect(on_delete_world_pressed.bind(world["id"], world["name"]))
         row.add_child(delBtn)
 
@@ -1158,19 +1158,19 @@ func _make_two_line_row_button(titleText: String, metaText: String) -> Button:
     vbox.offset_right = -12
     vbox.offset_top = 8
     vbox.offset_bottom = -8
-    vbox.add_theme_constant_override("separation", 2)
+    vbox.add_theme_constant_override(&"separation", 2)
     btn.add_child(vbox)
 
     var titleLabel: Label = Label.new()
     titleLabel.text = titleText
-    titleLabel.add_theme_font_size_override("font_size", 15)
+    titleLabel.add_theme_font_size_override(&"font_size", 15)
     titleLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     vbox.add_child(titleLabel)
 
     var metaLabel: Label = Label.new()
     metaLabel.text = metaText
-    metaLabel.add_theme_font_size_override("font_size", 11)
-    metaLabel.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
+    metaLabel.add_theme_font_size_override(&"font_size", 11)
+    metaLabel.add_theme_color_override(&"font_color", Color(0.65, 0.65, 0.65))
     metaLabel.mouse_filter = Control.MOUSE_FILTER_IGNORE
     vbox.add_child(metaLabel)
 
@@ -1180,8 +1180,8 @@ func _make_two_line_row_button(titleText: String, metaText: String) -> Button:
 func _add_empty_label() -> void:
     var emptyLabel: Label = Label.new()
     emptyLabel.text = "No existing worlds"
-    emptyLabel.add_theme_color_override("font_color", Color(0.55, 0.55, 0.55))
-    emptyLabel.add_theme_font_size_override("font_size", 13)
+    emptyLabel.add_theme_color_override(&"font_color", Color(0.55, 0.55, 0.55))
+    emptyLabel.add_theme_font_size_override(&"font_size", 13)
     emptyLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     emptyLabel.custom_minimum_size = Vector2(0, 80)
     worldPickerList.add_child(emptyLabel)
@@ -1322,7 +1322,7 @@ func show_new_world_dialog() -> void:
 func _build_new_world_name_input(vbox: VBoxContainer) -> void:
     var nameLabel: Label = Label.new()
     nameLabel.text = "World Name"
-    nameLabel.add_theme_font_size_override("font_size", 14)
+    nameLabel.add_theme_font_size_override(&"font_size", 14)
     vbox.add_child(nameLabel)
 
     newWorldNameInput = LineEdit.new()
@@ -1336,18 +1336,18 @@ func _build_new_world_name_input(vbox: VBoxContainer) -> void:
 func _build_new_world_choice_row(vbox: VBoxContainer, title: String, options: Array[Array], callback: Callable, btnList: Array[Button]) -> void:
     var label: Label = Label.new()
     label.text = title
-    label.add_theme_font_size_override("font_size", 14)
+    label.add_theme_font_size_override(&"font_size", 14)
     vbox.add_child(label)
 
     var row: HBoxContainer = HBoxContainer.new()
-    row.add_theme_constant_override("separation", 8)
+    row.add_theme_constant_override(&"separation", 8)
     vbox.add_child(row)
 
     for pair: Array in options:
         var btn: Button = Button.new()
         btn.text = pair[1]
         btn.custom_minimum_size = Vector2(0, 36)
-        btn.add_theme_font_size_override("font_size", 14)
+        btn.add_theme_font_size_override(&"font_size", 14)
         btn.mouse_filter = Control.MOUSE_FILTER_STOP
         btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
         btn.pressed.connect(callback.bind(pair[0]))
@@ -1359,7 +1359,7 @@ func _build_new_world_create_button(vbox: VBoxContainer) -> void:
     var createBtn: Button = Button.new()
     createBtn.text = "Create"
     createBtn.custom_minimum_size = Vector2(0, 40)
-    createBtn.add_theme_font_size_override("font_size", 16)
+    createBtn.add_theme_font_size_override(&"font_size", 16)
     createBtn.mouse_filter = Control.MOUSE_FILTER_STOP
     createBtn.pressed.connect(on_create_world_confirmed)
     vbox.add_child(createBtn)
@@ -1379,16 +1379,16 @@ func _update_selection_colors() -> void:
     for i: int in diffButtons.size():
         var btn: Button = diffButtons[i]
         if i + 1 == newWorldDifficulty:
-            btn.add_theme_color_override("font_color", SELECTED_COLOR)
+            btn.add_theme_color_override(&"font_color", SELECTED_COLOR)
         else:
-            btn.add_theme_color_override("font_color", UNSELECTED_COLOR)
+            btn.add_theme_color_override(&"font_color", UNSELECTED_COLOR)
 
     for i: int in seasonButtons.size():
         var btn: Button = seasonButtons[i]
         if i + 1 == newWorldSeason:
-            btn.add_theme_color_override("font_color", SELECTED_COLOR)
+            btn.add_theme_color_override(&"font_color", SELECTED_COLOR)
         else:
-            btn.add_theme_color_override("font_color", UNSELECTED_COLOR)
+            btn.add_theme_color_override(&"font_color", UNSELECTED_COLOR)
 
 
 func on_create_world_confirmed() -> void:
@@ -1477,7 +1477,7 @@ func show_direct_join_dialog() -> void:
 
     var addrLabel: Label = Label.new()
     addrLabel.text = "IP Address"
-    addrLabel.add_theme_font_size_override("font_size", 14)
+    addrLabel.add_theme_font_size_override(&"font_size", 14)
     vbox.add_child(addrLabel)
 
     djAddressInput = LineEdit.new()
@@ -1488,7 +1488,7 @@ func show_direct_join_dialog() -> void:
 
     var portLabel: Label = Label.new()
     portLabel.text = "Port"
-    portLabel.add_theme_font_size_override("font_size", 14)
+    portLabel.add_theme_font_size_override(&"font_size", 14)
     vbox.add_child(portLabel)
 
     djPortInput = LineEdit.new()
@@ -1575,7 +1575,7 @@ func _lobby_subtitle(useSteam: bool) -> String:
 
 func _build_lobby_address_row(parent: VBoxContainer, port: int) -> void:
     var addrBox: HBoxContainer = HBoxContainer.new()
-    addrBox.add_theme_constant_override("separation", 8)
+    addrBox.add_theme_constant_override(&"separation", 8)
     addrBox.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
     parent.add_child(addrBox)
 
@@ -1603,7 +1603,7 @@ func _build_lobby_settings_column(columns: HBoxContainer) -> void:
 
     var settingsHeader: Label = Label.new()
     settingsHeader.text = "Session Settings"
-    settingsHeader.add_theme_font_size_override("font_size", 14)
+    settingsHeader.add_theme_font_size_override(&"font_size", 14)
     settingsCol.add_child(settingsHeader)
 
     var settingsScroll: ScrollContainer = ScrollContainer.new()
@@ -1614,7 +1614,7 @@ func _build_lobby_settings_column(columns: HBoxContainer) -> void:
 
     var settingsBox: VBoxContainer = VBoxContainer.new()
     settingsBox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    settingsBox.add_theme_constant_override("separation", 4)
+    settingsBox.add_theme_constant_override(&"separation", 4)
     settingsScroll.add_child(settingsBox)
 
     _build_rate_slider(settingsBox, "Day rate", "day_rate_multiplier")
@@ -1639,7 +1639,7 @@ func _build_lobby_players_column(columns: HBoxContainer, useSteam: bool) -> void
 
     var playersHeader: Label = Label.new()
     playersHeader.text = "Players"
-    playersHeader.add_theme_font_size_override("font_size", 14)
+    playersHeader.add_theme_font_size_override(&"font_size", 14)
     playersCol.add_child(playersHeader)
 
     _lobbyPlayerList = VBoxContainer.new()
@@ -1648,7 +1648,7 @@ func _build_lobby_players_column(columns: HBoxContainer, useSteam: bool) -> void
     if useSteam:
         var friendsHeader: Label = Label.new()
         friendsHeader.text = "Invite Friends"
-        friendsHeader.add_theme_font_size_override("font_size", 14)
+        friendsHeader.add_theme_font_size_override(&"font_size", 14)
         playersCol.add_child(friendsHeader)
 
         friendScroll = ScrollContainer.new()
@@ -1692,7 +1692,7 @@ func _build_rate_slider(
     minv: float = 0.1, maxv: float = 10.0, step: float = 0.1,
 ) -> void:
     var row: HBoxContainer = HBoxContainer.new()
-    row.add_theme_constant_override("separation", 8)
+    row.add_theme_constant_override(&"separation", 8)
     row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     parent.add_child(row)
 
@@ -1721,7 +1721,7 @@ func _build_rate_slider(
 
 func _build_toggle(parent: VBoxContainer, caption: String, key: String) -> void:
     var row: HBoxContainer = HBoxContainer.new()
-    row.add_theme_constant_override("separation", 8)
+    row.add_theme_constant_override(&"separation", 8)
     row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     parent.add_child(row)
 
@@ -1764,7 +1764,7 @@ func _update_lobby_players() -> void:
     var hostLabel: Label = Label.new()
     var hostName: String = CoopManager.get_peer_name(CoopManager.localPeerId)
     hostLabel.text = "%s (Host)" % hostName
-    hostLabel.add_theme_font_size_override("font_size", 13)
+    hostLabel.add_theme_font_size_override(&"font_size", 13)
     _lobbyPlayerList.add_child(hostLabel)
     var localPid: int = CoopManager.localPeerId
     for peerId: int in CoopManager.peerGodotIds:
@@ -1772,7 +1772,7 @@ func _update_lobby_players() -> void:
             continue
         var peerLabel: Label = Label.new()
         peerLabel.text = CoopManager.get_peer_name(peerId)
-        peerLabel.add_theme_font_size_override("font_size", 13)
+        peerLabel.add_theme_font_size_override(&"font_size", 13)
         _lobbyPlayerList.add_child(peerLabel)
 
 
@@ -1801,7 +1801,7 @@ func on_lobby_friends_received(response: Dictionary) -> void:
         var label: Label = Label.new()
         label.text = friendName
         label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        label.add_theme_font_size_override("font_size", 13)
+        label.add_theme_font_size_override(&"font_size", 13)
         row.add_child(label)
 
         var steamID: String = friend.get(&"steam_id", "")
@@ -1881,8 +1881,8 @@ func on_delete_world_pressed(worldId: String, worldName: String) -> void:
 
     var warnLabel: Label = Label.new()
     warnLabel.text = "All player saves will be lost."
-    warnLabel.add_theme_font_size_override("font_size", 12)
-    warnLabel.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+    warnLabel.add_theme_font_size_override(&"font_size", 12)
+    warnLabel.add_theme_color_override(&"font_color", Color(0.8, 0.3, 0.3))
     worldPickerList.add_child(warnLabel)
 
     var row: HBoxContainer = HBoxContainer.new()
@@ -1892,7 +1892,7 @@ func on_delete_world_pressed(worldId: String, worldName: String) -> void:
     yesBtn.text = "Delete"
     yesBtn.mouse_filter = Control.MOUSE_FILTER_STOP
     yesBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    yesBtn.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+    yesBtn.add_theme_color_override(&"font_color", Color(0.8, 0.3, 0.3))
     yesBtn.pressed.connect(_confirm_delete_world.bind(worldId))
     row.add_child(yesBtn)
 
