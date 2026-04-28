@@ -17,6 +17,7 @@ const PATH_MENU_MODES: NodePath = ^"Modes"
 const PATH_MENU_SUBMENU: NodePath = ^"CoopMPSubmenu"
 const PATH_MENU_BTN_NEW: NodePath = ^"Main/Buttons/New"
 const PATH_MENU_BTN_LOAD: NodePath = ^"Main/Buttons/Load"
+const _GAME_THEME: Theme = preload("res://UI/Themes/Theme.tres")
 
 
 
@@ -107,13 +108,12 @@ func _build_submenu(menu: Node) -> void:
 
 
 func _make_submenu_wrapper(menu: Node) -> Control:
-    var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
     var wrapper: Control = Control.new()
     wrapper.name = "CoopMPSubmenu"
     wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
-    if gameTheme != null:
-        wrapper.theme = gameTheme
+    if _GAME_THEME != null:
+        wrapper.theme = _GAME_THEME
     menu.add_child(wrapper)
     wrapper.hide()
     return wrapper

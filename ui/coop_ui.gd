@@ -1311,8 +1311,10 @@ func show_new_world_dialog() -> void:
 
     var vbox: VBoxContainer = _dialog_vbox(newWorldPanel)
     _build_new_world_name_input(vbox)
-    _build_new_world_choice_row(vbox, "Difficulty", [[1, "Normal"], [2, "Hard"], [3, "Permadeath"]], _on_difficulty_selected, diffButtons)
-    _build_new_world_choice_row(vbox, "Season", [[1, "Summer"], [2, "Winter"]], _on_season_selected, seasonButtons)
+    var diffOptions: Array[Array] = [[1, "Normal"], [2, "Hard"], [3, "Permadeath"]]
+    var seasonOptions: Array[Array] = [[1, "Summer"], [2, "Winter"]]
+    _build_new_world_choice_row(vbox, "Difficulty", diffOptions, _on_difficulty_selected, diffButtons)
+    _build_new_world_choice_row(vbox, "Season", seasonOptions, _on_season_selected, seasonButtons)
     _update_selection_colors()
     _build_new_world_create_button(vbox)
 
@@ -1331,7 +1333,7 @@ func _build_new_world_name_input(vbox: VBoxContainer) -> void:
     vbox.add_child(newWorldNameInput)
 
 
-func _build_new_world_choice_row(vbox: VBoxContainer, title: String, options: Array, callback: Callable, btnList: Array[Button]) -> void:
+func _build_new_world_choice_row(vbox: VBoxContainer, title: String, options: Array[Array], callback: Callable, btnList: Array[Button]) -> void:
     var label: Label = Label.new()
     label.text = title
     label.add_theme_font_size_override("font_size", 14)
@@ -1662,7 +1664,11 @@ func _build_lobby_players_column(columns: HBoxContainer, useSteam: bool) -> void
 
 
 func _add_lobby_select_world_button() -> void:
+    if !is_instance_valid(lobbyPanel):
+        return
     var returnBtn: Button = lobbyPanel.find_child("ReturnBtn", true, false)
+    if returnBtn == null:
+        return
     var outerVBox: VBoxContainer = returnBtn.get_parent()
     var selectBtn: Button = Button.new()
     selectBtn.text = "Select World"

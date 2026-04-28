@@ -346,32 +346,55 @@ func register_patches() -> void:
     _register_hooks.call_deferred()
 
 
+const _HOOK_KNIFE_RIG: Script = preload("res://mod/hooks/knife_rig_hooks.gd")
+const _HOOK_HELICOPTER: Script = preload("res://mod/hooks/helicopter_hooks.gd")
+const _HOOK_CHARACTER: Script = preload("res://mod/hooks/character_hooks.gd")
+const _HOOK_BTR: Script = preload("res://mod/hooks/btr_hooks.gd")
+const _HOOK_POLICE: Script = preload("res://mod/hooks/police_hooks.gd")
+const _HOOK_CASA: Script = preload("res://mod/hooks/casa_hooks.gd")
+const _HOOK_GRENADE_RIG: Script = preload("res://mod/hooks/grenade_rig_hooks.gd")
+const _HOOK_ROCKET_GRAD: Script = preload("res://mod/hooks/rocket_grad_hooks.gd")
+const _HOOK_ROCKET_HELICOPTER: Script = preload("res://mod/hooks/rocket_helicopter_hooks.gd")
+const _HOOK_MISSILE_SPAWNER: Script = preload("res://mod/hooks/missile_spawner_hooks.gd")
+const _HOOK_TRADER: Script = preload("res://mod/hooks/trader_hooks.gd")
+const _HOOK_FISH_POOL: Script = preload("res://mod/hooks/fish_pool_hooks.gd")
+const _HOOK_INTERACTOR: Script = preload("res://mod/hooks/interactor_hooks.gd")
+const _HOOK_LOOT_SIMULATION: Script = preload("res://mod/hooks/loot_simulation_hooks.gd")
+const _HOOK_FURNITURE: Script = preload("res://mod/hooks/furniture_hooks.gd")
+const _HOOK_AI_SPAWNER: Script = preload("res://mod/hooks/ai_spawner_hooks.gd")
+const _HOOK_EVENT_SYSTEM: Script = preload("res://mod/hooks/event_system_hooks.gd")
+const _HOOK_CONTROLLER: Script = preload("res://mod/hooks/controller_hooks.gd")
+const _HOOK_INTERFACE: Script = preload("res://mod/hooks/interface_hooks.gd")
+const _HOOK_AI: Script = preload("res://mod/hooks/ai_hooks.gd")
+const _HOOK_LOADER: Script = preload("res://mod/hooks/loader_hooks.gd")
+
+
 func _register_hooks() -> void:
     var lib: Object = await _await_rtvmodlib()
     if lib == null:
         return
 
-    knifeRigHooks = _make_hook_module(lib, "res://mod/hooks/knife_rig_hooks.gd")
-    helicopterHooks = _make_hook_module(lib, "res://mod/hooks/helicopter_hooks.gd")
-    characterHooks = _make_hook_module(lib, "res://mod/hooks/character_hooks.gd")
-    btrHooks = _make_hook_module(lib, "res://mod/hooks/btr_hooks.gd")
-    policeHooks = _make_hook_module(lib, "res://mod/hooks/police_hooks.gd")
-    casaHooks = _make_hook_module(lib, "res://mod/hooks/casa_hooks.gd")
-    grenadeRigHooks = _make_hook_module(lib, "res://mod/hooks/grenade_rig_hooks.gd")
-    rocketGradHooks = _make_hook_module(lib, "res://mod/hooks/rocket_grad_hooks.gd")
-    rocketHelicopterHooks = _make_hook_module(lib, "res://mod/hooks/rocket_helicopter_hooks.gd")
-    missileSpawnerHooks = _make_hook_module(lib, "res://mod/hooks/missile_spawner_hooks.gd")
-    traderHooks = _make_hook_module(lib, "res://mod/hooks/trader_hooks.gd")
-    fishPoolHooks = _make_hook_module(lib, "res://mod/hooks/fish_pool_hooks.gd")
-    interactorHooks = _make_hook_module(lib, "res://mod/hooks/interactor_hooks.gd")
-    lootSimulationHooks = _make_hook_module(lib, "res://mod/hooks/loot_simulation_hooks.gd")
-    furnitureHooks = _make_hook_module(lib, "res://mod/hooks/furniture_hooks.gd")
-    aiSpawnerHooks = _make_hook_module(lib, "res://mod/hooks/ai_spawner_hooks.gd")
-    eventSystemHooks = _make_hook_module(lib, "res://mod/hooks/event_system_hooks.gd")
-    controllerHooks = _make_hook_module(lib, "res://mod/hooks/controller_hooks.gd")
-    interfaceHooks = _make_hook_module(lib, "res://mod/hooks/interface_hooks.gd")
-    aiHooks = _make_hook_module(lib, "res://mod/hooks/ai_hooks.gd")
-    loaderHooks = _make_hook_module(lib, "res://mod/hooks/loader_hooks.gd")
+    knifeRigHooks = _make_hook_module(lib, _HOOK_KNIFE_RIG)
+    helicopterHooks = _make_hook_module(lib, _HOOK_HELICOPTER)
+    characterHooks = _make_hook_module(lib, _HOOK_CHARACTER)
+    btrHooks = _make_hook_module(lib, _HOOK_BTR)
+    policeHooks = _make_hook_module(lib, _HOOK_POLICE)
+    casaHooks = _make_hook_module(lib, _HOOK_CASA)
+    grenadeRigHooks = _make_hook_module(lib, _HOOK_GRENADE_RIG)
+    rocketGradHooks = _make_hook_module(lib, _HOOK_ROCKET_GRAD)
+    rocketHelicopterHooks = _make_hook_module(lib, _HOOK_ROCKET_HELICOPTER)
+    missileSpawnerHooks = _make_hook_module(lib, _HOOK_MISSILE_SPAWNER)
+    traderHooks = _make_hook_module(lib, _HOOK_TRADER)
+    fishPoolHooks = _make_hook_module(lib, _HOOK_FISH_POOL)
+    interactorHooks = _make_hook_module(lib, _HOOK_INTERACTOR)
+    lootSimulationHooks = _make_hook_module(lib, _HOOK_LOOT_SIMULATION)
+    furnitureHooks = _make_hook_module(lib, _HOOK_FURNITURE)
+    aiSpawnerHooks = _make_hook_module(lib, _HOOK_AI_SPAWNER)
+    eventSystemHooks = _make_hook_module(lib, _HOOK_EVENT_SYSTEM)
+    controllerHooks = _make_hook_module(lib, _HOOK_CONTROLLER)
+    interfaceHooks = _make_hook_module(lib, _HOOK_INTERFACE)
+    aiHooks = _make_hook_module(lib, _HOOK_AI)
+    loaderHooks = _make_hook_module(lib, _HOOK_LOADER)
 
     _register_menu_hooks(lib)
     _log("[hooks] 21 hook modules + menu-_ready-pre/post registered via RTVModLib")
@@ -383,6 +406,8 @@ func _await_rtvmodlib() -> Object:
     var waited: int = 0
     while not Engine.has_meta(&"RTVModLib") and waited < 300:
         await get_tree().process_frame
+        if !is_instance_valid(self):
+            return null
         waited += 1
     var lib: Object = Engine.get_meta(&"RTVModLib") if Engine.has_meta(&"RTVModLib") else null
     if lib == null:
@@ -390,11 +415,13 @@ func _await_rtvmodlib() -> Object:
         return null
     if not lib._is_ready:
         await lib.frameworks_ready
+        if !is_instance_valid(self):
+            return null
     return lib
 
 
-func _make_hook_module(lib: Object, path: String) -> Object:
-    var module: Object = load(path).new()
+func _make_hook_module(lib: Object, hookScript: Script) -> RefCounted:
+    var module: RefCounted = hookScript.new()
     module.register(lib)
     return module
 
