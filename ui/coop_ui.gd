@@ -157,6 +157,21 @@ func open_panel() -> void:
 
 
 func build_ui() -> void:
+    _build_dim_overlay()
+    var columns: HBoxContainer = _build_panel_layout()
+    var mainCol: VBoxContainer = _build_main_column(columns)
+    _build_top_row(mainCol)
+    _build_session_info_row(mainCol)
+    mainCol.add_child(_make_spacer(6))
+    _build_name_row(mainCol)
+    _build_host_buttons(mainCol)
+    _build_join_row(mainCol)
+    mainCol.add_child(_make_spacer(8))
+    _build_bottom_controls(mainCol)
+    _build_friends_column(columns)
+
+
+func _build_dim_overlay() -> void:
     # Full-screen dim behind panel, matches vanilla Settings overlay.
     _dimBackground = ColorRect.new()
     _dimBackground.name = "DimBackground"
@@ -166,7 +181,6 @@ func build_ui() -> void:
     _dimBackground.visible = false
     add_child(_dimBackground)
 
-    # "Game Paused" banner at top-center.
     _pausedLabel = Label.new()
     _pausedLabel.name = "PausedLabel"
     _pausedLabel.text = "Game Paused"
@@ -183,6 +197,8 @@ func build_ui() -> void:
     _pausedLabel.visible = false
     add_child(_pausedLabel)
 
+
+func _build_panel_layout() -> HBoxContainer:
     panel = PanelContainer.new()
     panel.name = "CoopPanel"
     panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -205,14 +221,20 @@ func build_ui() -> void:
     columns.name = "Columns"
     columns.add_theme_constant_override("separation", 48)
     margin.add_child(columns)
+    return columns
 
+
+func _build_main_column(columns: HBoxContainer) -> VBoxContainer:
     var mainCol: VBoxContainer = VBoxContainer.new()
     mainCol.name = "MainCol"
     mainCol.custom_minimum_size = Vector2(500, 0)
     mainCol.add_theme_constant_override("separation", 8)
     columns.add_child(mainCol)
+    return mainCol
 
-    # Top row: [ title/subtitle/status (left) ] [ Connected Players (right) ]
+
+func _build_top_row(mainCol: VBoxContainer) -> void:
+    # [ title/subtitle/status (left) ] [ Connected Players (right) ]
     var topRow: HBoxContainer = HBoxContainer.new()
     topRow.name = "TopRow"
     topRow.add_theme_constant_override("separation", 24)
@@ -241,7 +263,6 @@ func build_ui() -> void:
     statusLabel.add_theme_font_size_override("font_size", 14)
     titleBlock.add_child(statusLabel)
 
-    # Players column sits on the right of the title info (in TopRow).
     var playersBlock: VBoxContainer = VBoxContainer.new()
     playersBlock.name = "PlayersBlock"
     playersBlock.custom_minimum_size = Vector2(200, 0)
@@ -257,8 +278,9 @@ func build_ui() -> void:
     playerList.name = "PlayerList"
     playersBlock.add_child(playerList)
 
-    # Session info + controls row (visible only during session):
-    #   [ mode+address (left) ] [ Disconnect/Logs stacked (right) ]
+
+func _build_session_info_row(mainCol: VBoxContainer) -> void:
+    # Visible only during session: [ mode+address (left) ] [ Disconnect/Logs (right) ]
     _sessionInfoRow = HBoxContainer.new()
     _sessionInfoRow.name = "SessionInfoRow"
     _sessionInfoRow.add_theme_constant_override("separation", 12)
@@ -300,9 +322,8 @@ func build_ui() -> void:
     _addressRow.add_child(addrCopyBtn)
 
 
-    mainCol.add_child(_make_spacer(6))
-
-    # Display name row (above host controls; used on Direct IP where Steam name unavailable)
+func _build_name_row(mainCol: VBoxContainer) -> void:
+    # Display name input (used on Direct IP where Steam name unavailable).
     _nameRow = HBoxContainer.new()
     _nameRow.name = "NameRow"
     _nameRow.add_theme_constant_override("separation", 8)
@@ -326,7 +347,8 @@ func build_ui() -> void:
     _nameInput.focus_exited.connect(_on_name_focus_exited)
     _nameRow.add_child(_nameInput)
 
-    # Host row: Host (Steam) | Host (IP)
+
+func _build_host_buttons(mainCol: VBoxContainer) -> void:
     _hostRow = HBoxContainer.new()
     _hostRow.name = "HostRow"
     _hostRow.add_theme_constant_override("separation", 8)
@@ -348,7 +370,8 @@ func build_ui() -> void:
     hostIPBtn.pressed.connect(_on_host_ip_pressed)
     _hostRow.add_child(hostIPBtn)
 
-    # IP/Port/Join row
+
+func _build_join_row(mainCol: VBoxContainer) -> void:
     _ipJoinRow = HBoxContainer.new()
     _ipJoinRow.name = "IPJoinRow"
     _ipJoinRow.add_theme_constant_override("separation", 8)
@@ -378,9 +401,9 @@ func build_ui() -> void:
     joinBtn.pressed.connect(_on_inline_join_pressed)
     _ipJoinRow.add_child(joinBtn)
 
-    mainCol.add_child(_make_spacer(8))
 
-    # Bottom session controls: Disconnect + Logs stacked vertically.
+func _build_bottom_controls(mainCol: VBoxContainer) -> void:
+    # Disconnect + Logs stacked, only visible in active session.
     _bottomControlsCol = VBoxContainer.new()
     _bottomControlsCol.name = "BottomControlsCol"
     _bottomControlsCol.add_theme_constant_override("separation", 6)
@@ -403,7 +426,9 @@ func build_ui() -> void:
     sessLogsBtn.pressed.connect(_on_collect_logs_pressed)
     _bottomControlsCol.add_child(sessLogsBtn)
 
-    # Right column — Invite Friends (Steam only)
+
+func _build_friends_column(columns: HBoxContainer) -> void:
+    # Right column — Invite Friends (Steam only).
     _friendsCol = VBoxContainer.new()
     _friendsCol.name = "FriendsCol"
     _friendsCol.custom_minimum_size = Vector2(280, 0)
@@ -1269,8 +1294,8 @@ func _count_players_in_world(playersDir: String) -> int:
 
 
 func show_new_world_dialog() -> void:
-    print("[coop_ui] show_new_world_dialog called")
-    # Close the world picker first (this is a forward transition, not a cancel).
+    if CoopManager.DEBUG: print("[coop_ui] show_new_world_dialog called")
+    # Forward transition (not a cancel): close world picker first.
     _free_dialog(worldPickerPanel)
     worldPickerPanel = null
     worldPickerVisible = false
@@ -1285,7 +1310,14 @@ func show_new_world_dialog() -> void:
     _wire_return_button(newWorldPanel, on_new_world_back)
 
     var vbox: VBoxContainer = _dialog_vbox(newWorldPanel)
+    _build_new_world_name_input(vbox)
+    _build_new_world_choice_row(vbox, "Difficulty", [[1, "Normal"], [2, "Hard"], [3, "Permadeath"]], _on_difficulty_selected, diffButtons)
+    _build_new_world_choice_row(vbox, "Season", [[1, "Summer"], [2, "Winter"]], _on_season_selected, seasonButtons)
+    _update_selection_colors()
+    _build_new_world_create_button(vbox)
 
+
+func _build_new_world_name_input(vbox: VBoxContainer) -> void:
     var nameLabel: Label = Label.new()
     nameLabel.text = "World Name"
     nameLabel.add_theme_font_size_override("font_size", 14)
@@ -1298,48 +1330,30 @@ func show_new_world_dialog() -> void:
     newWorldNameInput.custom_minimum_size = Vector2(0, 32)
     vbox.add_child(newWorldNameInput)
 
-    var diffLabel: Label = Label.new()
-    diffLabel.text = "Difficulty"
-    diffLabel.add_theme_font_size_override("font_size", 14)
-    vbox.add_child(diffLabel)
 
-    var diffRow: HBoxContainer = HBoxContainer.new()
-    diffRow.add_theme_constant_override("separation", 8)
-    vbox.add_child(diffRow)
+func _build_new_world_choice_row(vbox: VBoxContainer, title: String, options: Array, callback: Callable, btnList: Array[Button]) -> void:
+    var label: Label = Label.new()
+    label.text = title
+    label.add_theme_font_size_override("font_size", 14)
+    vbox.add_child(label)
 
-    for pair: Array in [[1, "Normal"], [2, "Hard"], [3, "Permadeath"]]:
+    var row: HBoxContainer = HBoxContainer.new()
+    row.add_theme_constant_override("separation", 8)
+    vbox.add_child(row)
+
+    for pair: Array in options:
         var btn: Button = Button.new()
         btn.text = pair[1]
         btn.custom_minimum_size = Vector2(0, 36)
         btn.add_theme_font_size_override("font_size", 14)
         btn.mouse_filter = Control.MOUSE_FILTER_STOP
         btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        btn.pressed.connect(_on_difficulty_selected.bind(pair[0]))
-        diffRow.add_child(btn)
-        diffButtons.append(btn)
+        btn.pressed.connect(callback.bind(pair[0]))
+        row.add_child(btn)
+        btnList.append(btn)
 
-    var seasonLabel: Label = Label.new()
-    seasonLabel.text = "Season"
-    seasonLabel.add_theme_font_size_override("font_size", 14)
-    vbox.add_child(seasonLabel)
 
-    var seasonRow: HBoxContainer = HBoxContainer.new()
-    seasonRow.add_theme_constant_override("separation", 8)
-    vbox.add_child(seasonRow)
-
-    for pair: Array in [[1, "Summer"], [2, "Winter"]]:
-        var btn: Button = Button.new()
-        btn.text = pair[1]
-        btn.custom_minimum_size = Vector2(0, 36)
-        btn.add_theme_font_size_override("font_size", 14)
-        btn.mouse_filter = Control.MOUSE_FILTER_STOP
-        btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        btn.pressed.connect(_on_season_selected.bind(pair[0]))
-        seasonRow.add_child(btn)
-        seasonButtons.append(btn)
-
-    _update_selection_colors()
-
+func _build_new_world_create_button(vbox: VBoxContainer) -> void:
     var createBtn: Button = Button.new()
     createBtn.text = "Create"
     createBtn.custom_minimum_size = Vector2(0, 40)
@@ -1376,7 +1390,7 @@ func _update_selection_colors() -> void:
 
 
 func on_create_world_confirmed() -> void:
-    print("[coop_ui] on_create_world_confirmed called")
+    if CoopManager.DEBUG: print("[coop_ui] on_create_world_confirmed called")
     # Steam gate only when hosting via Steam — IP mode doesn't need it.
     if pendingHostUseSteam && (!CoopManager.steamBridge.is_ready() || !CoopManager.steamBridge.ownsGame):
         CoopManager._log("[coop_ui] Create aborted — Steam not ready, try again in a moment")
@@ -1528,81 +1542,95 @@ func show_lobby(useSteam: bool) -> void:
         if !CoopManager.start_hosting(port, useSteam):
             return
 
-    var steamName: String = CoopManager.steamBridge.localSteamName if CoopManager.steamBridge.is_ready() else ""
-    var subtitle: String = ("Steam: %s" % steamName if !steamName.is_empty() else "Steam lobby") if useSteam else "Direct connect"
-    lobbyPanel = _make_menu_dialog_panel("Lobby", subtitle)
+    lobbyPanel = _make_menu_dialog_panel("Lobby", _lobby_subtitle(useSteam))
     add_child(lobbyPanel)
     _wire_return_button(lobbyPanel, _on_lobby_back)
 
     var vbox: VBoxContainer = _dialog_vbox(lobbyPanel)
 
-    # IP addresses (IP mode only)
     if !useSteam:
-        var addrBox: HBoxContainer = HBoxContainer.new()
-        addrBox.add_theme_constant_override("separation", 8)
-        addrBox.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-        vbox.add_child(addrBox)
+        _build_lobby_address_row(vbox, port)
 
-        for addr: String in CoopManager.get_sharable_addresses():
-            var text: String = "%s:%d" % [addr, port]
-            var label: Label = Label.new()
-            label.text = text
-            addrBox.add_child(label)
-
-            var copyBtn: Button = Button.new()
-            copyBtn.text = "Copy"
-            copyBtn.mouse_filter = Control.MOUSE_FILTER_STOP
-            copyBtn.set_meta(&"copyText", text)
-            copyBtn.pressed.connect(_on_lobby_copy_text.bind(text))
-            addrBox.add_child(copyBtn)
-
-    # Session settings (host-only). Daylight/night Simulation rate multipliers
-    # fall through to CoopManager.set_setting which broadcasts to all peers via
-    # world_state.broadcast_settings. Sliders cover 0.1×..10× — lets the host
-    # compress a full day cycle to ~3 min or slow night pacing for sneaking.
-    # Gate on isHost even though show_lobby's call sites are both host entries
-    # today — defensive so future non-host refactors can't re-open this path
-    # and flood request_setting_change on every slider tick.
     var columns: HBoxContainer = HBoxContainer.new()
     columns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     vbox.add_child(columns)
 
+    # Defensive isHost gate: today's call sites are both host entries, but a future refactor
+    # mustn't be able to re-open this path and flood request_setting_change per slider tick.
     if CoopManager.isHost:
-        var settingsCol: VBoxContainer = VBoxContainer.new()
-        settingsCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        columns.add_child(settingsCol)
+        _build_lobby_settings_column(columns)
 
-        var settingsHeader: Label = Label.new()
-        settingsHeader.text = "Session Settings"
-        settingsHeader.add_theme_font_size_override("font_size", 14)
-        settingsCol.add_child(settingsHeader)
+    _build_lobby_players_column(columns, useSteam)
+    _add_lobby_select_world_button()
 
-        var settingsScroll: ScrollContainer = ScrollContainer.new()
-        settingsScroll.custom_minimum_size = Vector2(0, 280)
-        settingsScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-        settingsScroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        settingsCol.add_child(settingsScroll)
 
-        var settingsBox: VBoxContainer = VBoxContainer.new()
-        settingsBox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        settingsBox.add_theme_constant_override("separation", 4)
-        settingsScroll.add_child(settingsBox)
+func _lobby_subtitle(useSteam: bool) -> String:
+    if !useSteam:
+        return "Direct connect"
+    var steamName: String = CoopManager.steamBridge.localSteamName if CoopManager.steamBridge.is_ready() else ""
+    return "Steam: %s" % steamName if !steamName.is_empty() else "Steam lobby"
 
-        _build_rate_slider(settingsBox, "Day rate", "day_rate_multiplier")
-        _build_rate_slider(settingsBox, "Night rate", "night_rate_multiplier")
-        _build_rate_slider(settingsBox, "AI spawns", "ai_spawn_multiplier", 0.0, 3.0, 0.1)
-        _build_rate_slider(settingsBox, "AI aggression", "ai_aggression_multiplier", 0.1, 3.0, 0.1)
-        _build_rate_slider(settingsBox, "Dmg → AI", "damage_to_ai_multiplier", 0.1, 5.0, 0.1)
-        _build_rate_slider(settingsBox, "Dmg → player", "damage_to_player_multiplier", 0.1, 5.0, 0.1)
-        _build_rate_slider(settingsBox, "Loot", "loot_multiplier", 0.0, 5.0, 0.1)
-        _build_rate_slider(settingsBox, "Stamina regen", "stamina_regen_multiplier", 0.1, 5.0, 0.1)
-        _build_rate_slider(settingsBox, "Stamina drain", "stamina_drain_multiplier", 0.1, 5.0, 0.1)
-        _build_rate_slider(settingsBox, "Temp loss", "temperature_loss_multiplier", 0.1, 5.0, 0.1)
-        _build_rate_slider(settingsBox, "Vitals decay", "vitals_decay_multiplier", 0.1, 5.0, 0.1)
-        _build_toggle(settingsBox, "Weather locked", "weather_locked")
-        _build_toggle(settingsBox, "Friendly fire", "friendly_fire")
 
-    # Connected players
+func _build_lobby_address_row(parent: VBoxContainer, port: int) -> void:
+    var addrBox: HBoxContainer = HBoxContainer.new()
+    addrBox.add_theme_constant_override("separation", 8)
+    addrBox.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+    parent.add_child(addrBox)
+
+    for addr: String in CoopManager.get_sharable_addresses():
+        var text: String = "%s:%d" % [addr, port]
+        var label: Label = Label.new()
+        label.text = text
+        addrBox.add_child(label)
+
+        var copyBtn: Button = Button.new()
+        copyBtn.text = "Copy"
+        copyBtn.mouse_filter = Control.MOUSE_FILTER_STOP
+        copyBtn.set_meta(&"copyText", text)
+        copyBtn.pressed.connect(_on_lobby_copy_text.bind(text))
+        addrBox.add_child(copyBtn)
+
+
+func _build_lobby_settings_column(columns: HBoxContainer) -> void:
+    # Daylight/night Simulation rate multipliers fall through to CoopManager.set_setting
+    # which broadcasts to all peers via world_state.broadcast_settings.
+    # Sliders cover 0.1×..10× — host can compress a day cycle to ~3 min or slow night pacing.
+    var settingsCol: VBoxContainer = VBoxContainer.new()
+    settingsCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    columns.add_child(settingsCol)
+
+    var settingsHeader: Label = Label.new()
+    settingsHeader.text = "Session Settings"
+    settingsHeader.add_theme_font_size_override("font_size", 14)
+    settingsCol.add_child(settingsHeader)
+
+    var settingsScroll: ScrollContainer = ScrollContainer.new()
+    settingsScroll.custom_minimum_size = Vector2(0, 280)
+    settingsScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    settingsScroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    settingsCol.add_child(settingsScroll)
+
+    var settingsBox: VBoxContainer = VBoxContainer.new()
+    settingsBox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    settingsBox.add_theme_constant_override("separation", 4)
+    settingsScroll.add_child(settingsBox)
+
+    _build_rate_slider(settingsBox, "Day rate", "day_rate_multiplier")
+    _build_rate_slider(settingsBox, "Night rate", "night_rate_multiplier")
+    _build_rate_slider(settingsBox, "AI spawns", "ai_spawn_multiplier", 0.0, 3.0, 0.1)
+    _build_rate_slider(settingsBox, "AI aggression", "ai_aggression_multiplier", 0.1, 3.0, 0.1)
+    _build_rate_slider(settingsBox, "Dmg → AI", "damage_to_ai_multiplier", 0.1, 5.0, 0.1)
+    _build_rate_slider(settingsBox, "Dmg → player", "damage_to_player_multiplier", 0.1, 5.0, 0.1)
+    _build_rate_slider(settingsBox, "Loot", "loot_multiplier", 0.0, 5.0, 0.1)
+    _build_rate_slider(settingsBox, "Stamina regen", "stamina_regen_multiplier", 0.1, 5.0, 0.1)
+    _build_rate_slider(settingsBox, "Stamina drain", "stamina_drain_multiplier", 0.1, 5.0, 0.1)
+    _build_rate_slider(settingsBox, "Temp loss", "temperature_loss_multiplier", 0.1, 5.0, 0.1)
+    _build_rate_slider(settingsBox, "Vitals decay", "vitals_decay_multiplier", 0.1, 5.0, 0.1)
+    _build_toggle(settingsBox, "Weather locked", "weather_locked")
+    _build_toggle(settingsBox, "Friendly fire", "friendly_fire")
+
+
+func _build_lobby_players_column(columns: HBoxContainer, useSteam: bool) -> void:
     var playersCol: VBoxContainer = VBoxContainer.new()
     playersCol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     columns.add_child(playersCol)
@@ -1615,7 +1643,6 @@ func show_lobby(useSteam: bool) -> void:
     _lobbyPlayerList = VBoxContainer.new()
     playersCol.add_child(_lobbyPlayerList)
 
-    # Friends list (Steam mode only) — render under Players in the right column.
     if useSteam:
         var friendsHeader: Label = Label.new()
         friendsHeader.text = "Invite Friends"
@@ -1633,7 +1660,8 @@ func show_lobby(useSteam: bool) -> void:
 
         _refresh_lobby_friends()
 
-    # Select World above Return
+
+func _add_lobby_select_world_button() -> void:
     var returnBtn: Button = lobbyPanel.find_child("ReturnBtn", true, false)
     var outerVBox: VBoxContainer = returnBtn.get_parent()
     var selectBtn: Button = Button.new()

@@ -347,8 +347,39 @@ func register_patches() -> void:
 
 
 func _register_hooks() -> void:
-    # Poll for RTVModLib meta — set during vostok Pass 2's _emit_frameworks_ready.
-    # Early autoloads run BEFORE meta exists; bail after ~5s if loader missing.
+    var lib: Object = await _await_rtvmodlib()
+    if lib == null:
+        return
+
+    knifeRigHooks = _make_hook_module(lib, "res://mod/hooks/knife_rig_hooks.gd")
+    helicopterHooks = _make_hook_module(lib, "res://mod/hooks/helicopter_hooks.gd")
+    characterHooks = _make_hook_module(lib, "res://mod/hooks/character_hooks.gd")
+    btrHooks = _make_hook_module(lib, "res://mod/hooks/btr_hooks.gd")
+    policeHooks = _make_hook_module(lib, "res://mod/hooks/police_hooks.gd")
+    casaHooks = _make_hook_module(lib, "res://mod/hooks/casa_hooks.gd")
+    grenadeRigHooks = _make_hook_module(lib, "res://mod/hooks/grenade_rig_hooks.gd")
+    rocketGradHooks = _make_hook_module(lib, "res://mod/hooks/rocket_grad_hooks.gd")
+    rocketHelicopterHooks = _make_hook_module(lib, "res://mod/hooks/rocket_helicopter_hooks.gd")
+    missileSpawnerHooks = _make_hook_module(lib, "res://mod/hooks/missile_spawner_hooks.gd")
+    traderHooks = _make_hook_module(lib, "res://mod/hooks/trader_hooks.gd")
+    fishPoolHooks = _make_hook_module(lib, "res://mod/hooks/fish_pool_hooks.gd")
+    interactorHooks = _make_hook_module(lib, "res://mod/hooks/interactor_hooks.gd")
+    lootSimulationHooks = _make_hook_module(lib, "res://mod/hooks/loot_simulation_hooks.gd")
+    furnitureHooks = _make_hook_module(lib, "res://mod/hooks/furniture_hooks.gd")
+    aiSpawnerHooks = _make_hook_module(lib, "res://mod/hooks/ai_spawner_hooks.gd")
+    eventSystemHooks = _make_hook_module(lib, "res://mod/hooks/event_system_hooks.gd")
+    controllerHooks = _make_hook_module(lib, "res://mod/hooks/controller_hooks.gd")
+    interfaceHooks = _make_hook_module(lib, "res://mod/hooks/interface_hooks.gd")
+    aiHooks = _make_hook_module(lib, "res://mod/hooks/ai_hooks.gd")
+    loaderHooks = _make_hook_module(lib, "res://mod/hooks/loader_hooks.gd")
+
+    _register_menu_hooks(lib)
+    _log("[hooks] 21 hook modules + menu-_ready-pre/post registered via RTVModLib")
+
+
+# Polls for the RTVModLib meta vostok sets in Pass 2's _emit_frameworks_ready.
+# Early autoload runs BEFORE that meta exists; ~5s timeout protects against missing loader.
+func _await_rtvmodlib() -> Object:
     var waited: int = 0
     while not Engine.has_meta(&"RTVModLib") and waited < 300:
         await get_tree().process_frame
@@ -356,61 +387,25 @@ func _register_hooks() -> void:
     var lib: Object = Engine.get_meta(&"RTVModLib") if Engine.has_meta(&"RTVModLib") else null
     if lib == null:
         _log("[hooks] RTVModLib meta never appeared — vostok-mod-loader missing?")
-        return
+        return null
     if not lib._is_ready:
         await lib.frameworks_ready
-    knifeRigHooks = load("res://mod/hooks/knife_rig_hooks.gd").new()
-    knifeRigHooks.register(lib)
-    helicopterHooks = load("res://mod/hooks/helicopter_hooks.gd").new()
-    helicopterHooks.register(lib)
-    characterHooks = load("res://mod/hooks/character_hooks.gd").new()
-    characterHooks.register(lib)
-    btrHooks = load("res://mod/hooks/btr_hooks.gd").new()
-    btrHooks.register(lib)
-    policeHooks = load("res://mod/hooks/police_hooks.gd").new()
-    policeHooks.register(lib)
-    casaHooks = load("res://mod/hooks/casa_hooks.gd").new()
-    casaHooks.register(lib)
-    grenadeRigHooks = load("res://mod/hooks/grenade_rig_hooks.gd").new()
-    grenadeRigHooks.register(lib)
-    rocketGradHooks = load("res://mod/hooks/rocket_grad_hooks.gd").new()
-    rocketGradHooks.register(lib)
-    rocketHelicopterHooks = load("res://mod/hooks/rocket_helicopter_hooks.gd").new()
-    rocketHelicopterHooks.register(lib)
-    missileSpawnerHooks = load("res://mod/hooks/missile_spawner_hooks.gd").new()
-    missileSpawnerHooks.register(lib)
-    traderHooks = load("res://mod/hooks/trader_hooks.gd").new()
-    traderHooks.register(lib)
-    fishPoolHooks = load("res://mod/hooks/fish_pool_hooks.gd").new()
-    fishPoolHooks.register(lib)
-    interactorHooks = load("res://mod/hooks/interactor_hooks.gd").new()
-    interactorHooks.register(lib)
-    lootSimulationHooks = load("res://mod/hooks/loot_simulation_hooks.gd").new()
-    lootSimulationHooks.register(lib)
-    furnitureHooks = load("res://mod/hooks/furniture_hooks.gd").new()
-    furnitureHooks.register(lib)
-    aiSpawnerHooks = load("res://mod/hooks/ai_spawner_hooks.gd").new()
-    aiSpawnerHooks.register(lib)
-    eventSystemHooks = load("res://mod/hooks/event_system_hooks.gd").new()
-    eventSystemHooks.register(lib)
-    controllerHooks = load("res://mod/hooks/controller_hooks.gd").new()
-    controllerHooks.register(lib)
-    interfaceHooks = load("res://mod/hooks/interface_hooks.gd").new()
-    interfaceHooks.register(lib)
-    aiHooks = load("res://mod/hooks/ai_hooks.gd").new()
-    aiHooks.register(lib)
-    loaderHooks = load("res://mod/hooks/loader_hooks.gd").new()
-    loaderHooks.register(lib)
-    # Menu-_ready-pre: customize main menu (Singleplayer/Multiplayer rewire)
-    # at the moment Main/Buttons enters the tree, ahead of vanilla _ready body.
-    # Avoids the call_deferred-from-_ready miss now that CoopManager is early
-    # autoload (fires before Menu scene exists) + the on_scene_changed delay.
+    return lib
+
+
+func _make_hook_module(lib: Object, path: String) -> Object:
+    var module: Object = load(path).new()
+    module.register(lib)
+    return module
+
+
+func _register_menu_hooks(lib: Object) -> void:
+    # Pre: rewire Singleplayer/Multiplayer at Main/Buttons enter_tree (before vanilla _ready body).
+    # Early autoload + scene-changed delay would otherwise miss the call_deferred-from-_ready window.
     lib.hook("menu-_ready-pre", _on_menu_ready_pre)
-    # Vanilla Menu._ready body checks ValidateShelter() and disables loadButton
-    # when no shelter — re-greys our renamed "Multiplayer" button. Re-enable
-    # AFTER vanilla body via -post hook (Multiplayer doesn't depend on shelter).
+    # Post: vanilla Menu._ready disables loadButton when no shelter — re-greys our renamed
+    # "Multiplayer" button. Re-enable AFTER vanilla body (Multiplayer doesn't need shelter).
     lib.hook("menu-_ready-post", _on_menu_ready_post)
-    _log("[hooks] 21 hook modules + menu-_ready-pre/post registered via RTVModLib")
 
 
 func _on_menu_ready_pre() -> void:
@@ -949,7 +944,7 @@ func ensure_all_spawned() -> void:
             spawn_remote_player(pid)
 
 func on_scene_changed() -> void:
-    print("[TX] on_scene_changed begin")
+    if DEBUG: print("[TX] on_scene_changed begin")
     var wasOnMenu: bool = _wasOnMenu
     _wasOnMenu = _is_on_menu()
     _autoLoadInProgress = false
@@ -989,7 +984,7 @@ func on_scene_changed() -> void:
     _update_rich_presence()
     _update_lobby_data()
     _log("Scene changed to %s" % currentMap)
-    print("[TX] on_scene_changed end")
+    if DEBUG: print("[TX] on_scene_changed end")
 
 
 func _despawn_off_map_peers() -> void:

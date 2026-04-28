@@ -94,8 +94,20 @@ func _build_submenu(menu: Node) -> void:
     if menu.get_node_or_null(PATH_MENU_SUBMENU) != null:
         return
 
-    var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
+    var wrapper: Control = _make_submenu_wrapper(menu)
+    var outer: VBoxContainer = _make_submenu_outer(wrapper)
+    _build_submenu_header(outer)
+    _build_submenu_button_grid(outer, menu)
 
+    var footerSpacer: Control = Control.new()
+    footerSpacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    outer.add_child(footerSpacer)
+
+    _build_submenu_footer(outer, menu)
+
+
+func _make_submenu_wrapper(menu: Node) -> Control:
+    var gameTheme: Theme = load("res://UI/Themes/Theme.tres")
     var wrapper: Control = Control.new()
     wrapper.name = "CoopMPSubmenu"
     wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -104,7 +116,10 @@ func _build_submenu(menu: Node) -> void:
         wrapper.theme = gameTheme
     menu.add_child(wrapper)
     wrapper.hide()
+    return wrapper
 
+
+func _make_submenu_outer(wrapper: Control) -> VBoxContainer:
     var outer: VBoxContainer = VBoxContainer.new()
     outer.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
     outer.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -112,7 +127,10 @@ func _build_submenu(menu: Node) -> void:
     outer.custom_minimum_size = Vector2(560, 0)
     outer.add_theme_constant_override(&"separation", 4)
     wrapper.add_child(outer)
+    return outer
 
+
+func _build_submenu_header(outer: VBoxContainer) -> void:
     var header: Label = Label.new()
     header.text = "Multiplayer"
     header.add_theme_font_size_override(&"font_size", 20)
@@ -130,6 +148,8 @@ func _build_submenu(menu: Node) -> void:
     topSpacer.custom_minimum_size = Vector2(0, 16)
     outer.add_child(topSpacer)
 
+
+func _build_submenu_button_grid(outer: VBoxContainer, menu: Node) -> void:
     var btnGrid: HBoxContainer = HBoxContainer.new()
     btnGrid.add_theme_constant_override(&"separation", 8)
     outer.add_child(btnGrid)
@@ -164,10 +184,8 @@ func _build_submenu(menu: Node) -> void:
     joinBtn.pressed.connect(_on_show_direct_join.bind(menu))
     joinCol.add_child(joinBtn)
 
-    var footerSpacer: Control = Control.new()
-    footerSpacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-    outer.add_child(footerSpacer)
 
+func _build_submenu_footer(outer: VBoxContainer, menu: Node) -> void:
     var logsBtn: Button = _submenu_button("Open Logs Folder")
     logsBtn.pressed.connect(_on_logs_pressed)
     outer.add_child(logsBtn)

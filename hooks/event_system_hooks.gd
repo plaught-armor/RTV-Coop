@@ -50,13 +50,13 @@ func _on_ready() -> void:
     var fnames: Array[String] = []
     for ev: Resource in es.traderEvents:
         fnames.append("%s(d%d->%s)" % [ev.name, ev.day, ev.function])
-    print("[event_system] CLIENT activate map=%s zone=%s day=%d traders_in_scene=%d traderEvents=%d %s" % [mapName, mapType, simDay, traderCount, es.traderEvents.size(), str(fnames)])
+    if CoopManager.DEBUG: print("[event_system] CLIENT activate map=%s zone=%s day=%d traders_in_scene=%d traderEvents=%d %s" % [mapName, mapType, simDay, traderCount, es.traderEvents.size(), str(fnames)])
     es.ActivateTraderEvent()
     var visibleAfter: int = 0
     for t: Node in es.get_tree().get_nodes_in_group(&"Trader"):
         if t.visible:
             visibleAfter += 1
-    print("[event_system] CLIENT post-activate visible=%d/%d" % [visibleAfter, traderCount])
+    if CoopManager.DEBUG: print("[event_system] CLIENT post-activate visible=%d/%d" % [visibleAfter, traderCount])
 
 
 # Generic post-hook: vanilla just ran, broadcast event name w/ no params on host.
