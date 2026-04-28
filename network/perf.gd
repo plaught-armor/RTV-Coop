@@ -6,9 +6,9 @@ const ENABLED: bool = true
 const PERF_DUMP_TICKS: int = 60
 
 
-var _totals: Dictionary = {}
-var _counts: Dictionary = {}
-var _maxes: Dictionary = {}
+var _totals: Dictionary[String, int] = {}
+var _counts: Dictionary[String, int] = {}
+var _maxes: Dictionary[String, int] = {}
 var _lastDumpFrame: int = -1
 
 
@@ -40,7 +40,7 @@ func tick() -> void:
     if f % PERF_DUMP_TICKS != 0 || _counts.is_empty():
         return
     print("[Perf] --- %d-tick window ---" % PERF_DUMP_TICKS)
-    var keys: Array = _totals.keys()
+    var keys: Array[String] = _totals.keys()
     keys.sort_custom(_sort_keys_by_total_desc)
     for k in keys:
         var total: int = _totals[k]

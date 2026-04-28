@@ -48,7 +48,7 @@ func mirror_user_to_world() -> void:
         return
     var worldDir: String = COOP_WORLDS_DIR + CoopManager.worldId + "/"
     DirAccess.make_dir_recursive_absolute(worldDir)
-    var jobs: Array = []
+    var jobs: Array[Array] = []
     for saveName: String in COOP_WORLD_SAVES:
         var src: String = "user://" + saveName
         if FileAccess.file_exists(src):
@@ -109,7 +109,7 @@ func mirror_user_to_solo() -> void:
     var dir: DirAccess = DirAccess.open("user://")
     if dir == null:
         return
-    var jobs: Array = []
+    var jobs: Array[Array] = []
     dir.list_dir_begin()
     var entry: String = dir.get_next()
     while entry != "":
@@ -162,7 +162,7 @@ func _copy_file(src: String, dst: String) -> void:
 
 
 # Worker thread: must not touch scene tree. FileAccess is thread-safe per handle.
-func _run_copy_jobs(jobs: Array) -> void:
+func _run_copy_jobs(jobs: Array[Array]) -> void:
     for pair: Array in jobs:
         var src: String = pair[0]
         var dst: String = pair[1]

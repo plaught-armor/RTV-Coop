@@ -235,7 +235,7 @@ func _update_sleep_overlay() -> void:
     if !is_instance_valid(CoopManager) || !CoopManager.isActive:
         sleepOverlay.visible = false
         return
-    var readyIds: Array = CoopManager.get_meta(&"coop_sleep_ready_ids", []) as Array
+    var readyIds: PackedInt32Array = CoopManager.get_meta(&"coop_sleep_ready_ids", PackedInt32Array()) as PackedInt32Array
     var total: int = int(CoopManager.get_meta(&"coop_sleep_total", 0))
     if total <= 1 || readyIds.is_empty():
         sleepOverlay.visible = false

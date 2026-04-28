@@ -82,7 +82,7 @@ func unpack(data: Dictionary) -> SlotData:
         else:
             slot.nested.append(_resolve_item(path))
 
-    var packedStorage: Array = data.get(&"storage", [])
+    var packedStorage: Array[Dictionary] = data.get(&"storage", []) as Array[Dictionary]
     for storedData: Dictionary in packedStorage:
         slot.storage.append(unpack(storedData))
 

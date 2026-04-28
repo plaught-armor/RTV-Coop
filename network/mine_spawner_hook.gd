@@ -56,7 +56,7 @@ func _on_node_added(n: Node) -> void:
 func _capture_and_broadcast() -> void:
     if !is_instance_valid(_minesNode):
         return
-    var layout: Array = []
+    var layout: Array[Dictionary] = []
     for child: Node in _minesNode.get_children():
         if !is_instance_valid(child) || child.scene_file_path.is_empty():
             continue

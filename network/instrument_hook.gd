@@ -14,7 +14,7 @@ var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_n
 const INSTRUMENT_SCRIPT_PATH: String = "res://Scripts/Instrument.gd"
 
 # Tracked Instrument nodes -> was_playing bool.
-var _watched: Dictionary = {}
+var _watched: Dictionary[Node, bool] = {}
 
 
 func connect_tree() -> void:
@@ -33,7 +33,7 @@ func _on_node_added(n: Node) -> void:
 func poll() -> void:
     if !CoopManager.is_session_active():
         return
-    var stale: Array = []
+    var stale: Array[Node] = []
     for node: Node in _watched:
         if !is_instance_valid(node):
             stale.append(node)

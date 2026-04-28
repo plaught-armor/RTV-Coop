@@ -28,9 +28,9 @@ var _interface: Node = null
 var _dbConstants: Dictionary = {}
 var _dbConstantsReady: bool = false
 ## Event history for late-joiner replay. Each entry: [eventName, params].
-var _firedEvents: Array = []
+var _firedEvents: Array[Array] = []
 ## Last broadcast Mines layout (host only) — replayed to late-joining peers.
-var lastMineLayout: Array = []
+var lastMineLayout: Array[Dictionary] = []
 
 
 
@@ -60,7 +60,7 @@ func _scene_node(path: String) -> Node:
 var syncedItems: Dictionary = { }
 var syncIdCounter: int = 0
 var trackingItems: bool = false
-var consumedSyncIDs: Array[String] = []
+var consumedSyncIDs: PackedStringArray = []
 var droppedItemHistory: Array[Dictionary] = []
 ## Client-side queue of local pickups waiting for sync_id confirmation from host.
 var pendingDrops: Array[Node] = []
@@ -68,7 +68,7 @@ var pendingDrops: Array[Node] = []
 const DROP_RATE_WINDOW_MS: int = 1000
 const DROP_RATE_LIMIT: int = 10
 const SYNCED_ITEMS_HARD_CAP: int = 500
-var _dropRateBuckets: Dictionary[int, Array] = {}
+var _dropRateBuckets: Dictionary[int, PackedInt64Array] = {}
 
 
 func start_item_tracking() -> void:
@@ -388,7 +388,7 @@ func sync_switch_state(switchPath: String, active: bool) -> void:
 
 ## Ready-set per bed: peers must all mark the same bed before sleep triggers.
 ## Resets when sleep fires or when a peer picks a different bed.
-var _bedReady: Dictionary[String, Array] = {}
+var _bedReady: Dictionary[String, PackedInt32Array] = {}
 
 
 func _expected_peer_count() -> int:
@@ -417,7 +417,7 @@ func _reset_bed_ready_except(keepPath: String) -> void:
 
 
 func _broadcast_bed_ready(bedPath: String) -> void:
-    var readyIds: Array = _bedReady.get(bedPath, [])
+    var readyIds: PackedInt32Array = _bedReady.get(bedPath, PackedInt32Array())
     var total: int = _expected_peer_count()
     CoopManager.set_meta(&"coop_sleep_ready_ids", readyIds.duplicate())
     CoopManager.set_meta(&"coop_sleep_total", total)
@@ -438,7 +438,7 @@ func _mark_bed_ready(bedPath: String, peerId: int) -> void:
     if !_active_peer_ids().has(peerId):
         return
     _reset_bed_ready_except(bedPath)
-    var readyIds: Array = _bedReady.get(bedPath, [])
+    var readyIds: PackedInt32Array = _bedReady.get(bedPath, PackedInt32Array())
     if !readyIds.has(peerId):
         readyIds.append(peerId)
     _bedReady[bedPath] = readyIds
@@ -458,9 +458,9 @@ func _trigger_sleep(bedPath: String) -> void:
     var duration: int = int(bed.randomSleep)
     _log("_trigger_sleep path=%s duration=%d total=%d" % [bedPath, duration, _expected_peer_count()])
     # Clear overlay on every peer before sleep audio kicks in.
-    CoopManager.set_meta(&"coop_sleep_ready_ids", [])
+    CoopManager.set_meta(&"coop_sleep_ready_ids", PackedInt32Array())
     CoopManager.set_meta(&"coop_sleep_total", _expected_peer_count())
-    sync_bed_ready.rpc(bedPath, [], _expected_peer_count())
+    sync_bed_ready.rpc(bedPath, PackedInt32Array(), _expected_peer_count())
     sync_bed_sleep.rpc(bedPath, duration)
     bed.Interact()
 
@@ -483,7 +483,7 @@ func request_bed_interact(bedPath: String) -> void:
 
 ## Host tells every peer the current ready-set so the overlay renders N/M.
 @rpc("authority", "call_remote", "reliable")
-func sync_bed_ready(_bedPath: String, readyIds: Array, total: int) -> void:
+func sync_bed_ready(_bedPath: String, readyIds: PackedInt32Array, total: int) -> void:
     CoopManager.set_meta(&"coop_sleep_ready_ids", readyIds.duplicate())
     CoopManager.set_meta(&"coop_sleep_total", total)
 
@@ -1288,9 +1288,9 @@ func _is_valid_audio_path(clipPath: String) -> bool:
 func _check_drop_rate(peerId: int) -> bool:
     var now: int = Time.get_ticks_msec()
     var cutoff: int = now - DROP_RATE_WINDOW_MS
-    var bucket: Array = _dropRateBuckets.get(peerId, [])
-    while !bucket.is_empty() && int(bucket[0]) < cutoff:
-        bucket.pop_front()
+    var bucket: PackedInt64Array = _dropRateBuckets.get(peerId, PackedInt64Array())
+    while bucket.size() > 0 && bucket[0] < cutoff:
+        bucket.remove_at(0)
     if bucket.size() >= DROP_RATE_LIMIT:
         _dropRateBuckets[peerId] = bucket
         return false

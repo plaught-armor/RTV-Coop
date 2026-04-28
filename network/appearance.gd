@@ -22,7 +22,7 @@ const ALLOWED_BODIES: Array[String] = ["Capsule"]
 # slot still validates against the same allowlist as legacy AI-rig peers did.
 const CAPSULE_MATERIAL_SENTINEL: String = "res://AI/_capsule"
 
-const OPTIONS: Array = [
+const OPTIONS: Array[Dictionary] = [
     {"name": "Capsule (FPS Arms)", "body": "Capsule", "material": CAPSULE_MATERIAL_SENTINEL},
 ]
 

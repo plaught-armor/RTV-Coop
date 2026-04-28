@@ -50,7 +50,7 @@ var pendingCallbacks: Dictionary[int, Callable] = {}
 ## Last successful get_friends response. Retained across scene changes so the
 ## in-game Settings Multiplayer tab can paint the list immediately from the
 ## main-menu lobby's earlier fetch instead of waiting for a fresh IPC round-trip.
-var friendsCache: Array = []
+var friendsCache: Array[Dictionary] = []
 var friendsCacheMs: int = 0
 ## Monotonic request ID counter.
 var nextReqId: int = 1
