@@ -24,7 +24,7 @@ func register(lib: Object) -> void:
 
 
 func _on_ready() -> void:
-    var es: Node = _lib._caller
+    var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     if !CoopManager.is_session_active() || CoopManager.isHost:
@@ -75,7 +75,7 @@ func _post_simple(eventName: String) -> void:
 
 
 func _on_police() -> void:
-    var es: Node = _lib._caller
+    var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()
@@ -87,7 +87,7 @@ func _on_police() -> void:
 
 
 func _on_btr() -> void:
-    var es: Node = _lib._caller
+    var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()
@@ -99,7 +99,7 @@ func _on_btr() -> void:
 
 
 func _on_crashsite() -> void:
-    var es: Node = _lib._caller
+    var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()
@@ -110,7 +110,7 @@ func _on_crashsite() -> void:
 
 
 func _on_cat() -> void:
-    var es: Node = _lib._caller
+    var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()

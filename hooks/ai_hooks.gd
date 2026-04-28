@@ -39,7 +39,7 @@ func register(lib: Object) -> void:
 
 
 func _on_ready_post() -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if ai.fire != null:
@@ -49,7 +49,7 @@ func _on_ready_post() -> void:
 
 
 func _on_initialize() -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     _lib.skip_super()
@@ -118,7 +118,7 @@ func _find_map_ancestor(ai: Node) -> Node:
 
 
 func _on_physics_process(delta: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active():
@@ -169,7 +169,7 @@ func _all_players_dead(ai: Node) -> bool:
 
 
 func _on_parameters(delta: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active():
@@ -220,7 +220,7 @@ func _on_parameters(delta: float) -> void:
 
 
 func _on_sensor(delta: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active():
@@ -260,7 +260,7 @@ func _get_target_camera_position(ai: Node) -> Vector3:
 
 
 func _on_los_check(target: Vector3) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     var _pt: int = CoopManager.perf.start()
@@ -297,7 +297,7 @@ func _on_los_check(target: Vector3) -> void:
 
 
 func _on_hearing() -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active():
@@ -326,7 +326,7 @@ func _on_hearing() -> void:
 
 
 func _on_fire_detection(delta: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active():
@@ -379,7 +379,7 @@ func _on_fire_detection(delta: float) -> void:
 
 
 func _on_raycast() -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active():
@@ -422,7 +422,7 @@ func _on_raycast() -> void:
 
 
 func _on_fire(delta: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active():
@@ -473,7 +473,7 @@ func _on_fire(delta: float) -> void:
 ## Host applies damage locally (scaled); client routes to host via RPC.
 ## Replace hook reimplements vanilla body so the scaled damage reaches health subtraction.
 func _on_weapon_damage(hitbox: String, damage: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     _lib.skip_super()
@@ -526,18 +526,18 @@ func _apply_weapon_damage(ai: Node, hitbox: String, damage: float) -> void:
 
 
 func _on_play_idle_post() -> void:
-    _broadcast_voice(_lib._caller, CoopManager.aiState.VoiceType.IDLE)
+    _broadcast_voice(_lib._caller as CharacterBody3D, CoopManager.aiState.VoiceType.IDLE)
 
 
 func _on_play_combat_post() -> void:
-    _broadcast_voice(_lib._caller, CoopManager.aiState.VoiceType.COMBAT)
+    _broadcast_voice(_lib._caller as CharacterBody3D, CoopManager.aiState.VoiceType.COMBAT)
 
 
 func _on_play_damage_post() -> void:
-    _broadcast_voice(_lib._caller, CoopManager.aiState.VoiceType.DAMAGE)
+    _broadcast_voice(_lib._caller as CharacterBody3D, CoopManager.aiState.VoiceType.DAMAGE)
 
 
-func _broadcast_voice(ai: Node, voiceType: int) -> void:
+func _broadcast_voice(ai: CharacterBody3D, voiceType: int) -> void:
     if ai == null:
         return
     if !CoopManager.is_session_active() || !CoopManager.isHost:
@@ -548,7 +548,7 @@ func _broadcast_voice(ai: Node, voiceType: int) -> void:
 
 
 func _on_death_pre(_direction: Vector3, _force: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     if !CoopManager.is_session_active() || !CoopManager.isHost:
@@ -564,7 +564,7 @@ func _on_death_pre(_direction: Vector3, _force: float) -> void:
 ## Tag the AI's weapon/backpack/secondary RigidBodies with deterministic
 ## sync_ids derived from [param syncId] and register them in
 ## [member world_state.syncedItems] so the existing pickup-broadcast path works.
-func _register_corpse_items_as_synced(ai: Node, syncId: int) -> void:
+func _register_corpse_items_as_synced(ai: CharacterBody3D, syncId: int) -> void:
     var ws: Node = CoopManager.worldState
     if !is_instance_valid(ws):
         return
@@ -583,7 +583,7 @@ func _maybe_register(ws: Node, item: Variant, syncId: String) -> void:
 
 
 func _on_interactor_pre(_delta: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     var doorBefore: Node = null
@@ -596,7 +596,7 @@ func _on_interactor_pre(_delta: float) -> void:
 
 
 func _on_interactor_post(_delta: float) -> void:
-    var ai: Node = _lib._caller
+    var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
     var doorBefore: Node = _doorBefore.get(ai, null)

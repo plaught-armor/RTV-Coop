@@ -14,7 +14,7 @@ func register(lib: Object) -> void:
 func _on_execute_launch(value: bool) -> void:
     if Engine.is_editor_hint() || !CoopManager.is_session_active():
         return
-    var s: Node = _lib._caller
+    var s: Node3D = _lib._caller as Node3D
     if s == null:
         return
     _lib.skip_super()

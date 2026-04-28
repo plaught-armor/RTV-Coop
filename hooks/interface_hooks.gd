@@ -24,14 +24,14 @@ func register(lib: Object) -> void:
 
 
 func _on_close_pre() -> void:
-    var iface: Node = _lib._caller
+    var iface: Control = _lib._caller as Control
     if iface == null:
         return
     _heldContainer[iface] = iface.container
 
 
 func _on_close_post() -> void:
-    var iface: Node = _lib._caller
+    var iface: Control = _lib._caller as Control
     if iface == null:
         return
     var heldContainer: Node = _heldContainer.get(iface, null)
@@ -53,7 +53,7 @@ func _on_close_post() -> void:
 
 
 func _on_drop(target: Node) -> void:
-    var iface: Node = _lib._caller
+    var iface: Control = _lib._caller as Control
     if iface == null:
         return
     if !CoopManager.is_session_active():
@@ -147,7 +147,7 @@ func _instantiate_pickup(file: PackedScene, map: Node, transform: Dictionary, dr
 
 
 func _on_complete_deal() -> void:
-    var iface: Node = _lib._caller
+    var iface: Control = _lib._caller as Control
     if iface == null:
         return
     if !CoopManager.is_session_active():
@@ -210,7 +210,7 @@ func _execute_client_trade(iface: Node, traderPath: String, requestedIndices: Pa
 ## Client-side defer: hide inputs + stash rewards; host ACK triggers finalize_pending_task.
 ## Host path runs vanilla (trader save) then broadcasts to peers.
 func _on_complete(data: Resource) -> void:
-    var iface: Node = _lib._caller
+    var iface: Control = _lib._caller as Control
     if iface == null:
         return
     if !CoopManager.is_session_active():

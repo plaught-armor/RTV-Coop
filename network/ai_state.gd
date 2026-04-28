@@ -370,8 +370,8 @@ func pack_ai_batch(agentsNode: Node) -> Array:
         if child.get(&"impact") == true:
             f |= AIFlag.IMPACT
         if child.get(&"weapon") != null:
-            var wData: Variant = child.get(&"weaponData")
-            if wData != null && wData.get(&"weaponType") == "Pistol":
+            var wData: WeaponData = child.get(&"weaponData") as WeaponData
+            if wData != null && wData.weaponType == "Pistol":
                 f |= AIFlag.PISTOL
         packed.append(state | ((f & 0xFFFF) << 8) | ((health & 0xFF) << 24))
 
@@ -591,10 +591,8 @@ func _seed_client_animator(idx: int, node: Node) -> void:
         skeleton.process_mode = Node.PROCESS_MODE_INHERIT
     var stateRaw: Variant = node.get(&"currentState")
     var state: int = int(stateRaw) if stateRaw != null else int(AIState.IDLE)
-    var isPistol: bool = false
-    var weaponData: Variant = node.get(&"weaponData")
-    if weaponData != null && weaponData.get(&"weaponType") == "Pistol":
-        isPistol = true
+    var weaponData: WeaponData = node.get(&"weaponData") as WeaponData
+    var isPistol: bool = weaponData != null && weaponData.weaponType == "Pistol"
     _apply_state_conditions(animator, state, isPistol)
     _apply_state_blends(animator, isPistol, 0.0, 0.0)
     if idx >= 0 && idx < _lastAppliedState.size():
@@ -678,17 +676,16 @@ func _register_local_corpse_items(syncId: int, ai: Node) -> void:
     if !is_instance_valid(ws):
         return
     var corpseId: int = syncId * 10
-    _tag_corpse_item(ws, ai.get(&"weapon"), "ai_corpse_%d_weapon" % corpseId)
-    _tag_corpse_item(ws, ai.get(&"backpack"), "ai_corpse_%d_backpack" % corpseId)
-    _tag_corpse_item(ws, ai.get(&"secondary"), "ai_corpse_%d_secondary" % corpseId)
+    _tag_corpse_item(ws, ai.get(&"weapon") as Node, "ai_corpse_%d_weapon" % corpseId)
+    _tag_corpse_item(ws, ai.get(&"backpack") as Node, "ai_corpse_%d_backpack" % corpseId)
+    _tag_corpse_item(ws, ai.get(&"secondary") as Node, "ai_corpse_%d_secondary" % corpseId)
 
 
-func _tag_corpse_item(ws: Node, item: Variant, syncId: String) -> void:
-    if !(item is Node) || !is_instance_valid(item):
+func _tag_corpse_item(ws: Node, item: Node, syncId: String) -> void:
+    if !is_instance_valid(item):
         return
-    var node: Node = item as Node
-    node.set_meta(&"sync_id", syncId)
-    ws.syncedItems[syncId] = node
+    item.set_meta(&"sync_id", syncId)
+    ws.syncedItems[syncId] = item
 
 
 func broadcast_ai_fire(syncId: int) -> void:
@@ -746,29 +743,23 @@ func broadcast_ai_loadout(syncId: int, ai: Node) -> void:
     var weaponFile: String = ""
     var weaponCondition: int = 0
     var weaponAmount: int = 0
-    var w: Variant = ai.get(&"weapon")
-    if w != null && w is Node && is_instance_valid(w):
-        var slotData: Variant = w.get(&"slotData")
+    var w: Node = ai.get(&"weapon") as Node
+    if is_instance_valid(w):
+        var slotData: SlotData = w.get(&"slotData") as SlotData
         if slotData != null:
-            var itemData: Variant = slotData.get(&"itemData")
+            var itemData: ItemData = slotData.itemData
             if itemData != null:
-                var fileVar: Variant = itemData.get(&"file")
-                if fileVar is String:
-                    weaponFile = fileVar
-            var condVar: Variant = slotData.get(&"condition")
-            if condVar is int:
-                weaponCondition = condVar
-            var amtVar: Variant = slotData.get(&"amount")
-            if amtVar is int:
-                weaponAmount = amtVar
+                weaponFile = String(itemData.file)
+            weaponCondition = int(slotData.condition)
+            weaponAmount = int(slotData.amount)
     var backpackFile: String = ""
     var bp: Variant = ai.get(&"backpack")
     if bp != null && bp is Node && is_instance_valid(bp):
         backpackFile = String(bp.name)
     var clothingPath: String = ""
-    var meshVar: Variant = ai.get(&"mesh")
-    if meshVar is MeshInstance3D:
-        var mat: Material = (meshVar as MeshInstance3D).get_surface_override_material(0)
+    var mesh: MeshInstance3D = ai.get(&"mesh") as MeshInstance3D
+    if mesh != null:
+        var mat: Material = mesh.get_surface_override_material(0)
         if mat != null && !mat.resource_path.is_empty():
             clothingPath = mat.resource_path
     _log("broadcast_ai_loadout: syncId=%d weapon=%s cond=%d amt=%d backpack=%s clothing=%s" % [syncId, weaponFile, weaponCondition, weaponAmount, backpackFile, clothingPath])
@@ -794,21 +785,17 @@ func receive_ai_loadout(syncId: int, weaponFile: String, weaponCondition: int, w
 
 
 func _apply_ai_weapon(ai: Node, weaponFile: String, weaponCondition: int, weaponAmount: int) -> void:
-    var weapons: Variant = ai.get(&"weapons")
-    if weapons == null || !(weapons is Node):
+    var weapons: Node = ai.get(&"weapons") as Node
+    if weapons == null:
         return
     if weaponFile.is_empty():
         return
     var picked: Node = null
-    for child: Node in (weapons as Node).get_children():
-        var slotData: Variant = child.get(&"slotData")
+    for child: Node in weapons.get_children():
+        var slotData: SlotData = child.get(&"slotData") as SlotData
         var fileMatch: bool = false
-        if slotData != null:
-            var itemData: Variant = slotData.get(&"itemData")
-            if itemData != null:
-                var fv: Variant = itemData.get(&"file")
-                if fv is String && (fv as String) == weaponFile:
-                    fileMatch = true
+        if slotData != null && slotData.itemData != null && String(slotData.itemData.file) == weaponFile:
+            fileMatch = true
         if fileMatch:
             picked = child
         else:
@@ -818,37 +805,35 @@ func _apply_ai_weapon(ai: Node, weaponFile: String, weaponCondition: int, weapon
     if picked.has_method(&"show"):
         picked.show()
     ai.set(&"weapon", picked)
-    var pickedSlot: Variant = picked.get(&"slotData")
+    var pickedSlot: SlotData = picked.get(&"slotData") as SlotData
     if pickedSlot != null:
-        var itemData: Variant = pickedSlot.get(&"itemData")
+        var itemData: ItemData = pickedSlot.itemData
         if itemData != null:
             ai.set(&"weaponData", itemData)
             # Drive the Pistol/Rifle top-level animator condition so the state
             # machine routes through the right sub-machine — same writes
             # AI.SelectWeapon does inline (Scripts/AI.gd:419-423).
-            var animator: AnimationTree = ai.get(&"animator")
+            var animator: AnimationTree = ai.get(&"animator") as AnimationTree
             if is_instance_valid(animator):
-                var isPistol: bool = false
-                var wt: Variant = itemData.get(&"weaponType")
-                if wt == "Pistol":
-                    isPistol = true
+                var weaponData: WeaponData = itemData as WeaponData
+                var isPistol: bool = weaponData != null && weaponData.weaponType == "Pistol"
                 animator[COND_PISTOL] = isPistol
                 animator[COND_RIFLE] = !isPistol
-            pickedSlot.set(&"condition", weaponCondition)
-            pickedSlot.set(&"amount", weaponAmount)
-            pickedSlot.set(&"chamber", true)
+            pickedSlot.condition = weaponCondition
+            pickedSlot.amount = weaponAmount
+            pickedSlot.chamber = true
 
 
 func _apply_ai_backpack(ai: Node, backpackFile: String) -> void:
-    var backpacks: Variant = ai.get(&"backpacks")
-    if backpacks == null || !(backpacks is Node):
+    var backpacks: Node = ai.get(&"backpacks") as Node
+    if backpacks == null:
         return
     if backpackFile.is_empty():
-        for child: Node in (backpacks as Node).get_children():
+        for child: Node in backpacks.get_children():
             child.queue_free()
         return
     var picked: Node = null
-    for child: Node in (backpacks as Node).get_children():
+    for child: Node in backpacks.get_children():
         if String(child.name) == backpackFile:
             picked = child
         else:
@@ -862,13 +847,13 @@ func _apply_ai_backpack(ai: Node, backpackFile: String) -> void:
 func _apply_ai_clothing(ai: Node, clothingPath: String) -> void:
     if clothingPath.is_empty():
         return
-    var meshVar: Variant = ai.get(&"mesh")
-    if !(meshVar is MeshInstance3D):
+    var mesh: MeshInstance3D = ai.get(&"mesh") as MeshInstance3D
+    if mesh == null:
         return
     var mat: Material = load(clothingPath) as Material
     if mat == null:
         return
-    (meshVar as MeshInstance3D).set_surface_override_material(0, mat)
+    mesh.set_surface_override_material(0, mat)
 
 
 @rpc("authority", "call_remote", "unreliable")
@@ -976,29 +961,22 @@ func send_full_state(peerId: int) -> void:
         var weaponFile: String = ""
         var weaponCondition: int = 0
         var weaponAmount: int = 0
-        var w: Variant = child.get(&"weapon")
-        if w != null && w is Node && is_instance_valid(w):
-            var slotData: Variant = w.get(&"slotData")
+        var w: Node = child.get(&"weapon") as Node
+        if is_instance_valid(w):
+            var slotData: SlotData = w.get(&"slotData") as SlotData
             if slotData != null:
-                var itemData: Variant = slotData.get(&"itemData")
-                if itemData != null:
-                    var fileVar: Variant = itemData.get(&"file")
-                    if fileVar is String:
-                        weaponFile = fileVar
-                var condVar: Variant = slotData.get(&"condition")
-                if condVar is int:
-                    weaponCondition = condVar
-                var amtVar: Variant = slotData.get(&"amount")
-                if amtVar is int:
-                    weaponAmount = amtVar
+                if slotData.itemData != null:
+                    weaponFile = String(slotData.itemData.file)
+                weaponCondition = int(slotData.condition)
+                weaponAmount = int(slotData.amount)
         var backpackFile: String = ""
-        var bp: Variant = child.get(&"backpack")
-        if bp != null && bp is Node && is_instance_valid(bp):
+        var bp: Node = child.get(&"backpack") as Node
+        if is_instance_valid(bp):
             backpackFile = String(bp.name)
         var clothingPath: String = ""
-        var meshVar: Variant = child.get(&"mesh")
-        if meshVar is MeshInstance3D:
-            var mat: Material = (meshVar as MeshInstance3D).get_surface_override_material(0)
+        var mesh: MeshInstance3D = child.get(&"mesh") as MeshInstance3D
+        if mesh != null:
+            var mat: Material = mesh.get_surface_override_material(0)
             if mat != null && !mat.resource_path.is_empty():
                 clothingPath = mat.resource_path
         receive_ai_loadout.rpc_id(peerId, idx, weaponFile, weaponCondition, weaponAmount, backpackFile, clothingPath)

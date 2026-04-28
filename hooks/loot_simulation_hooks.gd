@@ -13,7 +13,7 @@ func register(lib: Object) -> void:
 
 
 func _on_ready() -> void:
-    var sim: Node = _lib._caller
+    var sim: Node3D = _lib._caller as Node3D
     if sim == null:
         return
     if !CoopManager.is_session_active():
@@ -35,7 +35,7 @@ func _on_ready() -> void:
 
 
 func _apply_loot_multiplier() -> void:
-    var sim: Node = _lib._caller
+    var sim: Node3D = _lib._caller as Node3D
     if sim == null:
         return
     # Skip when vanilla didn't run (client / headless handoff).

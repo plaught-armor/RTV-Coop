@@ -901,22 +901,20 @@ func request_trader_task_complete(traderPath: String, taskName: String) -> void:
     # Validate task belongs to this trader's declared task list. Protects
     # against clients spoofing unrelated taskNames (wrong trader, unknown
     # name, empty string) to grab rewards without the input items.
-    var traderData: Resource = trader.get(&"traderData")
+    var traderData: TraderData = trader.get(&"traderData") as TraderData
     if !is_instance_valid(traderData):
         reject_trader_task_complete.rpc_id(senderId, taskName)
         return
-    var tasks: Variant = traderData.get(&"tasks")
-    if tasks == null || !(tasks is Array) || (tasks as Array).is_empty():
+    if traderData.tasks.is_empty():
         reject_trader_task_complete.rpc_id(senderId, taskName)
         return
     var known: bool = false
-    for taskData: Resource in tasks as Array:
+    for taskData: TaskData in traderData.tasks:
         if is_instance_valid(taskData) && taskData.name == taskName:
             known = true
             break
     if !known:
-        var dataName: Variant = traderData.get(&"name")
-        push_warning("[world_state] Rejecting trader task '%s' from peer %d — not in %s tasks" % [taskName, senderId, dataName if dataName != null else "?"])
+        push_warning("[world_state] Rejecting trader task '%s' from peer %d — not in %s tasks" % [taskName, senderId, traderData.name])
         reject_trader_task_complete.rpc_id(senderId, taskName)
         return
     # Host applies + saves the same as solo. No TaskData object in hand, so we
@@ -1373,9 +1371,9 @@ func broadcast_airdrop_state(casaPath: String, isDropped: bool, isReleased: bool
     casa.dropped = isDropped
     casa.released = isReleased
     if isDropped:
-        var airdropVar: Variant = casa.get(&"airdrop")
-        if airdropVar != null && airdropVar is Node3D && is_instance_valid(airdropVar):
-            (airdropVar as Node3D).visible = true
+        var airdrop: Node3D = casa.get(&"airdrop") as Node3D
+        if is_instance_valid(airdrop):
+            airdrop.visible = true
 
 
 ## Per-peer live instrument audio spawned on remote_player.

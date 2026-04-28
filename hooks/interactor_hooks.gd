@@ -18,7 +18,7 @@ func _on_interact() -> void:
     CoopManager._log("[interactor.trace] press detected")
     if !CoopManager.is_session_active():
         return  # vanilla runs
-    var ix: Node = _lib._caller
+    var ix: RayCast3D = _lib._caller as RayCast3D
     if ix == null:
         CoopManager._log("[interactor.trace] caller null")
         return

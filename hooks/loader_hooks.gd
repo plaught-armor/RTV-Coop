@@ -54,7 +54,7 @@ func _ensure_save_dir(loader: Node) -> void:
 
 
 func _on_reset_character() -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -69,7 +69,7 @@ func _on_reset_character() -> void:
 
 
 func _on_save_character() -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -160,7 +160,7 @@ func _save_inventory_grids(character: CharacterSave, iface: Node) -> void:
 
 
 func _on_load_character() -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -310,7 +310,7 @@ func _equip_active_rig(loader: Node, character: CharacterSave, rigManager: Node,
 
 
 func _on_new_game(difficulty: int, season: int) -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -362,7 +362,7 @@ func _on_new_game(difficulty: int, season: int) -> void:
 
 
 func _on_save_world() -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -380,7 +380,7 @@ func _on_save_world() -> void:
 
 
 func _on_load_world() -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -400,7 +400,7 @@ func _on_load_world() -> void:
 
 
 func _on_format_save() -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -422,7 +422,7 @@ func _on_format_save() -> void:
 
 
 func _on_validate_shelter() -> String:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return ""
     _lib.skip_super()
@@ -448,7 +448,7 @@ func _on_validate_shelter() -> String:
 
 
 func _on_save_shelter(targetShelter: String) -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -498,7 +498,7 @@ func _on_save_shelter(targetShelter: String) -> void:
 
 
 func _on_load_shelter(targetShelter: String) -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -561,7 +561,7 @@ func _on_load_shelter(targetShelter: String) -> void:
 
 
 func _on_check_shelter_state(targetShelter: String) -> bool:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return false
     _lib.skip_super()
@@ -570,7 +570,7 @@ func _on_check_shelter_state(targetShelter: String) -> bool:
 
 
 func _on_unlock_shelter(targetShelter: String) -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -584,7 +584,7 @@ func _on_unlock_shelter(targetShelter: String) -> void:
 
 
 func _on_save_trader(trader: String) -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -610,7 +610,7 @@ func _on_save_trader(trader: String) -> void:
 
 
 func _on_load_trader(trader: String) -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -641,7 +641,7 @@ func _on_load_trader(trader: String) -> void:
 
 
 func _on_save_task_notes(task: TaskData, add: bool) -> void:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return
     _lib.skip_super()
@@ -659,7 +659,7 @@ func _on_save_task_notes(task: TaskData, add: bool) -> void:
 
 
 func _on_load_task_notes() -> Array[TaskData]:
-    var loader: Node = _lib._caller
+    var loader: CanvasLayer = _lib._caller as CanvasLayer
     if loader == null:
         return []
     _lib.skip_super()

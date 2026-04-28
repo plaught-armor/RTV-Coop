@@ -30,7 +30,7 @@ func register(lib: Object) -> void:
 
 
 func _on_ready() -> void:
-    var s: Node = _lib._caller
+    var s: Node3D = _lib._caller as Node3D
     if s == null:
         return
     if !CoopManager.is_session_active():
@@ -96,7 +96,7 @@ func _on_spawn_wanderer() -> void:
     _lib.skip_super()
     if !CoopManager.isHost:
         return
-    var s: Node = _lib._caller
+    var s: Node3D = _lib._caller as Node3D
     if s == null:
         return
     if s.APool.get_child_count() == 0:
@@ -134,7 +134,7 @@ func _gate_common() -> void:
     if !CoopManager.isHost:
         _lib.skip_super()  # client: no spawn
         return
-    var s: Node = _lib._caller
+    var s: Node3D = _lib._caller as Node3D
     if s != null:
         _prevCount[s] = s.agents.get_child_count()
 
@@ -150,7 +150,7 @@ func _post_pos(_spawnPosition: Vector3) -> void:
 func _post_common() -> void:
     if !CoopManager.is_session_active() || !CoopManager.isHost:
         return
-    var s: Node = _lib._caller
+    var s: Node3D = _lib._caller as Node3D
     if s == null:
         return
     var prev: int = _prevCount.get(s, -1)

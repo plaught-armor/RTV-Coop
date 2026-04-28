@@ -23,7 +23,7 @@ func register(lib: Object) -> void:
 func _on_ready_post() -> void:
     if !CoopManager.is_session_active() || CoopManager.isHost:
         return
-    var c: Node = _lib._caller
+    var c: Node3D = _lib._caller as Node3D
     if c == null || !is_instance_valid(c.airdrop):
         return
     c.airdrop.freeze = true
@@ -114,6 +114,6 @@ func _on_collided(_body: Node3D) -> void:
     if !CoopManager.isHost:
         _lib.skip_super()
         return
-    var c: Node = _lib._caller
+    var c: Node3D = _lib._caller as Node3D
     if c != null && is_instance_valid(c.airdrop):
         CoopManager.worldState.broadcast_airdrop_landing.rpc(c.airdrop.global_position)

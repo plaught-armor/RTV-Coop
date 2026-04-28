@@ -33,7 +33,7 @@ func _maybe_log() -> void:
 func _on_stamina(delta: float) -> void:
     _maybe_log()
     _lib.skip_super()
-    var ch: Node = _lib._caller
+    var ch: Node3D = _lib._caller as Node3D
     if ch == null:
         return
     var gd: Resource = ch.gameData
@@ -65,7 +65,7 @@ func _on_stamina(delta: float) -> void:
 
 func _on_energy(delta: float) -> void:
     _lib.skip_super()
-    var ch: Node = _lib._caller
+    var ch: Node3D = _lib._caller as Node3D
     if ch == null:
         return
     var gd: Resource = ch.gameData
@@ -80,7 +80,7 @@ func _on_energy(delta: float) -> void:
 
 func _on_hydration(delta: float) -> void:
     _lib.skip_super()
-    var ch: Node = _lib._caller
+    var ch: Node3D = _lib._caller as Node3D
     if ch == null:
         return
     var gd: Resource = ch.gameData
@@ -95,7 +95,7 @@ func _on_hydration(delta: float) -> void:
 
 func _on_temperature(delta: float) -> void:
     _lib.skip_super()
-    var ch: Node = _lib._caller
+    var ch: Node3D = _lib._caller as Node3D
     if ch == null:
         return
     var gd: Resource = ch.gameData
