@@ -1,6 +1,10 @@
 ## Host-auth AI replication at 10Hz; sync IDs are flat ints (A_Pool then B_Pool).
 extends Node
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 const _AI_CONTAINER_PATHS: Array[NodePath] = [^"A_Pool", ^"B_Pool", ^"Agents"]
 const _AI_POOL_PATHS: Array[NodePath] = [^"A_Pool", ^"B_Pool"]
 
@@ -236,12 +240,15 @@ func _resize_slot_arrays() -> void:
 
 func _populate_slot_arrays(allNodes: Array[Node]) -> int:
     var activeCount: int = 0
+    var seedOnClient: bool = is_instance_valid(CoopManager) && CoopManager.is_session_active() && !CoopManager.isHost
     for child: Node in allNodes:
         var idx: int = child.get_meta(&"ai_sync_id")
         aiNodes[idx] = child
         if _agentsNode != null && child.get_parent() == _agentsNode:
             activeOnClient[idx] = 1
             activeCount += 1
+            if seedOnClient:
+                _seed_client_animator(idx, child)
     return activeCount
 
 
@@ -256,6 +263,7 @@ func _flush_pending_activations() -> void:
         var pnode: Node = aiNodes[pid]
         if !is_instance_valid(pnode):
             continue
+        pnode.set(&"currentState", pending.get(&"stateIdx", int(AIState.IDLE)))
         _activate_on_client(pid, pnode)
         pnode.global_position = pending.get(&"pos", Vector3.ZERO)
         pnode.global_rotation.y = pending.get(&"rotY", 0.0)
@@ -489,51 +497,109 @@ func _apply_snapshot(idx: int, node: Node, snap: AISnapshot) -> void:
     var stateKey: int = (snap.state & 0xFF) | (int(isPistol) << 8)
     if _lastAppliedState[idx] != stateKey:
         _lastAppliedState[idx] = stateKey
-        animator[COND_RIFLE_MOVEMENT] = false
-        animator[COND_RIFLE_COMBAT] = false
-        animator[COND_RIFLE_HUNT] = false
-        animator[COND_RIFLE_DEFEND] = false
-        animator[COND_RIFLE_GUARD] = false
-        animator[COND_RIFLE_GROUP] = false
-        animator[COND_PISTOL_MOVEMENT] = false
-        animator[COND_PISTOL_COMBAT] = false
-        animator[COND_PISTOL_HUNT] = false
-        animator[COND_PISTOL_DEFEND] = false
-        animator[COND_PISTOL_GUARD] = false
-        animator[COND_PISTOL_GROUP] = false
-        animator[COND_PISTOL] = isPistol
-        animator[COND_RIFLE] = !isPistol
-        if IS_MOVEMENT[snap.state] == 1:
-            animator[COND_RIFLE_MOVEMENT] = true
-            animator[COND_PISTOL_MOVEMENT] = true
-        elif snap.state == AIState.COMBAT:
-            animator[COND_RIFLE_COMBAT] = true
-            animator[COND_PISTOL_COMBAT] = true
-        elif snap.state == AIState.HUNT:
-            animator[COND_RIFLE_HUNT] = true
-            animator[COND_PISTOL_HUNT] = true
-        elif snap.state == AIState.DEFEND:
-            animator[COND_RIFLE_DEFEND] = true
-            animator[COND_PISTOL_DEFEND] = true
-        elif IS_GUARD[snap.state] == 1:
-            animator[COND_RIFLE_GUARD] = true
-            animator[COND_PISTOL_GUARD] = true
-        else:
-            animator[COND_RIFLE_GROUP] = true
-            animator[COND_PISTOL_GROUP] = true
+        _apply_state_conditions(animator, snap.state, isPistol)
 
     if absf(_lastAppliedSpeed[idx] - snap.move_speed) > SPEED_EPSILON:
         _lastAppliedSpeed[idx] = snap.move_speed
-        if isPistol:
-            animator[BLEND_PISTOL_MOVE] = snap.move_speed
-            animator[BLEND_PISTOL_COMBAT] = snap.strafe
-            animator[BLEND_PISTOL_HUNT] = snap.move_speed
-        else:
-            animator[BLEND_RIFLE_MOVE] = snap.move_speed
-            animator[BLEND_RIFLE_COMBAT] = snap.strafe
-            animator[BLEND_RIFLE_HUNT] = snap.move_speed
+        _apply_state_blends(animator, isPistol, snap.move_speed, snap.strafe)
 
     CoopManager.perf.stop("apply_snapshot", _pt)
+
+
+## Writes the Pistol/Rifle weapon-class conditions + the per-state condition
+## flag for [param state]. Reused from snapshot apply and from initial seeding
+## in [method _seed_client_animator] so AI never sit at AnimationTree root
+## (T-pose) between activation and the first batch snapshot.
+func _apply_state_conditions(animator: AnimationTree, state: int, isPistol: bool) -> void:
+    animator[COND_RIFLE_MOVEMENT] = false
+    animator[COND_RIFLE_COMBAT] = false
+    animator[COND_RIFLE_HUNT] = false
+    animator[COND_RIFLE_DEFEND] = false
+    animator[COND_RIFLE_GUARD] = false
+    animator[COND_RIFLE_GROUP] = false
+    animator[COND_PISTOL_MOVEMENT] = false
+    animator[COND_PISTOL_COMBAT] = false
+    animator[COND_PISTOL_HUNT] = false
+    animator[COND_PISTOL_DEFEND] = false
+    animator[COND_PISTOL_GUARD] = false
+    animator[COND_PISTOL_GROUP] = false
+    animator[COND_PISTOL] = isPistol
+    animator[COND_RIFLE] = !isPistol
+    if state >= 0 && state < IS_MOVEMENT.size() && IS_MOVEMENT[state] == 1:
+        animator[COND_RIFLE_MOVEMENT] = true
+        animator[COND_PISTOL_MOVEMENT] = true
+    elif state == AIState.COMBAT:
+        animator[COND_RIFLE_COMBAT] = true
+        animator[COND_PISTOL_COMBAT] = true
+    elif state == AIState.HUNT:
+        animator[COND_RIFLE_HUNT] = true
+        animator[COND_PISTOL_HUNT] = true
+    elif state == AIState.DEFEND:
+        animator[COND_RIFLE_DEFEND] = true
+        animator[COND_PISTOL_DEFEND] = true
+    elif state >= 0 && state < IS_GUARD.size() && IS_GUARD[state] == 1:
+        animator[COND_RIFLE_GUARD] = true
+        animator[COND_PISTOL_GUARD] = true
+    else:
+        animator[COND_RIFLE_GROUP] = true
+        animator[COND_PISTOL_GROUP] = true
+
+
+func _apply_state_blends(animator: AnimationTree, isPistol: bool, moveSpeed: float, strafe: float) -> void:
+    if isPistol:
+        animator[BLEND_PISTOL_MOVE] = moveSpeed
+        animator[BLEND_PISTOL_COMBAT] = strafe
+        animator[BLEND_PISTOL_HUNT] = moveSpeed
+    else:
+        animator[BLEND_RIFLE_MOVE] = moveSpeed
+        animator[BLEND_RIFLE_COMBAT] = strafe
+        animator[BLEND_RIFLE_HUNT] = moveSpeed
+
+
+## Seeds the animator with conditions + zero-speed blends derived from the
+## node's currently-set [code]currentState[/code] and equipped weapon. Called
+## on first client-side activation so the AI plays a real pose immediately
+## instead of waiting for the first batch snapshot (which would otherwise
+## leave the AnimationTree at its default root state — T-pose).
+func _seed_client_animator(idx: int, node: Node) -> void:
+    var animator: AnimationTree = node.get(&"animator")
+    if !is_instance_valid(animator):
+        return
+    if !animator.active:
+        animator.active = true
+    # AISpawner.Pause() (called for every pool AI on spawn) sets the AI node
+    # to PROCESS_MODE_DISABLED and the skeleton to PROCESS_MODE_WHEN_PAUSED.
+    # On client we never route through AI.Activate() — _activate_on_client
+    # just sets the `pause` bool — so without this reset the AI's
+    # _physics_process never fires (DISABLED skips _physics_process entirely)
+    # and animator.advance() is never called → AI stays at bind pose
+    # (T-pose). On death, skeleton ragdoll only ticks while tree is paused,
+    # so the AI only falls over after Esc opens the menu. Force INHERIT on
+    # both so the client _physics_process advance loop drives the animator
+    # and skeleton physics ragdoll runs in real time.
+    if node is Node3D:
+        (node as Node3D).process_mode = Node.PROCESS_MODE_INHERIT
+    # Force MANUAL callback so ai_patch._physics_process's animator.advance()
+    # is the sole tick source. Default IDLE auto-tick + manual advance =
+    # double-step (anims play at 2x). Base game sets MANUAL via AI.Pause()
+    # but our client path never routes through Pause/Activate, so we must
+    # set it here. Mirrors AI.Pause() in Scripts/AI.gd:351-352.
+    animator.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+    var skeleton: Skeleton3D = node.get(&"skeleton") as Skeleton3D
+    if is_instance_valid(skeleton):
+        skeleton.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL
+        skeleton.process_mode = Node.PROCESS_MODE_INHERIT
+    var stateRaw: Variant = node.get(&"currentState")
+    var state: int = int(stateRaw) if stateRaw != null else int(AIState.IDLE)
+    var isPistol: bool = false
+    var weaponData: Variant = node.get(&"weaponData")
+    if weaponData != null && weaponData.get(&"weaponType") == "Pistol":
+        isPistol = true
+    _apply_state_conditions(animator, state, isPistol)
+    _apply_state_blends(animator, isPistol, 0.0, 0.0)
+    if idx >= 0 && idx < _lastAppliedState.size():
+        _lastAppliedState[idx] = (state & 0xFF) | (int(isPistol) << 8)
+        _lastAppliedSpeed[idx] = 0.0
 
 
 func _activate_on_client(idx: int, node: Node) -> void:
@@ -547,10 +613,12 @@ func _activate_on_client(idx: int, node: Node) -> void:
     # Snapshots drive on client; keep AI logic paused.
     node.set(&"pause", true)
     node.set(&"sensorActive", false)
-    # Enable animator eagerly so Death() before first snapshot doesn't ragdoll from T-pose.
-    var animator: AnimationTree = node.get(&"animator")
-    if is_instance_valid(animator):
-        animator.active = true
+    # Seed animator with conditions + zero-blends derived from currentState +
+    # weapon so the AI plays a real pose immediately. Without this, the
+    # AnimationTree sits at its root state (T-pose) until the first batch
+    # snapshot lands ~100ms later — visible as a pop on every newly-activated
+    # AI on the client.
+    _seed_client_animator(idx, node)
 
 
 func broadcast_ai_activate(syncId: int, pos: Vector3, rotY: float, stateIdx: int) -> void:
@@ -569,6 +637,11 @@ func receive_ai_activate(syncId: int, pos: Vector3, rotY: float, stateIdx: int) 
         return
     var node: Node = aiNodes[syncId]
     _log("receive_ai_activate: syncId=%d pos=%s" % [syncId, str(pos)])
+    # Apply host's authoritative state before _activate_on_client seeds the
+    # animator from node.currentState — otherwise the seed picks up the
+    # client's stale enum default (IDLE) and the AI plays Guard on activate
+    # even when host has it in Combat.
+    node.set(&"currentState", stateIdx)
     _activate_on_client(syncId, node)
     node.global_position = pos
     node.global_rotation.y = rotY
@@ -591,6 +664,31 @@ func receive_ai_death(syncId: int, direction: Vector3, force: float) -> void:
         return
     if node.has_method(&"Death"):
         node.Death(direction, force)
+    # Mirror host's [method ai_patch._register_corpse_items_as_synced]: tag
+    # local weapon/backpack/secondary with the same deterministic sync_ids
+    # so the interactor pickup path resolves to the same item across peers.
+    # Loadout sync (broadcast_ai_loadout) ensures both sides hold the SAME
+    # weapon node — pickup-side request_item_consumed thus removes
+    # symmetrical instances.
+    _register_local_corpse_items(syncId, node)
+
+
+func _register_local_corpse_items(syncId: int, ai: Node) -> void:
+    var ws: Node = CoopManager.worldState
+    if !is_instance_valid(ws):
+        return
+    var corpseId: int = syncId * 10
+    _tag_corpse_item(ws, ai.get(&"weapon"), "ai_corpse_%d_weapon" % corpseId)
+    _tag_corpse_item(ws, ai.get(&"backpack"), "ai_corpse_%d_backpack" % corpseId)
+    _tag_corpse_item(ws, ai.get(&"secondary"), "ai_corpse_%d_secondary" % corpseId)
+
+
+func _tag_corpse_item(ws: Node, item: Variant, syncId: String) -> void:
+    if !(item is Node) || !is_instance_valid(item):
+        return
+    var node: Node = item as Node
+    node.set_meta(&"sync_id", syncId)
+    ws.syncedItems[syncId] = node
 
 
 func broadcast_ai_fire(syncId: int) -> void:
@@ -637,6 +735,142 @@ func broadcast_ai_voice(syncId: int, voiceType: int) -> void:
     receive_ai_voice.rpc(syncId, voiceType)
 
 
+## Host broadcasts the AI's authoritative loadout (weapon file + condition +
+## amount, backpack file, clothing material path) after its local
+## SelectWeapon/Backpack/Clothing rolled. Clients use this to converge their
+## local AI's visible equipment with host's so [member AI.weapon] points at
+## the same scene resource on every peer — required for AI corpse pickup
+## sync (the pickup-side sync_id flow needs all peers' weapon nodes to
+## resolve to the same item).
+func broadcast_ai_loadout(syncId: int, ai: Node) -> void:
+    var weaponFile: String = ""
+    var weaponCondition: int = 0
+    var weaponAmount: int = 0
+    var w: Variant = ai.get(&"weapon")
+    if w != null && w is Node && is_instance_valid(w):
+        var slotData: Variant = w.get(&"slotData")
+        if slotData != null:
+            var itemData: Variant = slotData.get(&"itemData")
+            if itemData != null:
+                var fileVar: Variant = itemData.get(&"file")
+                if fileVar is String:
+                    weaponFile = fileVar
+            var condVar: Variant = slotData.get(&"condition")
+            if condVar is int:
+                weaponCondition = condVar
+            var amtVar: Variant = slotData.get(&"amount")
+            if amtVar is int:
+                weaponAmount = amtVar
+    var backpackFile: String = ""
+    var bp: Variant = ai.get(&"backpack")
+    if bp != null && bp is Node && is_instance_valid(bp):
+        backpackFile = String(bp.name)
+    var clothingPath: String = ""
+    var meshVar: Variant = ai.get(&"mesh")
+    if meshVar is MeshInstance3D:
+        var mat: Material = (meshVar as MeshInstance3D).get_surface_override_material(0)
+        if mat != null && !mat.resource_path.is_empty():
+            clothingPath = mat.resource_path
+    _log("broadcast_ai_loadout: syncId=%d weapon=%s cond=%d amt=%d backpack=%s clothing=%s" % [syncId, weaponFile, weaponCondition, weaponAmount, backpackFile, clothingPath])
+    receive_ai_loadout.rpc(syncId, weaponFile, weaponCondition, weaponAmount, backpackFile, clothingPath)
+
+
+## Applies host's AI loadout to the local (client) AI node identified by
+## [param syncId]. Hides every weapon child whose itemData.file != [param
+## weaponFile] so [member AI.weapon] visually + structurally matches host;
+## also queue_frees the rejected siblings to mirror host's
+## [method AI.SelectWeapon] tail. Backpack: hide all but the named one.
+## Clothing: apply the override material to surface 0.
+@rpc("authority", "call_remote", "reliable")
+func receive_ai_loadout(syncId: int, weaponFile: String, weaponCondition: int, weaponAmount: int, backpackFile: String, clothingPath: String) -> void:
+    if syncId < 0 || syncId >= slotCount:
+        return
+    var node: Node = aiNodes[syncId]
+    if !is_instance_valid(node):
+        return
+    _apply_ai_weapon(node, weaponFile, weaponCondition, weaponAmount)
+    _apply_ai_backpack(node, backpackFile)
+    _apply_ai_clothing(node, clothingPath)
+
+
+func _apply_ai_weapon(ai: Node, weaponFile: String, weaponCondition: int, weaponAmount: int) -> void:
+    var weapons: Variant = ai.get(&"weapons")
+    if weapons == null || !(weapons is Node):
+        return
+    if weaponFile.is_empty():
+        return
+    var picked: Node = null
+    for child: Node in (weapons as Node).get_children():
+        var slotData: Variant = child.get(&"slotData")
+        var fileMatch: bool = false
+        if slotData != null:
+            var itemData: Variant = slotData.get(&"itemData")
+            if itemData != null:
+                var fv: Variant = itemData.get(&"file")
+                if fv is String && (fv as String) == weaponFile:
+                    fileMatch = true
+        if fileMatch:
+            picked = child
+        else:
+            child.queue_free()
+    if !is_instance_valid(picked):
+        return
+    if picked.has_method(&"show"):
+        picked.show()
+    ai.set(&"weapon", picked)
+    var pickedSlot: Variant = picked.get(&"slotData")
+    if pickedSlot != null:
+        var itemData: Variant = pickedSlot.get(&"itemData")
+        if itemData != null:
+            ai.set(&"weaponData", itemData)
+            # Drive the Pistol/Rifle top-level animator condition so the state
+            # machine routes through the right sub-machine — same writes
+            # AI.SelectWeapon does inline (Scripts/AI.gd:419-423).
+            var animator: AnimationTree = ai.get(&"animator")
+            if is_instance_valid(animator):
+                var isPistol: bool = false
+                var wt: Variant = itemData.get(&"weaponType")
+                if wt == "Pistol":
+                    isPistol = true
+                animator[COND_PISTOL] = isPistol
+                animator[COND_RIFLE] = !isPistol
+            pickedSlot.set(&"condition", weaponCondition)
+            pickedSlot.set(&"amount", weaponAmount)
+            pickedSlot.set(&"chamber", true)
+
+
+func _apply_ai_backpack(ai: Node, backpackFile: String) -> void:
+    var backpacks: Variant = ai.get(&"backpacks")
+    if backpacks == null || !(backpacks is Node):
+        return
+    if backpackFile.is_empty():
+        for child: Node in (backpacks as Node).get_children():
+            child.queue_free()
+        return
+    var picked: Node = null
+    for child: Node in (backpacks as Node).get_children():
+        if String(child.name) == backpackFile:
+            picked = child
+        else:
+            child.queue_free()
+    if is_instance_valid(picked):
+        ai.set(&"backpack", picked)
+        if picked.has_method(&"show"):
+            picked.show()
+
+
+func _apply_ai_clothing(ai: Node, clothingPath: String) -> void:
+    if clothingPath.is_empty():
+        return
+    var meshVar: Variant = ai.get(&"mesh")
+    if !(meshVar is MeshInstance3D):
+        return
+    var mat: Material = load(clothingPath) as Material
+    if mat == null:
+        return
+    (meshVar as MeshInstance3D).set_surface_override_material(0, mat)
+
+
 @rpc("authority", "call_remote", "unreliable")
 func receive_ai_voice(syncId: int, voiceType: int) -> void:
     if syncId < 0 || syncId >= slotCount:
@@ -662,42 +896,59 @@ const MAX_CLIENT_DAMAGE: float = 500.0
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_ai_damage_from_client(syncId: int, hitbox: String, damage: float) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_ai_damage_from_client RECV syncId=%d hitbox=%s dmg=%.1f from peer=%d" % [syncId, hitbox, damage, sender])
     if !CoopManager.isHost:
+        _log("request_ai_damage_from_client REJECT not-host")
         return
     if syncId < 0 || syncId >= slotCount:
+        _log("request_ai_damage_from_client REJECT bad-syncId=%d slotCount=%d" % [syncId, slotCount])
         return
     if !HITBOX_ALLOWLIST.has(hitbox):
+        _log("request_ai_damage_from_client REJECT bad-hitbox=%s" % hitbox)
         return
     if damage <= 0.0 || damage > MAX_CLIENT_DAMAGE:
+        _log("request_ai_damage_from_client REJECT bad-damage=%.1f" % damage)
         return
     var node: Node = aiNodes[syncId]
     if !is_instance_valid(node):
+        _log("request_ai_damage_from_client REJECT dead-node syncId=%d" % syncId)
         return
     if node.get(&"dead") == true:
+        _log("request_ai_damage_from_client REJECT already-dead syncId=%d" % syncId)
         return
     if node.has_method(&"WeaponDamage"):
+        _log("request_ai_damage_from_client APPLY syncId=%d dmg=%.1f" % [syncId, damage])
         # Host calls super WeaponDamage; patched version would re-route back to client.
         node.WeaponDamage(hitbox, damage)
 
 
 func send_ai_damage_to_peer(peerId: int, damage: float, penetration: int) -> void:
+    _log("send_ai_damage_to_peer peer=%d dmg=%.1f pen=%d" % [peerId, damage, penetration])
     receive_ai_damage.rpc_id(peerId, damage, penetration)
 
 
 @rpc("authority", "call_remote", "reliable")
 func receive_ai_damage(damage: float, penetration: int) -> void:
+    _log("receive_ai_damage RECV dmg=%.1f pen=%d" % [damage, penetration])
     if is_instance_valid(_character) && _character.has_method(&"WeaponDamage"):
         _character.WeaponDamage(damage, penetration)
+    else:
+        _log("receive_ai_damage ABORT character invalid")
 
 
 func send_explosion_damage_to_peer(peerId: int) -> void:
+    _log("send_explosion_damage_to_peer peer=%d" % peerId)
     receive_explosion_damage.rpc_id(peerId)
 
 
 @rpc("authority", "call_remote", "reliable")
 func receive_explosion_damage() -> void:
+    _log("receive_explosion_damage RECV")
     if is_instance_valid(_character) && _character.has_method(&"ExplosionDamage"):
         _character.ExplosionDamage()
+    else:
+        _log("receive_explosion_damage ABORT character invalid")
 
 
 func send_full_state(peerId: int) -> void:
@@ -720,6 +971,37 @@ func send_full_state(peerId: int) -> void:
             continue
         var idx: int = child.get_meta(&"ai_sync_id")
         receive_ai_activate.rpc_id(peerId, idx, child.global_position, child.global_rotation.y, child.currentState)
+        # Targeted loadout push so the late joiner's AI converges with host
+        # without waiting for a death/swap event to refresh equipment state.
+        var weaponFile: String = ""
+        var weaponCondition: int = 0
+        var weaponAmount: int = 0
+        var w: Variant = child.get(&"weapon")
+        if w != null && w is Node && is_instance_valid(w):
+            var slotData: Variant = w.get(&"slotData")
+            if slotData != null:
+                var itemData: Variant = slotData.get(&"itemData")
+                if itemData != null:
+                    var fileVar: Variant = itemData.get(&"file")
+                    if fileVar is String:
+                        weaponFile = fileVar
+                var condVar: Variant = slotData.get(&"condition")
+                if condVar is int:
+                    weaponCondition = condVar
+                var amtVar: Variant = slotData.get(&"amount")
+                if amtVar is int:
+                    weaponAmount = amtVar
+        var backpackFile: String = ""
+        var bp: Variant = child.get(&"backpack")
+        if bp != null && bp is Node && is_instance_valid(bp):
+            backpackFile = String(bp.name)
+        var clothingPath: String = ""
+        var meshVar: Variant = child.get(&"mesh")
+        if meshVar is MeshInstance3D:
+            var mat: Material = (meshVar as MeshInstance3D).get_surface_override_material(0)
+            if mat != null && !mat.resource_path.is_empty():
+                clothingPath = mat.resource_path
+        receive_ai_loadout.rpc_id(peerId, idx, weaponFile, weaponCondition, weaponAmount, backpackFile, clothingPath)
         sentCount += 1
     _log("send_full_state: sent %d active AI to peer %d" % [sentCount, peerId])
 

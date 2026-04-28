@@ -1,12 +1,17 @@
 ## Patch for Explosion.gd — co-op splash damage (host-authoritative, remote player detection).
 extends "res://Scripts/Explosion.gd"
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 const COOP_HIT_LAYER: int = 1 << 19
 
 
 func Explode() -> void:
     if CoopManager.is_session_active():
         area.collision_mask |= COOP_HIT_LAYER
+        CoopManager._log("[explosion] Explode pos=%s host=%s" % [str(global_position), str(CoopManager.isHost)])
     super.Explode()
 
 
@@ -19,6 +24,7 @@ func CheckOverlap() -> void:
     if bodies.size() == 0:
         return
 
+    CoopManager._log("[explosion] CheckOverlap bodies=%d" % bodies.size())
     for target: Node3D in bodies:
         if target.is_in_group(&"CoopRemote"):
             _check_los_remote(target)
@@ -44,8 +50,10 @@ func CheckLOS(target) -> void:
         return
 
     if collider.is_in_group(&"AI"):
+        CoopManager._log("[explosion] AI damage to %s" % target.name)
         target.ExplosionDamage(LOS.global_basis.z)
     elif collider.is_in_group(&"Player"):
+        CoopManager._log("[explosion] Player damage to %s" % target.name)
         target.get_child(0).ExplosionDamage()
 
 
@@ -66,6 +74,7 @@ func _check_los_remote(target: Node3D) -> void:
         if remoteRoot != null:
             var peerId: int = remoteRoot.get_meta(&"peer_id", -1)
             if peerId > 0:
+                CoopManager._log("[explosion] remote peer=%d damage" % peerId)
                 CoopManager.aiState.send_explosion_damage_to_peer(peerId)
 
 

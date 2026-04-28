@@ -8,6 +8,10 @@
 extends RefCounted
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 var _lastCat: float = -1.0
 var _lastFound: bool = false
 var _lastDead: bool = false

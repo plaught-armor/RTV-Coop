@@ -2,6 +2,10 @@
 extends Node
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 signal setup_finished(success: bool)
 
 const PATH_CORE: NodePath = ^"Core"

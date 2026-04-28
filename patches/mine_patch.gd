@@ -1,6 +1,10 @@
 ## Patch for Mine.gd — host-authoritative detonation; clients request via RPC.
 extends "res://Scripts/Mine.gd"
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 var _cachedPath: String = ""
 
 
@@ -11,6 +15,7 @@ func _ready() -> void:
 
 func Detonate() -> void:
     if CoopManager.is_session_active():
+        CoopManager._log("[mine] Detonate path=%s host=%s" % [_cachedPath, str(CoopManager.isHost)])
         if CoopManager.isHost:
             CoopManager.worldState.broadcast_mine_detonate(_cachedPath, false)
             super.Detonate()
@@ -22,6 +27,7 @@ func Detonate() -> void:
 
 func InstantDetonate() -> void:
     if CoopManager.is_session_active():
+        CoopManager._log("[mine] InstantDetonate path=%s host=%s" % [_cachedPath, str(CoopManager.isHost)])
         if CoopManager.isHost:
             CoopManager.worldState.broadcast_mine_detonate(_cachedPath, true)
             super.InstantDetonate()

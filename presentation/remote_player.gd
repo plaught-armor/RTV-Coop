@@ -1,9 +1,8 @@
-## Base class for remote player visuals; subclasses choose rig style
-## ([code]remote_player_puppet.gd[/code] = AI rig, [code]remote_player_capsule.gd[/code] = bare capsule + FPS arms).
-## Owns shared snapshot state, audio + occlusion bus, hit collision body, name
-## label / health overlay, decals, and fire-event audio. Subclasses fill in
-## rig spawn / weapon attach / per-frame skeletal updates / ragdoll via the
-## virtual hooks below.
+## Remote player visual: bare CapsuleMesh body + chest Marker3D weapon mount.
+## set_active_weapon attaches a stripped FPS weapon rig (with its own
+## AnimationPlayer + AnimationTree); set_active_anim_state mirrors the owner's
+## current state-machine playback node onto that tree (Reload, Inspect, fire
+## mode, etc) so weapon anims play in sync on the peer.
 extends Node3D
 
 
@@ -17,10 +16,29 @@ const COOP_HIT_LAYER: int = 1 << 19
 const PATH_MUZZLE: NodePath = ^"Muzzle"
 const PATH_HITBODY: NodePath = ^"HitBody"
 const PATH_LOCAL_CONTROLLER: NodePath = ^"Core/Controller"
+const PATH_ARMS: NodePath = ^"Arms"
 
 const OCCLUSION_CHECK_TICKS: int = 24
 const OCCLUSION_DB_PENALTY: float = -8.0
 const OCCLUSION_CUTOFF_HZ: float = 800.0
+
+const CAPSULE_HEIGHT: float = 1.8
+const CAPSULE_RADIUS: float = 0.3
+const CAPSULE_CHEST_Y: float = 1.3
+const CAPSULE_WEAPON_MOUNT_NAME: StringName = &"WeaponMount"
+
+# RigManager.UpdateRig normally drives arm sleeve/glove materials from the
+# local player's torso/hand equipment slots. On a peer we don't have that
+# state, so apply the same defaults RigManager falls back to.
+const FPS_DEFAULT_SLEEVES_PATH: String = "res://Items/Clothing/Jacket_M62/Files/MT_Jacket_M62_Sleeves.tres"
+const FPS_DEFAULT_GLOVES_PATH: String = "res://Items/Clothing/Gloves_Leather/Files/MT_Gloves_Leather.tres"
+
+# Holster tween: drop arms below chest before freeing rig, raise from below
+# when drawing fresh. Vanilla local game has no draw/holster animation
+# (PlayEquip is audio-only); peer adds visual feedback so the rig doesn't
+# pop in/out of existence on weapon swap.
+const HOLSTER_DROP_Y: float = -0.6
+const HOLSTER_TWEEN_SECS: float = 0.2
 
 
 var targetPosition: Vector3 = Vector3.ZERO
@@ -43,12 +61,25 @@ var isOccluded: bool = false
 var occludedBusName: StringName = &""
 var occludedBusIdx: int = -1
 
-# Concrete rig fields populated by subclass _spawn_rig.
-var modelRoot: Node3D = null
 var meshNode: MeshInstance3D = null
+var weaponMount: Marker3D = null
 var activeWeapon: Node3D = null
 var activeMuzzle: Node3D = null
-var currentBody: String = ""
+# AnimationTree harvested from the attached FPS weapon rig (per-weapon).
+# Local WeaponRig drives state machine transitions via brief condition
+# pulses (Reload=true on keypress, false on the same tick), which are too
+# fast to network sync reliably; instead we broadcast the playback's
+# current state name and travel() to it on the peer.
+var weaponAnimTree: AnimationTree = null
+# Last playback state name applied via RPC; replayed on weapon swap so a
+# peer arriving mid-reload still ends up at the right pose.
+var _lastAnimState: String = ""
+# Active holster/draw tween — kill on weapon swap so cancelled tween
+# doesn't leave a freshly-drawn rig stuck at HOLSTER_DROP_Y.
+var _weaponMountTween: Tween = null
+# Mount Y offset on initial spawn — captured from _spawn_capsule_rig so
+# the holster tween knows what "raised" position to interpolate back to.
+var _weaponMountRestY: float = 0.0
 # StringName so _apply_attachments pointer-compares vs Attachments child names.
 var _activeAttachments: Array[StringName] = []
 
@@ -67,69 +98,42 @@ func _ready() -> void:
     add_child(audioPlayer)
 
     _ensure_occluded_bus()
+    _spawn_capsule_rig()
     _create_collision_body()
     add_to_group(&"CoopRemote")
 
     var defaults: Dictionary = CoopManager.appearance.get_defaults()
-    # Capsule subclass rejects non-Capsule bodies (and vice versa) so the
-    # default-load only fires when the cached scene matches the family.
-    if accepts_body(defaults.body):
-        set_appearance(defaults.body, defaults.material)
+    set_appearance(defaults.body, defaults.material)
 
 
-# Virtual: subclass declares which body family it can render.
-func accepts_body(_body: String) -> bool:
-    return false
+func _spawn_capsule_rig() -> void:
+    var meshInst: MeshInstance3D = MeshInstance3D.new()
+    var capsule: CapsuleMesh = CapsuleMesh.new()
+    capsule.radius = CAPSULE_RADIUS
+    capsule.height = CAPSULE_HEIGHT
+    meshInst.mesh = capsule
+    meshInst.position.y = CAPSULE_HEIGHT * 0.5
+    add_child(meshInst)
+    meshNode = meshInst
 
-
-# Virtual: subclass instantiates concrete rig + populates modelRoot/meshNode/currentBody.
-func _spawn_rig(_body: String) -> bool:
-    return false
-
-
-# Virtual: subclass frees instantiated rig + resets references.
-func _free_rig() -> void:
-    pass
-
-
-# Virtual: subclass per-frame skeletal updates (spine pitch, anim blend, flashlight).
-func _apply_visuals(_delta: float) -> void:
-    pass
-
-
-# Virtual: subclass ragdoll / death pose handling.
-func _start_ragdoll() -> void:
-    pass
-
-
-# Virtual: subclass attaches weapon model (baked AI rig vs FPS rig).
-func set_active_weapon(_weaponName: String) -> void:
-    pass
-
-
-# Virtual: optional muzzle flash hook fired by play_fire_event.
-func _pulse_muzzle_flash() -> void:
-    pass
-
-
-func is_capsule_body() -> bool:
-    return currentBody == "Capsule"
+    # Marker3D ≈ BoneAttachment3D for a skeletonless rig — set_active_weapon
+    # parents the FPS weapon rig here. The FPS rig is authored for a Camera3D
+    # parent looking down -Z (Godot's default forward) with arms+gun in the
+    # camera's view; mounted directly under the capsule the rig presents
+    # back-to-front. Rotate 180° around Y so the rig's "in front of camera"
+    # axis aligns with the capsule's forward direction (-Z).
+    var mount: Marker3D = Marker3D.new()
+    mount.name = CAPSULE_WEAPON_MOUNT_NAME
+    mount.position = Vector3(0.25, CAPSULE_CHEST_Y, -0.35)
+    mount.rotation.y = PI
+    add_child(mount)
+    weaponMount = mount
+    _weaponMountRestY = mount.position.y
 
 
 func set_appearance(body: String, materialPath: String) -> void:
     if !CoopManager.appearance.is_valid({"body": body, "material": materialPath}):
         return
-    if !accepts_body(body):
-        return
-
-    # Body change → free old rig + load new. Material change only → keep rig,
-    # just re-apply the material below. set_appearance fires twice on spawn
-    # (default body, then cached/RPC body) so the second call may swap the rig.
-    if body != currentBody:
-        _free_rig()
-        if !_spawn_rig(body):
-            return
-
     if !is_instance_valid(meshNode):
         return
     var mat: Material = _load_material(materialPath)
@@ -152,6 +156,236 @@ func _load_material(path: String) -> Material:
     if mat != null:
         _materialCache[path] = mat
     return mat
+
+
+func set_active_weapon(weaponName: String) -> void:
+    if !is_instance_valid(weaponMount):
+        return
+
+    if _weaponMountTween != null && _weaponMountTween.is_valid():
+        _weaponMountTween.kill()
+    _weaponMountTween = null
+
+    var hasOldRig: bool = is_instance_valid(activeWeapon)
+    var wantsRig: bool = !weaponName.is_empty() && _is_valid_weapon_name(weaponName)
+
+    if hasOldRig && !wantsRig:
+        # Holster: tween rig down then free.
+        _holster_tween_down()
+        return
+
+    # Drawing or swapping — clear current rig immediately.
+    if hasOldRig:
+        activeWeapon.queue_free()
+    activeWeapon = null
+    activeMuzzle = null
+    weaponAnimTree = null
+
+    if !wantsRig:
+        weaponMount.position.y = _weaponMountRestY
+        return
+
+    var startFromHolster: bool = !hasOldRig
+    if startFromHolster:
+        weaponMount.position.y = _weaponMountRestY + HOLSTER_DROP_Y
+    else:
+        weaponMount.position.y = _weaponMountRestY
+    _attach_fps_rig(weaponMount, weaponName)
+    _apply_attachments()
+    if startFromHolster:
+        _holster_tween_up()
+
+
+func _holster_tween_down() -> void:
+    var rig: Node3D = activeWeapon
+    activeMuzzle = null
+    weaponAnimTree = null
+    activeWeapon = null
+    var startY: float = weaponMount.position.y
+    var tween: Tween = create_tween()
+    tween.tween_property(weaponMount, ^"position:y", _weaponMountRestY + HOLSTER_DROP_Y, HOLSTER_TWEEN_SECS).from(startY)
+    tween.tween_callback(_on_holster_complete.bind(rig))
+    _weaponMountTween = tween
+
+
+func _on_holster_complete(rig: Node) -> void:
+    if is_instance_valid(rig):
+        rig.queue_free()
+    if is_instance_valid(weaponMount):
+        weaponMount.position.y = _weaponMountRestY
+
+
+func _holster_tween_up() -> void:
+    var tween: Tween = create_tween()
+    tween.tween_property(weaponMount, ^"position:y", _weaponMountRestY, HOLSTER_TWEEN_SECS)
+    _weaponMountTween = tween
+
+
+## Loads the FPS weapon rig (full animations), strips its script + UI/camera
+## coupling, forces VisualInstance3D layers from FPS-only (layer 2) to default
+## world (layer 1) so peers' world cameras render it, applies default sleeve/
+## glove materials to the arm mesh.
+func _attach_fps_rig(mount: Node, weaponName: String) -> void:
+    var path: String = "res://Items/Weapons/%s/%s_Rig.tscn" % [weaponName, weaponName]
+    if !ResourceLoader.exists(path):
+        return
+    var packed: PackedScene = load(path) as PackedScene
+    if packed == null:
+        return
+    var rig: Node = packed.instantiate()
+    if rig == null:
+        return
+    rig.name = &"_coop_dyn"
+    # WeaponRig.gd is the rig root script, but Handling/Sway/Noise/Tilt/Impulse/
+    # Recoil children all have their own scripts that read the LOCAL viewer's
+    # gameData (mouse delta, aim state, scope flags) and rewrite their own
+    # transforms every frame. On a peer those drives are wrong: the rig
+    # ends up drifting around the world following the viewer's mouse instead
+    # of staying parented to the capsule mount. Strip every script in the
+    # subtree before adding to the mount.
+    _strip_scripts_recursive(rig)
+    _strip_rig_recursive(rig)
+    _strip_fps_rig_recursive(rig)
+    _force_world_layer_recursive(rig)
+    if rig is Node3D:
+        (rig as Node3D).transform = Transform3D.IDENTITY
+    mount.add_child(rig)
+    activeWeapon = rig as Node3D
+    activeMuzzle = rig.get_node_or_null(PATH_MUZZLE) as Node3D
+    _apply_default_arm_materials(rig)
+    var rigTree: AnimationTree = _find_tree_in_subtree(rig)
+    if rigTree != null:
+        # WeaponRig._ready (which we strip) normally activates the tree. Force
+        # it on here so the state machine evaluates and travel() works.
+        rigTree.active = true
+        weaponAnimTree = rigTree
+        # Diag: confirms the tree actually advances clips after travel(). If
+        # this signal never fires after a successful travel(), the tree is
+        # silently failing (likely AnimationPlayer.root_node mis-binding or
+        # missing AnimationLibrary).
+        if !rigTree.animation_started.is_connected(_on_peer_anim_started):
+            rigTree.animation_started.connect(_on_peer_anim_started)
+        if !_lastAnimState.is_empty():
+            _apply_anim_state(_lastAnimState)
+
+
+func _on_peer_anim_started(clipName: StringName) -> void:
+    if !is_instance_valid(CoopManager):
+        return
+    CoopManager._log("[remote_player] peer=%s anim_started clip=%s" % [str(displayName), str(clipName)])
+
+
+## FPS rigs ship with per-link scripts (Handling/Sway/Noise/Tilt/Impulse/
+## Recoil + WeaponRig at the root) that read gameData every frame and adjust
+## their own transforms. On a peer those reads pull the local viewer's input
+## state, dragging the rig away from the capsule mount. Recursively null
+## every script in the subtree so the rig becomes a static node tree —
+## animation drives only what the AnimationPlayer authored.
+func _strip_scripts_recursive(node: Node) -> void:
+    node.set_script(null)
+    for child: Node in node.get_children():
+        _strip_scripts_recursive(child)
+
+
+## FPS rigs bundle their source RigidBody3D + "Item" group, which makes
+## Interactor pick them up through the local player's body.
+func _strip_rig_recursive(node: Node) -> void:
+    for g: StringName in node.get_groups():
+        node.remove_from_group(g)
+    if node is RigidBody3D:
+        var rb: RigidBody3D = node
+        rb.freeze = true
+        rb.collision_layer = 0
+        rb.collision_mask = 0
+    elif node is CollisionObject3D:
+        var co: CollisionObject3D = node
+        co.collision_layer = 0
+        co.collision_mask = 0
+    for child: Node in node.get_children():
+        _strip_rig_recursive(child)
+
+
+## FPS rigs bundle Camera3D + spotlights + scope viewports that crash or
+## misrender for a peer (no XR origin, no PIP shader binds). Strip them.
+func _strip_fps_rig_recursive(node: Node) -> void:
+    var trash: Array[Node] = []
+    for child: Node in node.get_children():
+        if child is Camera3D || child is Light3D || child is SubViewport:
+            trash.append(child)
+        else:
+            _strip_fps_rig_recursive(child)
+    for n: Node in trash:
+        n.get_parent().remove_child(n)
+        n.queue_free()
+
+
+## FPS weapon rig meshes are authored on visibility layer 2 (FPS camera only).
+## Peers' world cameras cull layer 2, so meshes invisible without this reset.
+func _force_world_layer_recursive(node: Node) -> void:
+    if node is VisualInstance3D:
+        (node as VisualInstance3D).layers = 1
+    for child: Node in node.get_children():
+        _force_world_layer_recursive(child)
+
+
+func _apply_default_arm_materials(rig: Node) -> void:
+    var arms: MeshInstance3D = rig.get_node_or_null(PATH_ARMS) as MeshInstance3D
+    if arms == null:
+        for child: Node in rig.get_children():
+            arms = _find_arms_recursive(child)
+            if arms != null:
+                break
+    if arms == null:
+        return
+    var sleeves: Material = load(FPS_DEFAULT_SLEEVES_PATH) as Material
+    var gloves: Material = load(FPS_DEFAULT_GLOVES_PATH) as Material
+    if sleeves != null:
+        arms.set_surface_override_material(0, sleeves)
+    if gloves != null:
+        arms.set_surface_override_material(1, gloves)
+
+
+func _find_arms_recursive(node: Node) -> MeshInstance3D:
+    if node is MeshInstance3D && node.name == &"Arms":
+        return node as MeshInstance3D
+    for child: Node in node.get_children():
+        var found: MeshInstance3D = _find_arms_recursive(child)
+        if found != null:
+            return found
+    return null
+
+
+func _find_tree_in_subtree(root: Node) -> AnimationTree:
+    if root is AnimationTree:
+        return root as AnimationTree
+    for child: Node in root.get_children():
+        var found: AnimationTree = _find_tree_in_subtree(child)
+        if found != null:
+            return found
+    return null
+
+
+## Mirrors the local player's AnimationTree playback state onto this peer's
+## attached weapon rig. [param stateName] is the name of the currently-active
+## state-machine node (e.g. [code]"Reload"[/code], [code]"Inspect_Front"[/code],
+## [code]"Idle"[/code]) — calling [code]playback.travel(stateName)[/code]
+## transitions to it through the rig's authored transition graph.
+func set_active_anim_state(stateName: String) -> void:
+    _lastAnimState = stateName
+    _apply_anim_state(stateName)
+
+
+func _apply_anim_state(stateName: String) -> void:
+    if !is_instance_valid(weaponAnimTree):
+        return
+    if stateName.is_empty():
+        return
+    var playback: Variant = weaponAnimTree.get(&"parameters/playback")
+    if playback == null:
+        return
+    if String(playback.get_current_node()) == stateName:
+        return
+    playback.travel(stateName)
 
 
 ## Equipment-sync entry for attachments. Mirrors [method Pickup._ready]'s
@@ -269,19 +503,17 @@ func die() -> void:
     set_meta(&"health", 0)
     nameLabel.text = "%s [DEAD]" % displayName
     _lastRenderedHealth = 0
-    _start_ragdoll()
     var hitBody: Node = get_node_or_null(PATH_HITBODY)
     if hitBody != null:
         hitBody.collision_layer = 0
         hitBody.remove_from_group(&"CoopRemote")
 
 
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
     if !is_instance_valid(CoopManager) || isDead:
         return
     global_position = targetPosition
     rotation.y = targetRotationY
-    _apply_visuals(delta)
 
     if Engine.get_physics_frames() % OCCLUSION_CHECK_TICKS == 0:
         _update_occlusion()
@@ -394,7 +626,7 @@ func spawn_knife_impact(hitPoint: Vector3, hitNormal: Vector3, hitSurface: Strin
         decal.PlayKnifeHit(hitSurface)
 
 
-func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> void:
+func play_fire_event(fireAudio: String, tailAudio: String, _showFlash: bool) -> void:
     play_remote_audio(fireAudio)
 
     # Tail audio on its own player so it doesn't cut the fire sound.
@@ -411,6 +643,3 @@ func play_fire_event(fireAudio: String, tailAudio: String, showFlash: bool) -> v
                 tailPlayer.bus = occludedBusName
             tailPlayer.play()
             tailPlayer.finished.connect(tailPlayer.queue_free)
-
-    if showFlash:
-        _pulse_muzzle_flash()

@@ -16,6 +16,9 @@ var remoteNodes: Array[Node3D] = []
 var cachedAppearances: Array[Dictionary] = []
 var cachedEquipment: PackedStringArray = []
 var cachedAttachments: Array[Array] = []
+# Last animator playback state name received per peer for late-spawn replay.
+# Indexed by the same peer slot scheme as cachedEquipment / cachedAttachments.
+var cachedAnims: PackedStringArray = []
 var peerIdxByGodotId: Dictionary[int, int] = {}
 var avatarCache: Dictionary[String, ImageTexture] = { }
 var headlessMaps: Dictionary[String, Node] = {}
@@ -62,13 +65,10 @@ var _pendingHostUseSteam: bool = true
 # script fails to compile, returning null, and `.new()` produces null subsystems.
 # Editor runs work because project.godot has the autoload entry; production
 # .vmz runs do not. Lazy-load via _init_lazy_subsystems below.
-var remotePuppetScene: PackedScene = null
-var remoteCapsuleScene: PackedScene = null
+var remoteScene: PackedScene = null
 var PlayerStateScript: Script = null
 var slotSerializer: RefCounted = preload("res://mod/network/slot_serializer.gd").new()
 var HeadlessMapScript: Script = null
-# Cached before take_over_path to avoid circular extends after path redirect.
-var AIPatchScript: Script = null
 var appearance: RefCounted = preload("res://mod/network/appearance.gd").new()
 var perf: RefCounted = preload("res://mod/network/perf.gd").new()
 var logCollector: RefCounted = preload("res://mod/autoload/log_collector.gd").new()
@@ -81,6 +81,27 @@ var catStateHook: RefCounted = null
 var deathStateHook: RefCounted = null
 var instrumentHook: RefCounted = null
 var mineSpawnerHook: RefCounted = null
+var knifeRigHooks: RefCounted = null
+var helicopterHooks: RefCounted = null
+var characterHooks: RefCounted = null
+var btrHooks: RefCounted = null
+var policeHooks: RefCounted = null
+var casaHooks: RefCounted = null
+var grenadeRigHooks: RefCounted = null
+var rocketGradHooks: RefCounted = null
+var rocketHelicopterHooks: RefCounted = null
+var missileSpawnerHooks: RefCounted = null
+var traderHooks: RefCounted = null
+var fishPoolHooks: RefCounted = null
+var interactorHooks: RefCounted = null
+var lootSimulationHooks: RefCounted = null
+var furnitureHooks: RefCounted = null
+var aiSpawnerHooks: RefCounted = null
+var eventSystemHooks: RefCounted = null
+var controllerHooks: RefCounted = null
+var interfaceHooks: RefCounted = null
+var aiHooks: RefCounted = null
+var loaderHooks: RefCounted = null
 var MenuCustomizerScript: Script = null
 var menuCustomizer: Node = null
 # Host-set display name for non-Steam (Direct IP) sessions. Persisted at user://coop/name.txt.
@@ -159,11 +180,9 @@ func _normalize_autoload_path() -> void:
 # preload() of these scripts returns null; runtime load() succeeds because
 # the autoload Node exists at /root by then.
 func _init_lazy_subsystems() -> void:
-    remotePuppetScene = load("res://mod/presentation/remote_player_puppet.tscn")
-    remoteCapsuleScene = load("res://mod/presentation/remote_player_capsule.tscn")
+    remoteScene = load("res://mod/presentation/remote_player.tscn")
     PlayerStateScript = load("res://mod/network/player_state.gd")
     HeadlessMapScript = load("res://mod/network/headless_map.gd")
-    AIPatchScript = load("res://mod/patches/ai_patch.gd")
     saveMirror = load("res://mod/autoload/save_mirror.gd").new()
     layoutsHook = load("res://mod/network/layouts_hook.gd").new()
     simulationHook = load("res://mod/network/simulation_hook.gd").new()
@@ -261,16 +280,29 @@ func _physics_process(_delta: float) -> void:
         ensure_all_spawned()
 
 
+var _mpStatusLastReady: int = -1
+
+
 func _update_mp_status() -> void:
     var scene: Node = get_tree().current_scene
     if !is_instance_valid(scene):
         return
     var submenu: Node = scene.get_node_or_null(PATH_MENU_SUBMENU)
     if submenu == null:
+        if _mpStatusLastReady != -2:
+            _log("[mp_status] submenu MISSING scene=%s" % scene.name)
+            _mpStatusLastReady = -2
         return
     var hostBtn: Button = submenu.find_child("HostBtn", true, false) as Button
     var browseBtn: Button = submenu.find_child("BrowseBtn", true, false) as Button
-    var bridge_ready: bool = is_instance_valid(steamBridge) && steamBridge.is_ready() && steamBridge.ownsGame
+    var bridge_valid: bool = is_instance_valid(steamBridge)
+    var bridge_is_ready: bool = bridge_valid && steamBridge.is_ready()
+    var owns: bool = bridge_valid && steamBridge.ownsGame
+    var bridge_ready: bool = bridge_is_ready && owns
+    var readyInt: int = 1 if bridge_ready else 0
+    if readyInt != _mpStatusLastReady:
+        _log("[mp_status] bridge_valid=%s is_ready=%s owns=%s -> bridge_ready=%s hostBtn=%s browseBtn=%s" % [str(bridge_valid), str(bridge_is_ready), str(owns), str(bridge_ready), str(hostBtn != null), str(browseBtn != null)])
+        _mpStatusLastReady = readyInt
     if hostBtn != null:
         hostBtn.disabled = !bridge_ready
     if browseBtn != null:
@@ -279,16 +311,131 @@ func _update_mp_status() -> void:
 
 func register_patches() -> void:
     var registry: RefCounted = preload("res://mod/autoload/patch_registry.gd").new()
-    var count: int = registry.register_all()
-    _log("Patches registered (%d)" % count)
+    # Early-autoload (`!` prefix in mod.txt) runs BEFORE vostok-mod-loader sets
+    # Engine.meta("RTVModLib") in Pass 2's _emit_frameworks_ready. Always
+    # populate the hook-skip list so take_over_path doesn't shadow vanilla on
+    # scripts vostok rewrites; _register_hooks polls for the lib then registers.
+    var hookSkip: PackedStringArray = []
+    for p: String in [
+        "res://Scripts/KnifeRig.gd",
+        "res://Scripts/Helicopter.gd",
+        "res://Scripts/Character.gd",
+        "res://Scripts/BTR.gd",
+        "res://Scripts/Police.gd",
+        "res://Scripts/CASA.gd",
+        "res://Scripts/GrenadeRig.gd",
+        "res://Scripts/RocketGrad.gd",
+        "res://Scripts/RocketHelicopter.gd",
+        "res://Scripts/MissileSpawner.gd",
+        "res://Scripts/Trader.gd",
+        "res://Scripts/FishPool.gd",
+        "res://Scripts/Interactor.gd",
+        "res://Scripts/LootSimulation.gd",
+        "res://Scripts/Furniture.gd",
+        "res://Scripts/DecorMode.gd",
+        "res://Scripts/AISpawner.gd",
+        "res://Scripts/EventSystem.gd",
+        "res://Scripts/Controller.gd",
+        "res://Scripts/Interface.gd",
+        "res://Scripts/AI.gd",
+        "res://Scripts/Loader.gd",
+    ]:
+        hookSkip.append(p)
+    var count: int = registry.register_all(hookSkip)
+    _log("Patches registered (%d, hook-skipped %d)" % [count, hookSkip.size()])
+    _register_hooks.call_deferred()
 
 
-# AISpawner preloads AI body scenes at parse time, caching them with the original
-# AI.gd script. Puppet rigs need the patched script to pick up puppetMode.
-func ensure_ai_patch_script(ai: Node) -> void:
-    var s: Script = ai.get_script()
-    if s == null || s.resource_path == "res://Scripts/AI.gd":
-        ai.set_script(AIPatchScript)
+func _register_hooks() -> void:
+    # Poll for RTVModLib meta — set during vostok Pass 2's _emit_frameworks_ready.
+    # Early autoloads run BEFORE meta exists; bail after ~5s if loader missing.
+    var waited: int = 0
+    while not Engine.has_meta(&"RTVModLib") and waited < 300:
+        await get_tree().process_frame
+        waited += 1
+    var lib: Object = Engine.get_meta(&"RTVModLib") if Engine.has_meta(&"RTVModLib") else null
+    if lib == null:
+        _log("[hooks] RTVModLib meta never appeared — vostok-mod-loader missing?")
+        return
+    if not lib._is_ready:
+        await lib.frameworks_ready
+    knifeRigHooks = load("res://mod/hooks/knife_rig_hooks.gd").new()
+    knifeRigHooks.register(lib)
+    helicopterHooks = load("res://mod/hooks/helicopter_hooks.gd").new()
+    helicopterHooks.register(lib)
+    characterHooks = load("res://mod/hooks/character_hooks.gd").new()
+    characterHooks.register(lib)
+    btrHooks = load("res://mod/hooks/btr_hooks.gd").new()
+    btrHooks.register(lib)
+    policeHooks = load("res://mod/hooks/police_hooks.gd").new()
+    policeHooks.register(lib)
+    casaHooks = load("res://mod/hooks/casa_hooks.gd").new()
+    casaHooks.register(lib)
+    grenadeRigHooks = load("res://mod/hooks/grenade_rig_hooks.gd").new()
+    grenadeRigHooks.register(lib)
+    rocketGradHooks = load("res://mod/hooks/rocket_grad_hooks.gd").new()
+    rocketGradHooks.register(lib)
+    rocketHelicopterHooks = load("res://mod/hooks/rocket_helicopter_hooks.gd").new()
+    rocketHelicopterHooks.register(lib)
+    missileSpawnerHooks = load("res://mod/hooks/missile_spawner_hooks.gd").new()
+    missileSpawnerHooks.register(lib)
+    traderHooks = load("res://mod/hooks/trader_hooks.gd").new()
+    traderHooks.register(lib)
+    fishPoolHooks = load("res://mod/hooks/fish_pool_hooks.gd").new()
+    fishPoolHooks.register(lib)
+    interactorHooks = load("res://mod/hooks/interactor_hooks.gd").new()
+    interactorHooks.register(lib)
+    lootSimulationHooks = load("res://mod/hooks/loot_simulation_hooks.gd").new()
+    lootSimulationHooks.register(lib)
+    furnitureHooks = load("res://mod/hooks/furniture_hooks.gd").new()
+    furnitureHooks.register(lib)
+    aiSpawnerHooks = load("res://mod/hooks/ai_spawner_hooks.gd").new()
+    aiSpawnerHooks.register(lib)
+    eventSystemHooks = load("res://mod/hooks/event_system_hooks.gd").new()
+    eventSystemHooks.register(lib)
+    controllerHooks = load("res://mod/hooks/controller_hooks.gd").new()
+    controllerHooks.register(lib)
+    interfaceHooks = load("res://mod/hooks/interface_hooks.gd").new()
+    interfaceHooks.register(lib)
+    aiHooks = load("res://mod/hooks/ai_hooks.gd").new()
+    aiHooks.register(lib)
+    loaderHooks = load("res://mod/hooks/loader_hooks.gd").new()
+    loaderHooks.register(lib)
+    # Menu-_ready-pre: customize main menu (Singleplayer/Multiplayer rewire)
+    # at the moment Main/Buttons enters the tree, ahead of vanilla _ready body.
+    # Avoids the call_deferred-from-_ready miss now that CoopManager is early
+    # autoload (fires before Menu scene exists) + the on_scene_changed delay.
+    lib.hook("menu-_ready-pre", _on_menu_ready_pre)
+    # Vanilla Menu._ready body checks ValidateShelter() and disables loadButton
+    # when no shelter — re-greys our renamed "Multiplayer" button. Re-enable
+    # AFTER vanilla body via -post hook (Multiplayer doesn't depend on shelter).
+    lib.hook("menu-_ready-post", _on_menu_ready_post)
+    _log("[hooks] 21 hook modules + menu-_ready-pre/post registered via RTVModLib")
+
+
+func _on_menu_ready_pre() -> void:
+    if menuCustomizer == null:
+        return
+    var lib: Object = Engine.get_meta(&"RTVModLib") if Engine.has_meta(&"RTVModLib") else null
+    if lib == null:
+        return
+    var menu: Node = lib._caller
+    if menu == null:
+        return
+    menuCustomizer.maybe_customize(menu)
+
+
+func _on_menu_ready_post() -> void:
+    var lib: Object = Engine.get_meta(&"RTVModLib") if Engine.has_meta(&"RTVModLib") else null
+    if lib == null:
+        return
+    var menu: Node = lib._caller
+    if menu == null:
+        return
+    var loadBtn: Button = menu.get(&"loadButton") as Button
+    if loadBtn != null:
+        loadBtn.disabled = false
+        _log("[menu] post: loadButton.disabled forced false (Multiplayer always available)")
 
 
 ## Starts ENet server + optional Steam lobby; world/save setup deferred until finalize_host.
@@ -383,6 +530,7 @@ func disconnect_session() -> void:
     cachedAppearances.resize(0)
     cachedEquipment.resize(0)
     cachedAttachments.resize(0)
+    cachedAnims.resize(0)
     peerIdxByGodotId.clear()
     for mapPath: String in headlessMaps:
         var hmap: Node = headlessMaps[mapPath]
@@ -422,6 +570,7 @@ func alloc_peer_slot(godotId: int) -> int:
             cachedAppearances[i] = {}
             cachedEquipment[i] = ""
             cachedAttachments[i] = []
+            cachedAnims[i] = ""
             peerIdxByGodotId[godotId] = i
             return i
     var idx: int = peerGodotIds.size()
@@ -433,6 +582,7 @@ func alloc_peer_slot(godotId: int) -> int:
     cachedAppearances.append({})
     cachedEquipment.append("")
     cachedAttachments.append([])
+    cachedAnims.append("")
     peerIdxByGodotId[godotId] = idx
     return idx
 
@@ -451,6 +601,7 @@ func free_peer_slot(idx: int) -> void:
     cachedAppearances[idx] = {}
     cachedEquipment[idx] = ""
     cachedAttachments[idx] = []
+    cachedAnims[idx] = ""
     peerIdxByGodotId.erase(godotId)
 
 
@@ -468,6 +619,10 @@ func cache_peer_appearance(godotId: int, entry: Dictionary) -> void:
 
 func cache_peer_attachments(godotId: int, names: Array) -> void:
     cachedAttachments[alloc_peer_slot(godotId)] = names
+
+
+func cache_peer_anim(godotId: int, stateName: String) -> void:
+    cachedAnims[alloc_peer_slot(godotId)] = stateName
 
 
 func active_peer_idxs() -> PackedInt32Array:
@@ -713,14 +868,13 @@ func spawn_remote_player(peerId: int) -> void:
 
     var idx: int = alloc_peer_slot(peerId)
     var cachedAppearance: Dictionary = cachedAppearances[idx]
-    var scene: PackedScene = remoteCapsuleScene if cachedAppearance.get("body", "") == "Capsule" else remotePuppetScene
-    var remote: Node3D = scene.instantiate()
+    var remote: Node3D = remoteScene.instantiate()
     remote.name = "RemotePlayer_%d" % peerId
     remote.set_meta(&"peer_id", peerId)
-    # Remote puppet must keep ticking while vanilla Settings pauses the tree,
-    # otherwise position snapshots queue up and remote teleports on resume.
+    # Must keep ticking while vanilla Settings pauses the tree, otherwise
+    # position snapshots queue up and remote teleports on resume.
     remote.process_mode = Node.PROCESS_MODE_ALWAYS
-    remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId))
+    remote.tree_exiting.connect(on_remote_node_exiting.bind(peerId, remote))
     mapNode.add_child(remote)
     var peerDisplayName: String = get_peer_name(peerId)
     remote.displayName = peerDisplayName
@@ -742,8 +896,13 @@ func spawn_remote_player(peerId: int) -> void:
     if !cachedEq.is_empty():
         remote.set_active_weapon(cachedEq)
         cachedEquipment[idx] = ""
+    var cachedAnim: String = cachedAnims[idx]
+    if !cachedAnim.is_empty():
+        remote.set_active_anim_state(cachedAnim)
+        cachedAnims[idx] = ""
     playerState.send_equipment_to(peerId, playerState.get_current_weapon_name())
     playerState.send_attachments_to(peerId, playerState.get_current_attachments())
+    playerState.send_anim_to(peerId, playerState.get_current_anim())
 
 
 func _apply_cached_appearance(cached: Dictionary, remote: Node3D) -> void:
@@ -753,9 +912,9 @@ func _apply_cached_appearance(cached: Dictionary, remote: Node3D) -> void:
 
 
 ## Routes a sanitized appearance update for [param peerId] to the right remote
-## node. If the body family changes (puppet ↔ capsule) the existing node
-## doesn't match — re-cache appearance + loadout and despawn so the next
-## [method spawn_remote_player] picks the matching scene.
+## node. Caches when the slot exists but no remote is spawned yet; otherwise
+## hands off to [method RemotePlayer.set_appearance] which only re-applies the
+## material (single body family in use).
 func apply_remote_appearance(peerId: int, sanitized: Dictionary) -> void:
     var idx: int = peer_idx(peerId)
     if idx < 0:
@@ -765,30 +924,12 @@ func apply_remote_appearance(peerId: int, sanitized: Dictionary) -> void:
     if !is_instance_valid(remote):
         cache_peer_appearance(peerId, sanitized)
         return
-    var newIsCapsule: bool = sanitized.get("body", "") == "Capsule"
-    var curIsCapsule: bool = remote.has_method(&"is_capsule_body") && remote.is_capsule_body()
-    if newIsCapsule != curIsCapsule:
-        cache_peer_appearance(peerId, sanitized)
-        var attVar: Variant = remote.get(&"_activeAttachments")
-        if attVar is Array:
-            cachedAttachments[idx] = (attVar as Array).duplicate()
-        var weaponVar: Variant = remote.get(&"activeWeapon")
-        if weaponVar is Node3D && is_instance_valid(weaponVar):
-            var wname: String = String((weaponVar as Node3D).name)
-            if wname == "_coop_dyn":
-                cachedEquipment[idx] = ""
-            else:
-                cachedEquipment[idx] = wname
-        remote.queue_free()
-        remoteNodes[idx] = null
-        spawn_remote_player(peerId)
-        return
     remote.set_appearance(sanitized.body, sanitized.material)
 
 
-func on_remote_node_exiting(peerId: int) -> void:
+func on_remote_node_exiting(peerId: int, node: Node) -> void:
     var idx: int = peer_idx(peerId)
-    if idx >= 0:
+    if idx >= 0 && remoteNodes[idx] == node:
         remoteNodes[idx] = null
 
 
@@ -1069,25 +1210,11 @@ func _receive_world_id(hostWorldId: String, hostDifficulty: int, hostSeason: int
             _recheck_host_state()
 
 
-## Gates scene load behind the character-creation picker so client confirms before entry.
+## Capsule-only: no picker, just save defaults + start load.
 func _client_start_load() -> void:
-    if !is_instance_valid(coopUI):
-        if !saveMirror.has_local_appearance():
-            saveMirror.save_local_appearance(appearance.get_defaults())
-        _auto_load_game()
-        return
-    coopUI.show_character_picker(_on_client_picker_confirm, _on_client_picker_cancel)
-
-
-func _on_client_picker_confirm(_entry: Dictionary = {}) -> void:
     if !saveMirror.has_local_appearance():
         saveMirror.save_local_appearance(appearance.get_defaults())
     _auto_load_game()
-
-
-func _on_client_picker_cancel() -> void:
-    _log("Client cancelled character picker — disconnecting")
-    disconnect_session()
 
 
 func send_character_to_host() -> void:
@@ -1442,5 +1569,16 @@ func find_remote_root(node: Node) -> Node3D:
     return null
 
 
+const _FLUSHED_LOG_PATH: String = "user://coop_flushed.log"
+var _flushedLogFile: FileAccess = null
+
+
 func _log(msg: String) -> void:
-    print("[CoopManager] %s" % msg)
+    var line: String = "[CoopManager] %s" % msg
+    print(line)
+    if _flushedLogFile == null:
+        _flushedLogFile = FileAccess.open(_FLUSHED_LOG_PATH, FileAccess.WRITE)
+        if _flushedLogFile == null:
+            return
+    _flushedLogFile.store_line("%.3f %s" % [Time.get_unix_time_from_system(), line])
+    _flushedLogFile.flush()

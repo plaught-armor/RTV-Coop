@@ -2,6 +2,10 @@
 extends RefCounted
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 const COOP_WORLDS_DIR: String = "user://coop/"
 const SOLO_SAVES_DIR: String = "user://solo/"
 var COOP_WORLD_SAVES: PackedStringArray = [

@@ -12,6 +12,7 @@ func collect() -> void:
     var sources: PackedStringArray = [
         "user://logs/godot.log",
         "user://logs/steam_helper.log",
+        "user://coop_flushed.log",
     ]
     # Pick last three timestamped rollover logs (godot<timestamp>.log).
     var logsDir: DirAccess = DirAccess.open("user://logs/")

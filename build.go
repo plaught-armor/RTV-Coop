@@ -23,7 +23,7 @@ import (
 	"strings"
 )
 
-var modDirs = []string{"autoload", "network", "patches", "presentation", "ui", "bin"}
+var modDirs = []string{"autoload", "hooks", "network", "patches", "presentation", "ui", "bin"}
 
 var helperBins = []string{"steam_helper_linux", "steam_helper.exe"}
 var sdkLibs = []string{"libsteam_api.so", "libsteam_api64.so", "steam_api64.dll"}

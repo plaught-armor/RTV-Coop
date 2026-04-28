@@ -52,22 +52,10 @@ jobs:
             rtv-coop-${{ steps.ver.outputs.version }}.vmz
           generate_release_notes: true
           body: |
-            ## Downloads
+            ## Download
 
-            | File | Use |
-            |------|-----|
-            | `rtv-coop-setup-${{ steps.ver.outputs.version }}.zip` | **First-time install.** Bundle ships RTV Mod Loader + co-op mod + `override.cfg`. Extract directly into the game install directory. |
-            | `rtv-coop-${{ steps.ver.outputs.version }}.vmz` | **Mod update only.** Replace existing `mods/rtv-coop.vmz`. Use this if you already have RTV Mod Loader installed. |
+            `rtv-coop-${{ steps.ver.outputs.version }}.vmz` — drop into your game's `mods/` folder.
 
-            See [INSTALLATION.md](https://github.com/plaught-armor/RTV-Coop/blob/main/INSTALLATION.md) for full instructions and Linux/Proton paths.
+            **Requires:** [vostok-mod-loader](https://github.com/ametrocavich/vostok-mod-loader) installed in the game directory. See [INSTALLATION.md](https://github.com/plaught-armor/RTV-Coop/blob/main/INSTALLATION.md) for full setup.
 
             ---
-
-  bundle:
-    needs: build
-    uses: ./.github/workflows/bundle-setup.yml
-    with:
-      mod_tag: ${{ needs.build.outputs.tag }}
-      ml_tag: ''
-    permissions:
-      contents: write

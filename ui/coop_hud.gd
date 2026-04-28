@@ -4,6 +4,10 @@ extends VBoxContainer
 
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 var pingTimer: float = 0.0
 var hudVisible: bool = true
 var inGameplay: bool = false

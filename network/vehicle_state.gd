@@ -1,6 +1,10 @@
 ## Host-auth 10Hz transform sync for Helicopter/BTR/Police/CASA and rockets in flight.
 extends Node
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 var TRACKED_SCRIPTS: PackedStringArray = [
     "res://Scripts/Helicopter.gd",
     "res://Scripts/BTR.gd",

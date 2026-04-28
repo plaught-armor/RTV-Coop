@@ -7,6 +7,10 @@ extends Node
 
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 ## TCP port the helper listens on. Fixed at 27099 for Proton (wrapper launches helper).
 ## Randomized per instance in editor for multi-instance testing.
 var HELPER_PORT: int = 27099
@@ -155,7 +159,7 @@ func on_initial_user(response: Dictionary) -> void:
     localSteamName = data.get(&"name", "")
     localSteamID = data.get(&"steam_id", "")
     ownsGame = true # Assume ownership — launched through Steam
-    _log("Steam user: %s (%s)" % [localSteamName, localSteamID])
+    _log("Steam user: %s (%s) ownsGame=true" % [localSteamName, localSteamID])
     # Cache our own avatar
     if !localSteamID.is_empty():
         CoopManager.fetch_avatar(localSteamID)
@@ -532,5 +536,7 @@ func get_steam_lib_user_path() -> String:
 
 
 func _log(msg: String) -> void:
-    if CoopManager == null || CoopManager.DEBUG:
+    if CoopManager != null:
+        CoopManager._log("[SteamBridge] %s" % msg)
+    else:
         print("[SteamBridge] %s" % msg)

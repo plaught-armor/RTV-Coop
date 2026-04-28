@@ -2,7 +2,18 @@
 ## Host is authoritative. Clients send interaction requests, host validates and broadcasts.
 extends Node
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 var gameData: GameData = preload("res://Resources/GameData.tres")
+
+
+func _log(msg: String) -> void:
+    if is_instance_valid(CoopManager):
+        CoopManager._log("[world_state] %s" % msg)
+    else:
+        print("[world_state] %s" % msg)
 
 const PATH_UI: NodePath = ^"Core/UI"
 const PATH_INTERFACE: NodePath = ^"Core/UI/Interface"
@@ -18,6 +29,8 @@ var _dbConstants: Dictionary = {}
 var _dbConstantsReady: bool = false
 ## Event history for late-joiner replay. Each entry: [eventName, params].
 var _firedEvents: Array = []
+## Last broadcast Mines layout (host only) — replayed to late-joining peers.
+var lastMineLayout: Array = []
 
 
 
@@ -59,6 +72,7 @@ var _dropRateBuckets: Dictionary[int, Array] = {}
 
 
 func start_item_tracking() -> void:
+    _log("start_item_tracking host=%s" % str(CoopManager.isHost))
     if trackingItems:
         return
     trackingItems = true
@@ -70,6 +84,7 @@ func start_item_tracking() -> void:
 
 
 func stop_item_tracking() -> void:
+    _log("stop_item_tracking synced=%d pending=%d" % [syncedItems.size(), pendingDrops.size()])
     trackingItems = false
     syncedItems.clear()
     consumedSyncIDs.clear()
@@ -80,9 +95,11 @@ func stop_item_tracking() -> void:
 
 func broadcast_item_drop(pickup: Node) -> void:
     if !trackingItems || !CoopManager.isActive:
+        _log("broadcast_item_drop SKIP tracking=%s active=%s" % [str(trackingItems), str(CoopManager.isActive)])
         return
     var slotData: SlotData = pickup.get(&"slotData")
     if slotData == null || slotData.itemData == null:
+        _log("broadcast_item_drop SKIP null slotData")
         return
     var packedSlot: Dictionary = CoopManager.slotSerializer.pack(slotData)
     var pos: Vector3 = pickup.global_position
@@ -93,13 +110,16 @@ func broadcast_item_drop(pickup: Node) -> void:
         pickup.set_meta(&"sync_id", syncId)
         syncedItems[syncId] = pickup
         droppedItemHistory.append({&"id": syncId, &"slot": packedSlot, &"pos": pos, &"rot": rot})
+        _log("broadcast_item_drop HOST item=%s id=%s pos=%s" % [slotData.itemData.file, syncId, str(pos)])
         sync_item_drop.rpc(syncId, packedSlot, pos, rot)
     else:
         pendingDrops.append(pickup)
+        _log("broadcast_item_drop CLIENT requesting item=%s pending=%d" % [slotData.itemData.file, pendingDrops.size()])
         request_item_drop.rpc_id(1, packedSlot, pos, rot)
 
 
 func on_synced_item_picked_up(syncId: String) -> void:
+    _log("on_synced_item_picked_up id=%s host=%s" % [syncId, str(CoopManager.isHost)])
     if !CoopManager.isHost:
         return
     syncedItems.erase(syncId)
@@ -109,14 +129,18 @@ func on_synced_item_picked_up(syncId: String) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> void:
+    _log("sync_item_drop RECV id=%s pos=%s" % [syncId, str(pos)])
     var slotData: SlotData = CoopManager.slotSerializer.unpack(packedSlot)
     if slotData == null:
+        _log("sync_item_drop ABORT null slotData id=%s" % syncId)
         return
     var scene: PackedScene = find_pickup_scene(slotData.itemData.file)
     if scene == null:
+        _log("sync_item_drop ABORT scene-not-found file=%s id=%s" % [slotData.itemData.file, syncId])
         return
     var pickup: Node3D = scene.instantiate()
     if !is_instance_valid(_currentScene):
+        _log("sync_item_drop ABORT no current scene id=%s" % syncId)
         pickup.queue_free()
         return
     _currentScene.add_child(pickup)
@@ -130,10 +154,12 @@ func sync_item_drop(syncId: String, packedSlot: Dictionary, pos: Vector3, rot: V
         pickup.Unfreeze()
     pickup.set_meta(&"sync_id", syncId)
     syncedItems[syncId] = pickup
+    _log("sync_item_drop DONE id=%s file=%s synced=%d" % [syncId, slotData.itemData.file, syncedItems.size()])
 
 
 @rpc("authority", "call_remote", "reliable")
 func sync_item_consumed(syncId: String) -> void:
+    _log("sync_item_consumed RECV id=%s tracked=%s" % [syncId, str(syncId in syncedItems)])
     if syncId in syncedItems:
         var node: Node = syncedItems[syncId]
         if is_instance_valid(node):
@@ -143,7 +169,10 @@ func sync_item_consumed(syncId: String) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_item_consumed(syncId: String) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_item_consumed RECV id=%s from peer=%d" % [syncId, sender])
     if !CoopManager.isHost:
+        _log("request_item_consumed REJECT not-host id=%s" % syncId)
         return
     if syncId in syncedItems:
         var node: Node = syncedItems[syncId]
@@ -153,25 +182,32 @@ func request_item_consumed(syncId: String) -> void:
         syncedItems.erase(syncId)
         consumedSyncIDs.append(syncId)
         sync_item_consumed.rpc(syncId)
+        _log("request_item_consumed DONE id=%s broadcast" % syncId)
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_item_drop(packedSlot: Dictionary, pos: Vector3, rot: Vector3) -> void:
-    if !CoopManager.isHost:
-        return
     var dropperId: int = multiplayer.get_remote_sender_id()
+    _log("request_item_drop RECV from peer=%d pos=%s" % [dropperId, str(pos)])
+    if !CoopManager.isHost:
+        _log("request_item_drop REJECT not-host peer=%d" % dropperId)
+        return
     if !_check_drop_rate(dropperId):
+        _log("request_item_drop REJECT rate-limit peer=%d" % dropperId)
         reject_item_drop.rpc_id(dropperId)
         return
     if syncedItems.size() >= SYNCED_ITEMS_HARD_CAP:
+        _log("request_item_drop REJECT hard-cap synced=%d" % syncedItems.size())
         reject_item_drop.rpc_id(dropperId)
         return
     var slotData: SlotData = CoopManager.slotSerializer.unpack(packedSlot)
     if slotData == null || slotData.itemData == null:
+        _log("request_item_drop REJECT unpack-fail peer=%d" % dropperId)
         reject_item_drop.rpc_id(dropperId)
         return
     var scene: PackedScene = find_pickup_scene(slotData.itemData.file)
     if scene == null:
+        _log("request_item_drop REJECT scene-not-found file=%s" % slotData.itemData.file)
         reject_item_drop.rpc_id(dropperId)
         return
     syncIdCounter += 1
@@ -249,36 +285,43 @@ func _physics_process(_delta: float) -> void:
 ## Used by both host's local Interactor patch and by request_door_interact (client path).
 func host_door_interact(door: Node) -> void:
     if !CoopManager.isHost || !is_instance_valid(door) || !(door is Door) || !is_instance_valid(_currentScene):
+        _log("host_door_interact ABORT host=%s valid=%s" % [str(CoopManager.isHost), str(is_instance_valid(door))])
         return
     var doorPath: String = _currentScene.get_path_to(door)
     var wasLocked: bool = door.locked
     door.Interact()
+    _log("host_door_interact path=%s isOpen=%s wasLocked=%s nowLocked=%s" % [doorPath, str(door.isOpen), str(wasLocked), str(door.locked)])
     sync_door_state.rpc(doorPath, door.isOpen)
     if wasLocked && !door.locked:
         sync_door_unlock.rpc(doorPath)
         if is_instance_valid(door.linked):
             var linkedPath: String = _currentScene.get_path_to(door.linked)
             sync_door_unlock.rpc(linkedPath)
-    if CoopManager.DEBUG:
-        print("[world_state] host_door_interact %s isOpen=%s" % [doorPath, door.isOpen])
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_door_interact(doorPath: String) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_door_interact RECV path=%s from peer=%d" % [doorPath, sender])
     if !CoopManager.isHost:
+        _log("request_door_interact REJECT not-host")
         return
     if !is_valid_path(doorPath):
+        _log("request_door_interact REJECT invalid-path=%s" % doorPath)
         return
     var door: Node = _scene_node(doorPath)
     if !(door is Door):
+        _log("request_door_interact REJECT not-a-door path=%s" % doorPath)
         return
     host_door_interact(door)
 
 
 @rpc("authority", "call_remote", "reliable")
 func sync_door_state(doorPath: String, isOpen: bool) -> void:
+    _log("sync_door_state RECV path=%s isOpen=%s" % [doorPath, str(isOpen)])
     var door: Node = _scene_node(doorPath)
     if door == null || !(door is Door):
+        _log("sync_door_state ABORT resolve-failed path=%s" % doorPath)
         return
     door.isOpen = isOpen
     door.animationTime += 4.0
@@ -289,6 +332,7 @@ func sync_door_state(doorPath: String, isOpen: bool) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func sync_door_unlock(doorPath: String) -> void:
+    _log("sync_door_unlock RECV path=%s" % doorPath)
     var door: Node = _scene_node(doorPath)
     if door == null || !(door is Door):
         return
@@ -299,30 +343,37 @@ func sync_door_unlock(doorPath: String) -> void:
 
 func host_switch_interact(sw: Node) -> void:
     if !CoopManager.isHost || !is_instance_valid(sw) || !is_instance_valid(_currentScene):
+        _log("host_switch_interact ABORT host=%s valid=%s" % [str(CoopManager.isHost), str(is_instance_valid(sw))])
         return
     if !sw.has_method(&"Activate") || !sw.has_method(&"PlaySwitch"):
+        _log("host_switch_interact ABORT missing methods")
         return
     var switchPath: String = _currentScene.get_path_to(sw)
     sw.Interact()
+    _log("host_switch_interact path=%s active=%s" % [switchPath, str(sw.active)])
     sync_switch_state.rpc(switchPath, sw.active)
-    if CoopManager.DEBUG:
-        print("[world_state] host_switch_interact %s active=%s" % [switchPath, sw.active])
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_switch_interact(switchPath: String) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_switch_interact RECV path=%s from peer=%d" % [switchPath, sender])
     if !CoopManager.isHost:
+        _log("request_switch_interact REJECT not-host")
         return
     if !is_valid_path(switchPath):
+        _log("request_switch_interact REJECT invalid-path")
         return
     var sw: Node = _scene_node(switchPath)
     if sw == null:
+        _log("request_switch_interact REJECT resolve-failed")
         return
     host_switch_interact(sw)
 
 
 @rpc("authority", "call_remote", "reliable")
 func sync_switch_state(switchPath: String, active: bool) -> void:
+    _log("sync_switch_state RECV path=%s active=%s" % [switchPath, str(active)])
     var sw: Node = _scene_node(switchPath)
     if sw == null:
         return
@@ -402,8 +453,10 @@ func _mark_bed_ready(bedPath: String, peerId: int) -> void:
 func _trigger_sleep(bedPath: String) -> void:
     var bed: Node = _scene_node(bedPath)
     if !is_instance_valid(bed) || !bed.canSleep:
+        _log("_trigger_sleep ABORT invalid-bed path=%s" % bedPath)
         return
     var duration: int = int(bed.randomSleep)
+    _log("_trigger_sleep path=%s duration=%d total=%d" % [bedPath, duration, _expected_peer_count()])
     # Clear overlay on every peer before sleep audio kicks in.
     CoopManager.set_meta(&"coop_sleep_ready_ids", [])
     CoopManager.set_meta(&"coop_sleep_total", _expected_peer_count())
@@ -414,15 +467,18 @@ func _trigger_sleep(bedPath: String) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_bed_interact(bedPath: String) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_bed_interact RECV path=%s from peer=%d" % [bedPath, sender])
     if !CoopManager.isHost:
+        _log("request_bed_interact REJECT not-host")
         return
     if !is_valid_path(bedPath):
         return
     var bed: Node = _scene_node(bedPath)
     if !is_instance_valid(bed) || !bed.has_method(&"Interact") || !bed.canSleep:
+        _log("request_bed_interact REJECT invalid-bed")
         return
-    var senderId: int = multiplayer.get_remote_sender_id()
-    _mark_bed_ready(bedPath, senderId)
+    _mark_bed_ready(bedPath, sender)
 
 
 ## Host tells every peer the current ready-set so the overlay renders N/M.
@@ -456,35 +512,40 @@ func sync_bed_sleep(bedPath: String, duration: int) -> void:
 
 func host_container_interact(container: Node) -> void:
     if !CoopManager.isHost || !is_instance_valid(container) || !(container is LootContainer) || !is_instance_valid(_currentScene):
+        _log("host_container_interact ABORT host=%s valid=%s" % [str(CoopManager.isHost), str(is_instance_valid(container))])
         return
     var containerPath: String = _currentScene.get_path_to(container)
     container.Interact()
     var packedLoot: Array[Dictionary] = CoopManager.slotSerializer.pack_array(container.loot)
+    _log("host_container_interact path=%s loot=%d" % [containerPath, container.loot.size()])
     sync_container_state.rpc(containerPath, packedLoot)
-    if CoopManager.DEBUG:
-        print("[world_state] host_container_interact %s loot=%d" % [containerPath, container.loot.size()])
 
 
 func host_trader_interact(trader: Node) -> void:
     if !CoopManager.isHost || !is_instance_valid(trader) || !trader.has_method(&"Interact"):
+        _log("host_trader_interact ABORT host=%s valid=%s" % [str(CoopManager.isHost), str(is_instance_valid(trader))])
         return
+    _log("host_trader_interact name=%s" % trader.name)
     trader.Interact()
-    if CoopManager.DEBUG:
-        print("[world_state] host_trader_interact %s" % trader.name)
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_container_open(containerPath: String) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_container_open RECV path=%s from peer=%d" % [containerPath, sender])
     if !CoopManager.isHost:
+        _log("request_container_open REJECT not-host")
         return
     if !is_valid_path(containerPath):
+        _log("request_container_open REJECT invalid-path")
         return
     var container: Node = _scene_node(containerPath)
     if container == null || !(container is LootContainer):
+        _log("request_container_open REJECT not-a-container path=%s" % containerPath)
         return
     var packedLoot: Array[Dictionary] = CoopManager.slotSerializer.pack_array(container.loot)
-    var requesterId: int = multiplayer.get_remote_sender_id()
-    sync_container_open.rpc_id(requesterId, containerPath, packedLoot)
+    _log("request_container_open GRANT path=%s loot=%d" % [containerPath, container.loot.size()])
+    sync_container_open.rpc_id(sender, containerPath, packedLoot)
 
 
 ## Host tells a specific client to open a container with the given loot.
@@ -509,25 +570,79 @@ func sync_container_state(containerPath: String, packedLoot: Array[Dictionary]) 
     container.loot = CoopManager.slotSerializer.unpack_array(packedLoot)
 
 
+## Post-close storage sync — writes to [member LootContainer.storage] (NOT
+## .loot), flips storaged=true so [Interface.FillContainerGrid] reads from
+## storage on next open. If a peer currently has this container open in the
+## UI, rebuild the grid so the change is visible immediately instead of
+## stale until reopen.
+@rpc("authority", "call_remote", "reliable")
+func sync_container_storage(containerPath: String, packedStorage: Array[Dictionary]) -> void:
+    var container: Node = _scene_node(containerPath)
+    if container == null || !(container is LootContainer):
+        return
+    container.storage = CoopManager.slotSerializer.unpack_array(packedStorage)
+    container.storaged = true
+    var iface: Node = _interface
+    if is_instance_valid(iface) && iface.get(&"container") == container:
+        if iface.has_method(&"ClearContainerGrid"):
+            iface.ClearContainerGrid()
+        if iface.has_method(&"FillContainerGrid"):
+            iface.FillContainerGrid()
+
+
+## Client → host on Interface.Close after the player has finished moving
+## items between container UI and inventory. [param packedStorage] is the
+## post-close [member LootContainer.storage] from the client's perspective —
+## host adopts it and re-broadcasts via [method sync_container_state] so every
+## peer converges on the closer's resulting state. Trust model matches base
+## drop/take RPCs: host doesn't reconcile against any opened-state diff, so
+## a desynced client could write garbage; container open snapshot is the
+## defence (clients only see items they were authorized to take).
+@rpc("any_peer", "call_remote", "reliable")
+func request_container_set_storage(containerPath: String, packedStorage: Array[Dictionary]) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_container_set_storage RECV path=%s slots=%d from peer=%d" % [containerPath, packedStorage.size(), sender])
+    if !CoopManager.isHost:
+        _log("request_container_set_storage REJECT not-host")
+        return
+    if !is_valid_path(containerPath):
+        _log("request_container_set_storage REJECT invalid-path")
+        return
+    var container: Node = _scene_node(containerPath)
+    if !is_instance_valid(container) || !(container is LootContainer):
+        _log("request_container_set_storage REJECT not-a-container")
+        return
+    container.storage = CoopManager.slotSerializer.unpack_array(packedStorage)
+    container.storaged = true
+    sync_container_storage.rpc(containerPath, packedStorage)
+    _log("request_container_set_storage GRANT path=%s slots=%d" % [containerPath, packedStorage.size()])
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func request_container_take_item(containerPath: String, itemIndex: int) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_container_take_item RECV path=%s idx=%d from peer=%d" % [containerPath, itemIndex, sender])
     if !CoopManager.isHost:
+        _log("request_container_take_item REJECT not-host")
         return
     if !is_valid_path(containerPath):
         return
     var container: Node = _scene_node(containerPath)
     if !is_instance_valid(container) || !(container is LootContainer):
+        _log("request_container_take_item REJECT not-a-container")
         return
     if itemIndex < 0 || itemIndex >= container.loot.size():
+        _log("request_container_take_item REJECT bad-idx idx=%d size=%d" % [itemIndex, container.loot.size()])
         return
     var takenSlot: SlotData = container.loot[itemIndex]
     if takenSlot == null:
+        _log("request_container_take_item REJECT null-slot idx=%d" % itemIndex)
         return
     # Remove from host's authoritative loot array
     container.loot.remove_at(itemIndex)
+    _log("request_container_take_item GRANT item=%s to peer=%d remaining=%d" % [takenSlot.itemData.file if takenSlot.itemData != null else "?", sender, container.loot.size()])
     # Send item to requesting client
-    var requesterId: int = multiplayer.get_remote_sender_id()
-    grant_pickup_to_client.rpc_id(requesterId, CoopManager.slotSerializer.pack(takenSlot))
+    grant_pickup_to_client.rpc_id(sender, CoopManager.slotSerializer.pack(takenSlot))
     # Broadcast updated loot to all peers
     sync_container_state.rpc(containerPath, CoopManager.slotSerializer.pack_array(container.loot))
 
@@ -535,14 +650,20 @@ func request_container_take_item(containerPath: String, itemIndex: int) -> void:
 func grant_pickup_to_client(packedSlot: Dictionary) -> void:
     var slotData: SlotData = CoopManager.slotSerializer.unpack(packedSlot)
     if slotData == null:
+        _log("grant_pickup_to_client ABORT unpack-fail")
         return
     var iface: Node = _interface
     if !is_instance_valid(iface):
+        _log("grant_pickup_to_client ABORT no-interface")
         return
     if iface.AutoStack(slotData, iface.inventoryGrid):
+        _log("grant_pickup_to_client STACKED item=%s" % slotData.itemData.file)
         iface.UpdateStats(false)
     elif iface.Create(slotData, iface.inventoryGrid, false):
+        _log("grant_pickup_to_client CREATED item=%s" % slotData.itemData.file)
         iface.UpdateStats(false)
+    else:
+        _log("grant_pickup_to_client FAILED no-room item=%s" % slotData.itemData.file)
 
 
 
@@ -590,23 +711,30 @@ func register_scene_items() -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_trader_open(traderPath: String) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_trader_open RECV path=%s from peer=%d" % [traderPath, sender])
     if !CoopManager.isHost:
+        _log("request_trader_open REJECT not-host")
         return
     if !is_valid_path(traderPath):
+        _log("request_trader_open REJECT invalid-path")
         return
     var trader: Node = _scene_node(traderPath)
     if !is_instance_valid(trader) || !trader.has_method(&"Interact"):
+        _log("request_trader_open REJECT not-a-trader")
         return
     var packedSupply: Array[Dictionary] = CoopManager.slotSerializer.pack_array(trader.supply)
     var tax: int = int(trader.tax)
-    var requesterId: int = multiplayer.get_remote_sender_id()
-    sync_trader_supply.rpc_id(requesterId, traderPath, packedSupply, tax)
+    _log("request_trader_open GRANT supply=%d tax=%d to peer=%d" % [packedSupply.size(), tax, sender])
+    sync_trader_supply.rpc_id(sender, traderPath, packedSupply, tax)
 
 
 @rpc("authority", "call_remote", "reliable")
 func sync_trader_supply(traderPath: String, packedSupply: Array[Dictionary], tax: int) -> void:
+    _log("sync_trader_supply RECV path=%s supply=%d tax=%d" % [traderPath, packedSupply.size(), tax])
     var trader: Node = _scene_node(traderPath)
     if !is_instance_valid(trader):
+        _log("sync_trader_supply ABORT resolve-failed")
         return
     # Replace local supply with host's authoritative copy.
     trader.supply = CoopManager.slotSerializer.unpack_array(packedSupply)
@@ -618,14 +746,19 @@ func sync_trader_supply(traderPath: String, packedSupply: Array[Dictionary], tax
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_trade(traderPath: String, requestedIndices: PackedInt32Array, offeredSlots: Array[Dictionary]) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_trade RECV path=%s requested=%d offered=%d from peer=%d" % [traderPath, requestedIndices.size(), offeredSlots.size(), sender])
     if !CoopManager.isHost:
+        _log("request_trade REJECT not-host")
         return
     if !is_valid_path(traderPath):
+        _log("request_trade REJECT invalid-path")
         return
     var trader: Node = _scene_node(traderPath)
     if !is_instance_valid(trader):
+        _log("request_trade REJECT resolve-failed")
         return
-    var requesterId: int = multiplayer.get_remote_sender_id()
+    var requesterId: int = sender
 
     # Validate requested indices still exist.
     var requestedItems: Array[SlotData] = []
@@ -662,9 +795,12 @@ func request_trade(traderPath: String, requestedIndices: PackedInt32Array, offer
     # host itself is buying — rpc_id(0) skips self, so apply the grant logic
     # directly instead of routing through the RPC.
     var grantedSlots: Array[Dictionary] = CoopManager.slotSerializer.pack_array(requestedItems)
+    _log("request_trade GRANT requesterId=%d granted=%d offerValue=%.1f reqValue=%.1f" % [requesterId, grantedSlots.size(), offerValue, requestValue])
     if requesterId == 0:
+        _log("request_trade host-local-apply (requesterId=0)")
         _apply_trade_granted(grantedSlots)
     else:
+        _log("request_trade rpc_id->%d sync_trade_granted" % requesterId)
         sync_trade_granted.rpc_id(requesterId, grantedSlots)
 
     # Broadcast updated supply to all peers.
@@ -687,6 +823,7 @@ func reject_trade() -> void:
 ## Finalizes the trade: removes pending offered items and spawns granted items.
 @rpc("authority", "call_remote", "reliable")
 func sync_trade_granted(grantedSlots: Array[Dictionary]) -> void:
+    _log("sync_trade_granted RECV granted=%d" % grantedSlots.size())
     _apply_trade_granted(grantedSlots)
 
 
@@ -694,19 +831,26 @@ func sync_trade_granted(grantedSlots: Array[Dictionary]) -> void:
 ## client receiving grant) and [method request_trade] (host purchasing on
 func _apply_trade_granted(grantedSlots: Array[Dictionary]) -> void:
     var iface: Node = _interface
+    _log("_apply_trade_granted granted=%d iface_valid=%s" % [grantedSlots.size(), str(is_instance_valid(iface))])
     _remove_pending_trade_elements(iface)
     remove_meta(&"_pending_trade_elements")
 
     if !is_instance_valid(iface):
+        _log("_apply_trade_granted ABORT no iface")
         return
+    var created: int = 0
     for packed: Dictionary in grantedSlots:
         var slot: SlotData = CoopManager.slotSerializer.unpack(packed)
         if slot == null:
+            _log("_apply_trade_granted SKIP unpack-null")
             continue
         var targetGrid: Node = iface.catalogGrid if slot.itemData.type == "Furniture" else iface.inventoryGrid
         var updateStacks: bool = slot.itemData.type != "Furniture"
+        _log("_apply_trade_granted CREATE item=%s type=%s grid=%s" % [slot.itemData.file, slot.itemData.type, targetGrid.name if is_instance_valid(targetGrid) else "<null>"])
         iface.Create(slot, targetGrid, updateStacks)
+        created += 1
     iface.UpdateStats(false)
+    _log("_apply_trade_granted DONE created=%d" % created)
 
 
 func _remove_pending_trade_elements(iface: Node) -> void:
@@ -819,20 +963,20 @@ func sync_trader_tasks_snapshot(traderPath: String, tasks: Array) -> void:
 
 
 ## Host tells the requester their deferred completion succeeded. Client
-## finalises the pending bundle from [method interface_patch.Complete] by
+## finalises the pending bundle from interface_hooks._on_complete by
 ## destroying hidden inputs + spawning rewards under host authority.
 @rpc("authority", "call_remote", "reliable")
 func ack_trader_task_complete(taskName: String) -> void:
-    if is_instance_valid(_interface) && _interface.has_method(&"finalize_pending_task"):
-        _interface.finalize_pending_task(taskName)
+    if is_instance_valid(_interface) && CoopManager.interfaceHooks != null:
+        CoopManager.interfaceHooks.finalize_pending_task(_interface, taskName)
 
 
 ## Host tells the requesting client the task was refused. Client restores
 ## the hidden inputs and shows an error — nothing else changes.
 @rpc("authority", "call_remote", "reliable")
 func reject_trader_task_complete(taskName: String) -> void:
-    if is_instance_valid(_interface) && _interface.has_method(&"reject_pending_task"):
-        _interface.reject_pending_task(taskName)
+    if is_instance_valid(_interface) && CoopManager.interfaceHooks != null:
+        CoopManager.interfaceHooks.reject_pending_task(_interface, taskName)
 
 
 
@@ -927,6 +1071,24 @@ func receive_mine_detonate(minePath: String, instant: bool) -> void:
         mine.Detonate()
 
 
+## Pushes captured Mines layout to one or all peers. Sent on host capture (rpc to all)
+## and on late-join request (rpc_id to requester).
+@rpc("authority", "call_remote", "reliable")
+func broadcast_mine_layout(layout: Array) -> void:
+    CoopManager.mineSpawnerHook.apply_layout(layout)
+
+
+## Late-joiner asks host for current Mines layout. Host echoes lastMineLayout if non-empty.
+@rpc("any_peer", "call_remote", "reliable")
+func request_mine_layout() -> void:
+    if !CoopManager.isHost:
+        return
+    var senderId: int = multiplayer.get_remote_sender_id()
+    if lastMineLayout.is_empty():
+        return
+    broadcast_mine_layout.rpc_id(senderId, lastMineLayout)
+
+
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_furniture_place(furniturePath: String, pos: Vector3, rotY: float) -> void:
@@ -982,8 +1144,11 @@ func sync_furniture_grab(furniturePath: String) -> void:
     var node: Node = _scene_node(furniturePath)
     if !is_instance_valid(node):
         return
-    if node.has_method(&"force_release"):
-        node.force_release()
+    # TODO post-hook-migration: force_release helper no longer exists on
+    # vanilla Furniture. Walk `node`'s Furniture-script children + call
+    # ResetMove via CoopManager.furnitureHooks.suppress_sync if multi-grab
+    # becomes a visible bug. Edge case auto-resolves on next ResetMove
+    # broadcast in practice.
 
 
 ## Peer released this piece — currently a no-op since sync_furniture_place
@@ -1001,21 +1166,28 @@ func sync_furniture_release(_furniturePath: String) -> void:
 ## broadcasts if accepted.
 @rpc("any_peer", "call_remote", "reliable")
 func request_setting_change(key: String, value: Variant) -> void:
+    var sender: int = multiplayer.get_remote_sender_id()
+    _log("request_setting_change RECV key=%s value=%s from peer=%d" % [key, str(value), sender])
     if !CoopManager.isHost:
+        _log("request_setting_change REJECT not-host")
         return
     if !CoopManager.settings.has(key):
+        _log("request_setting_change REJECT unknown-key=%s" % key)
         return
     var t: int = typeof(value)
     if t != TYPE_FLOAT && t != TYPE_INT:
+        _log("request_setting_change REJECT bad-type=%d" % t)
         return
     var f: float = clampf(float(value), 0.0, 1000.0)
     CoopManager.set_setting(key, f)
+    _log("request_setting_change APPLIED key=%s value=%f" % [key, f])
 
 
 ## Host broadcasts the full settings dict. Simpler than keyed diffs and the
 ## payload is tiny; mostly fires on setting changes + peer join.
 @rpc("authority", "call_remote", "reliable")
 func broadcast_settings(newSettings: Dictionary) -> void:
+    _log("broadcast_settings RECV keys=%d" % newSettings.size())
     CoopManager.settings = newSettings.duplicate()
 
 
@@ -1034,7 +1206,11 @@ func broadcast_event(eventName: String, params: PackedInt32Array) -> void:
     var eventSystem: Node = scene.get_node_or_null(PATH_EVENT_SYSTEM)
     if eventSystem == null:
         return
-    if eventSystem.has_method(&"receive_event"):
+    # Hook-migration path: receive_event helper no longer on vanilla
+    # EventSystem; routed through CoopManager.eventSystemHooks.
+    if CoopManager.eventSystemHooks != null:
+        CoopManager.eventSystemHooks.dispatch_event(eventSystem, eventName, params)
+    elif eventSystem.has_method(&"receive_event"):
         eventSystem.receive_event(eventName, params)
 
 
@@ -1202,7 +1378,7 @@ func broadcast_airdrop_state(casaPath: String, isDropped: bool, isReleased: bool
             (airdropVar as Node3D).visible = true
 
 
-## Per-peer live instrument audio spawned on remote_player puppet.
+## Per-peer live instrument audio spawned on remote_player.
 var _remoteInstrumentAudio: Dictionary = {}
 
 
@@ -1222,8 +1398,8 @@ func _play_remote_instrument(peerId: int, clipPath: String) -> void:
     var idx: int = CoopManager.peer_idx(peerId)
     if idx < 0 || idx >= CoopManager.remoteNodes.size():
         return
-    var puppet: Node3D = CoopManager.remoteNodes[idx]
-    if !is_instance_valid(puppet):
+    var remote: Node3D = CoopManager.remoteNodes[idx]
+    if !is_instance_valid(remote):
         return
     var clip: AudioStream = load(clipPath) as AudioStream
     if clip == null:
@@ -1233,7 +1409,7 @@ func _play_remote_instrument(peerId: int, clipPath: String) -> void:
     audio.max_distance = 50.0
     audio.unit_size = 6.0
     audio.bus = &"Master"
-    puppet.add_child(audio)
+    remote.add_child(audio)
     audio.play()
     _remoteInstrumentAudio[peerId] = audio
 

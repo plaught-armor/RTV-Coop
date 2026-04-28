@@ -6,6 +6,10 @@ extends Control
 
 
 
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
+
 var panel: PanelContainer = null
 var statusLabel: Label = null
 var panelVisible: bool = false
@@ -1404,21 +1408,10 @@ func on_create_world_confirmed() -> void:
             CoopManager.saveMirror.clear_active_world()
             return
 
-    # Save paths are up now, so the picker can write appearance.json. Defer
-    # NewGame + mirror + LoadScene until the host confirms a character — we
-    # don't want to write World.tres / Character.tres for a world they might
-    # back out of during the picker.
-    show_character_picker(
-        _on_host_picker_confirm,
-        _on_host_picker_cancel.bind(worldId, worldDir),
-    )
-
-
-## Spawns the character-creation dialog. [param onConfirm] runs after confirm,
-func show_character_picker(onConfirm: Callable, onCancel: Callable) -> void:
-    var picker: Control = load("res://mod/ui/character_creation.gd").new()
-    add_child(picker)
-    picker.init(onConfirm, onCancel)
+    # Capsule-only appearance — skip the picker entirely. Save paths are up
+    # so writing the default capsule appearance now is safe.
+    CoopManager.saveMirror.save_local_appearance(CoopManager.appearance.get_defaults())
+    _on_host_picker_confirm()
 
 
 func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
@@ -1429,16 +1422,6 @@ func _on_host_picker_confirm(_entry: Dictionary = {}) -> void:
     loader.NewGame(newWorldDifficulty, newWorldSeason)
     CoopManager.saveMirror.mirror_user_to_world()
     loader.LoadScene("Cabin")
-
-
-## Back out of world creation from inside the picker: tear down the host
-## session we started pre-picker, delete the empty world dir, and return to
-func _on_host_picker_cancel(worldId: String, worldDir: String) -> void:
-    CoopManager.disconnect_session()
-    CoopManager.saveMirror.clear_active_world()
-    _remove_dir_recursive(worldDir)
-    CoopManager._log("[coop_ui] world creation cancelled in picker (%s)" % worldId)
-    show_world_picker()
 
 
 ## Recursively removes a directory and its contents. Used to clean up an empty
@@ -1632,17 +1615,17 @@ func show_lobby(useSteam: bool) -> void:
     _lobbyPlayerList = VBoxContainer.new()
     playersCol.add_child(_lobbyPlayerList)
 
-    # Friends list (Steam mode only)
+    # Friends list (Steam mode only) — render under Players in the right column.
     if useSteam:
         var friendsHeader: Label = Label.new()
         friendsHeader.text = "Invite Friends"
         friendsHeader.add_theme_font_size_override("font_size", 14)
-        vbox.add_child(friendsHeader)
+        playersCol.add_child(friendsHeader)
 
         friendScroll = ScrollContainer.new()
         friendScroll.custom_minimum_size = Vector2(0, 150)
         friendScroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-        vbox.add_child(friendScroll)
+        playersCol.add_child(friendScroll)
 
         _lobbyFriendList = VBoxContainer.new()
         _lobbyFriendList.size_flags_horizontal = Control.SIZE_EXPAND_FILL

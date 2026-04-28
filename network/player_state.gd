@@ -199,6 +199,7 @@ func _physics_process(_delta: float) -> void:
 
     if Engine.get_physics_frames() % EQUIPMENT_CHECK_TICKS == 0:
         _poll_equipment()
+        _refresh_anim_hook()
 
     var currentTime: float = Time.get_ticks_msec() / 1000.0
     var renderTime: float = currentTime - INTERP_DELAY
@@ -660,6 +661,111 @@ func get_current_attachments() -> Array[StringName]:
     if !_lastBroadcastedAttachments.is_empty():
         return _lastBroadcastedAttachments
     return _read_current_attachments()
+
+
+## Last animator playback-state name broadcast for the local player's active
+## weapon rig. Source = `parameters/playback.get_current_node()` — the
+## AnimationTree's currently-active state machine node. Driven by
+## `_on_local_anim_started`, which fires on every clip transition the
+## state machine performs; peer mirrors via `playback.travel(stateName)`.
+var _lastBroadcastedAnimState: String = ""
+
+## AnimationTree we have animation_started hooked on. Tracked so weapon
+## swap can disconnect the old tree before the rig frees, and so we can
+## skip redundant connect calls when the same rig stays drawn.
+var _connectedAnimTree: AnimationTree = null
+
+
+## Returns the active rig's AnimationTree if a weapon is drawn, else null.
+func _read_current_anim_tree() -> AnimationTree:
+    var rigManager: Node = _get_rig_manager()
+    if rigManager == null:
+        return null
+    for rig: Node in rigManager.get_children():
+        var tree: AnimationTree = rig.get(&"animator") as AnimationTree
+        if tree != null:
+            return tree
+    return null
+
+
+## Re-points animation_started subscription to the currently-drawn rig's
+## AnimationTree. Cheap when the same rig is still drawn (pointer compare).
+## Called at the same cadence as [method _poll_equipment] (every
+## [member EQUIPMENT_CHECK_TICKS]) so weapon swaps re-hook within ~0.5s.
+func _refresh_anim_hook() -> void:
+    var tree: AnimationTree = _read_current_anim_tree()
+    if tree == _connectedAnimTree:
+        return
+    if is_instance_valid(_connectedAnimTree) && _connectedAnimTree.animation_started.is_connected(_on_local_anim_started):
+        _connectedAnimTree.animation_started.disconnect(_on_local_anim_started)
+    _connectedAnimTree = tree
+    if tree != null:
+        tree.animation_started.connect(_on_local_anim_started)
+        # Force a state broadcast on hook attach so a freshly-drawn weapon
+        # syncs its initial Idle state to peers without waiting for the
+        # first transition.
+        _broadcast_current_anim_state()
+    else:
+        # Holstered — clear last state so re-draw forces a re-broadcast.
+        if !_lastBroadcastedAnimState.is_empty():
+            _lastBroadcastedAnimState = ""
+            broadcast_anim_state("")
+
+
+func _on_local_anim_started(_clipName: StringName) -> void:
+    _broadcast_current_anim_state()
+
+
+func _broadcast_current_anim_state() -> void:
+    if !is_instance_valid(_connectedAnimTree):
+        return
+    var playback: Variant = _connectedAnimTree.get(&"parameters/playback")
+    if playback == null:
+        return
+    var stateName: String = String(playback.get_current_node())
+    if stateName == _lastBroadcastedAnimState:
+        return
+    _lastBroadcastedAnimState = stateName
+    broadcast_anim_state(stateName)
+
+
+func broadcast_anim_state(stateName: String) -> void:
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
+        return
+    receive_anim_state.rpc(stateName)
+
+
+## Targeted variant for new-peer spawn so late joiners get the current
+## playback state without waiting for the next transition.
+func send_anim_to(peerId: int, stateName: String) -> void:
+    if !is_instance_valid(CoopManager) || !CoopManager.is_session_active():
+        return
+    receive_anim_state.rpc_id(peerId, stateName)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func receive_anim_state(stateName: String) -> void:
+    if !is_instance_valid(CoopManager):
+        return
+    var peerId: int = multiplayer.get_remote_sender_id()
+    var remoteNode: Node3D = CoopManager.get_remote_player_node(peerId)
+    if remoteNode == null:
+        CoopManager.cache_peer_anim(peerId, stateName)
+        return
+    if remoteNode.has_method(&"set_active_anim_state"):
+        remoteNode.set_active_anim_state(stateName)
+
+
+func get_current_anim() -> String:
+    if !_lastBroadcastedAnimState.is_empty():
+        return _lastBroadcastedAnimState
+    var tree: AnimationTree = _read_current_anim_tree()
+    if tree == null:
+        return ""
+    var playback: Variant = tree.get(&"parameters/playback")
+    if playback == null:
+        return ""
+    return String(playback.get_current_node())
 
 
 ## Walks the local scene to find the active weapon name. Returns "" when no

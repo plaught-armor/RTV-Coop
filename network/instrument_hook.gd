@@ -1,11 +1,15 @@
 ## Watches Instrument nodes for audioPlayer.playing transitions and broadcasts
-## start/stop so remote peers hear it on the puppet rig. Replaces instrument_patch.
+## start/stop so remote peers hear it on the remote_player rig. Replaces instrument_patch.
 ##
 ## Tracks each Instrument added to the scene via SceneTree.node_added, keyed
 ## by node instance. On each CoopManager._process tick, checks edge.
 ## Cleaned up on node removal.
 extends RefCounted
 
+
+
+# Shadow autoload identifier for production .vmz runs (no project setting registry).
+var CoopManager: Node = (Engine.get_main_loop() as SceneTree).root.get_node_or_null(^"/root/CoopManager")
 
 const INSTRUMENT_SCRIPT_PATH: String = "res://Scripts/Instrument.gd"
 

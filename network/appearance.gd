@@ -16,19 +16,14 @@ func is_visually_allowed(resourcePath: String) -> bool:
     return false
 
 
-const ALLOWED_BODIES: Array[String] = ["Bandit", "Guard", "Military", "Punisher"]
+const ALLOWED_BODIES: Array[String] = ["Capsule"]
 
-# Prefix guard so remote peers can't smuggle arbitrary resource loads via appearance RPC.
-const MATERIAL_PREFIX: String = "res://AI/"
+# Capsule body has no skinned mesh — uses a literal sentinel so the material
+# slot still validates against the same allowlist as legacy AI-rig peers did.
+const CAPSULE_MATERIAL_SENTINEL: String = "res://AI/_capsule"
 
 const OPTIONS: Array = [
-    {"name": "Bandit 01", "body": "Bandit", "material": "res://AI/Bandit/Files/MT_Bandit_01.tres"},
-    {"name": "Bandit 02", "body": "Bandit", "material": "res://AI/Bandit/Files/MT_Bandit_02.tres"},
-    {"name": "Bandit 03", "body": "Bandit", "material": "res://AI/Bandit/Files/MT_Bandit_03.tres"},
-    {"name": "Bandit 04", "body": "Bandit", "material": "res://AI/Bandit/Files/MT_Bandit_04.tres"},
-    {"name": "Guard", "body": "Guard", "material": "res://AI/Guard/Files/MT_Guard.tres"},
-    {"name": "Military", "body": "Military", "material": "res://AI/Military/Files/MT_Military.tres"},
-    {"name": "Punisher", "body": "Punisher", "material": "res://AI/Punisher/Files/MT_Punisher.tres"},
+    {"name": "Capsule (FPS Arms)", "body": "Capsule", "material": CAPSULE_MATERIAL_SENTINEL},
 ]
 
 
@@ -37,11 +32,7 @@ func get_defaults() -> Dictionary:
 
 
 func is_allowed_material(p: String) -> bool:
-    if p.is_empty():
-        return false
-    if p.find("..") != -1:
-        return false
-    return p.begins_with(MATERIAL_PREFIX)
+    return p == CAPSULE_MATERIAL_SENTINEL
 
 
 func is_valid(entry: Dictionary) -> bool:
