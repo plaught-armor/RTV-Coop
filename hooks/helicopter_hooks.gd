@@ -28,7 +28,7 @@ func _on_phys(delta: float) -> void:
 
 
 func _apply_host_snapshot(heli: Node3D, delta: float) -> void:
-    var path: String = _relPaths.get(heli, "")
+    var path: String = _relPaths[heli] if _relPaths.has(heli) else ""
     if path.is_empty():
         var scene: Node = heli.get_tree().current_scene
         if is_instance_valid(scene):

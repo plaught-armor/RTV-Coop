@@ -32,7 +32,7 @@ func dispatch(cm: Node, target: Node) -> bool:
     var scriptObj: Script = target.get_script()
     if scriptObj == null:
         return false
-    var route: Array = ROUTES.get(scriptObj.resource_path, [])
+    var route: Array = ROUTES[scriptObj.resource_path] if ROUTES.has(scriptObj.resource_path) else []
     if route.is_empty():
         return false
 

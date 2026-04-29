@@ -71,7 +71,7 @@ func _on_catalog_post() -> void:
     var f: Furniture = _lib._caller as Furniture
     if f == null:
         return
-    var furniturePath: String = _catalogPaths.get(f, "")
+    var furniturePath: String = _catalogPaths[f] if _catalogPaths.has(f) else ""
     _catalogPaths.erase(f)
     if furniturePath.is_empty():
         return

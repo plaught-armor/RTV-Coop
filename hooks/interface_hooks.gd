@@ -34,7 +34,7 @@ func _on_close_post() -> void:
     var iface: Control = _lib._caller as Control
     if iface == null:
         return
-    var heldContainer: Node = _heldContainer.get(iface, null)
+    var heldContainer: Node = _heldContainer[iface] if _heldContainer.has(iface) else null
     _heldContainer.erase(iface)
     if !CoopManager.is_session_active():
         return
@@ -226,7 +226,7 @@ func _on_complete(data: Resource) -> void:
     _lib.skip_super()
 
     var taskName: String = iface.inputTarget.taskData.name
-    var pending: Dictionary = _pendingTasks.get(iface, {})
+    var pending: Dictionary = _pendingTasks[iface] if _pendingTasks.has(iface) else {}
     if pending.has(taskName):
         CoopManager._log("[interface] Complete task=%s already_pending" % taskName)
         return
@@ -262,7 +262,7 @@ func _broadcast_host_complete(iface: Node, data: Resource) -> void:
 
 ## Host ACK path: destroy hidden inputs and spawn rewards (mirrors vanilla Complete).
 func finalize_pending_task(iface: Node, taskName: String) -> void:
-    var pending: Dictionary = _pendingTasks.get(iface, {})
+    var pending: Dictionary = _pendingTasks[iface] if _pendingTasks.has(iface) else {}
     if !pending.has(taskName):
         CoopManager._log("[interface] finalize_pending_task task=%s NOT_FOUND" % taskName)
         return
@@ -295,7 +295,7 @@ func finalize_pending_task(iface: Node, taskName: String) -> void:
 
 ## Host reject path: restore hidden inventory so client keeps inputs.
 func reject_pending_task(iface: Node, taskName: String) -> void:
-    var pending: Dictionary = _pendingTasks.get(iface, {})
+    var pending: Dictionary = _pendingTasks[iface] if _pendingTasks.has(iface) else {}
     if !pending.has(taskName):
         CoopManager._log("[interface] reject_pending_task task=%s NOT_FOUND" % taskName)
         return

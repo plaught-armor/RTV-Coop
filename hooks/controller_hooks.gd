@@ -47,7 +47,7 @@ func _warm_audio_pool(c: Controller) -> void:
 
 
 func _get_audio_player(c: Controller) -> AudioStreamPlayer:
-    var pool: Array = _audioPool.get(c, [])
+    var pool: Array = _audioPool[c] if _audioPool.has(c) else []
     for player: AudioStreamPlayer in pool:
         if !player.playing:
             return player
@@ -110,7 +110,7 @@ func _on_movement_post(_delta: float) -> void:
     )
     CoopManager.playerState.broadcast_vitals()
     var firing: bool = CoopManager.gd.isFiring
-    var prevFiring: bool = _wasFiring.get(c, false)
+    var prevFiring: bool = _wasFiring[c] if _wasFiring.has(c) else false
     if firing && !prevFiring:
         _broadcast_fire_event(c)
     _wasFiring[c] = firing

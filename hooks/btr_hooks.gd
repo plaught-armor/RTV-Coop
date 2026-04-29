@@ -31,7 +31,7 @@ func _on_phys(delta: float) -> void:
 
 
 func _apply_host_snapshot(btr: Node3D, delta: float) -> void:
-    var path: String = _relPaths.get(btr, "")
+    var path: String = _relPaths[btr] if _relPaths.has(btr) else ""
     if path.is_empty():
         var scene: Node = btr.get_tree().current_scene
         if is_instance_valid(scene):

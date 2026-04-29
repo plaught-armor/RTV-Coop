@@ -250,7 +250,7 @@ func _on_sensor(delta: float) -> void:
 
 
 func _get_target_camera_position(ai: Node) -> Vector3:
-    var pid: int = _targetPeerId.get(ai, -1)
+    var pid: int = _targetPeerId[ai] if _targetPeerId.has(ai) else -1
     if pid < 0:
         return ai.gameData.cameraPosition
     var remote: Node3D = CoopManager.get_remote_player_node(pid)
@@ -599,7 +599,7 @@ func _on_interactor_post(_delta: float) -> void:
     var ai: CharacterBody3D = _lib._caller as CharacterBody3D
     if ai == null:
         return
-    var doorBefore: Node = _doorBefore.get(ai, null)
+    var doorBefore: Node = _doorBefore[ai] if _doorBefore.has(ai) else null
     _doorBefore.erase(ai)
     if !is_instance_valid(doorBefore):
         return

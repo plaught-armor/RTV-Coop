@@ -49,8 +49,8 @@ func _on_phys(delta: float) -> void:
 
 
 func _broadcast_drop_edges(c: Node3D) -> void:
-    var prevDrop: bool = _lastBroadcastDropped.get(c, false)
-    var prevRel: bool = _lastBroadcastReleased.get(c, false)
+    var prevDrop: bool = _lastBroadcastDropped[c] if _lastBroadcastDropped.has(c) else false
+    var prevRel: bool = _lastBroadcastReleased[c] if _lastBroadcastReleased.has(c) else false
     if c.dropped != prevDrop || c.released != prevRel:
         _lastBroadcastDropped[c] = c.dropped
         _lastBroadcastReleased[c] = c.released
@@ -71,7 +71,7 @@ func _broadcast_airdrop_pose(c: Node3D) -> void:
 
 
 func _get_rel_path(c: Node3D) -> String:
-    var path: String = _relPaths.get(c, "")
+    var path: String = _relPaths[c] if _relPaths.has(c) else ""
     if path.is_empty():
         var scene: Node = c.get_tree().current_scene
         if is_instance_valid(scene):

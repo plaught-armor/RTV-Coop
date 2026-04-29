@@ -628,7 +628,7 @@ func free_peer_slot(idx: int) -> void:
 
 
 func peer_idx(godotId: int) -> int:
-    return peerIdxByGodotId.get(godotId, -1)
+    return peerIdxByGodotId[godotId] if peerIdxByGodotId.has(godotId) else -1
 
 
 func cache_peer_equipment(godotId: int, weaponName: String) -> void:
@@ -1541,7 +1541,7 @@ func is_session_active() -> bool:
 
 
 func get_setting(key: String, fallback: Variant = null) -> Variant:
-    return settings.get(key, fallback)
+    return settings[key] if settings.has(key) else fallback
 
 
 func set_setting(key: String, value: Variant) -> void:

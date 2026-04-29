@@ -39,7 +39,7 @@ func _on_phys(delta: float) -> void:
 
 
 func _apply_host_snapshot(p: Node3D, delta: float) -> void:
-    var path: String = _relPaths.get(p, "")
+    var path: String = _relPaths[p] if _relPaths.has(p) else ""
     if path.is_empty():
         var scene: Node = p.get_tree().current_scene
         if is_instance_valid(scene):
@@ -57,7 +57,7 @@ func _apply_host_snapshot(p: Node3D, delta: float) -> void:
 
 
 func _run_client_cosmetics(p: Node3D, delta: float) -> void:
-    var prev: Vector3 = _clientPrev.get(p, p.global_position)
+    var prev: Vector3 = _clientPrev[p] if _clientPrev.has(p) else p.global_position
     var vel: Vector3 = (p.global_position - prev) / max(delta, 0.001)
     _clientPrev[p] = p.global_position
     var fwd: float = vel.dot(p.global_transform.basis.z)

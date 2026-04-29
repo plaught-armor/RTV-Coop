@@ -30,7 +30,7 @@ func _on_phys(delta: float) -> void:
 
 
 func _host_tick(r: Node3D, delta: float) -> void:
-    if _exploded.get(r, false):
+    if _exploded[r] if _exploded.has(r) else false:
         return
     r.phase += delta
     r.rotate_y(deg_to_rad(sin(r.phase * r.horizontalFrequency) * r.deviation * delta))
@@ -44,7 +44,7 @@ func _host_tick(r: Node3D, delta: float) -> void:
 
 
 func _coop_explode(r: Node3D) -> void:
-    if _exploded.get(r, false):
+    if _exploded[r] if _exploded.has(r) else false:
         return
     _exploded[r] = true
     var pos: Vector3 = r.global_position
@@ -63,7 +63,7 @@ func _coop_explode(r: Node3D) -> void:
 
 
 func _coop_cleanup(r: Node3D) -> void:
-    if _exploded.get(r, false):
+    if _exploded[r] if _exploded.has(r) else false:
         return
     _exploded[r] = true
     CoopManager.worldState.broadcast_rocket_cleanup.rpc(r.global_position)
@@ -71,7 +71,7 @@ func _coop_cleanup(r: Node3D) -> void:
 
 
 func _apply_host_snapshot(r: Node3D, delta: float) -> void:
-    var path: String = _relPaths.get(r, "")
+    var path: String = _relPaths[r] if _relPaths.has(r) else ""
     if path.is_empty():
         var scene: Node = r.get_tree().current_scene
         if is_instance_valid(scene):

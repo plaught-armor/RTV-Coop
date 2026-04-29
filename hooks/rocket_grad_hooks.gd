@@ -30,7 +30,7 @@ func _on_process(delta: float) -> void:
 
 
 func _apply_host_snapshot(r: Node3D, delta: float) -> void:
-    var path: String = _relPaths.get(r, "")
+    var path: String = _relPaths[r] if _relPaths.has(r) else ""
     if path.is_empty():
         var scene: Node = r.get_tree().current_scene
         if is_instance_valid(scene):

@@ -32,7 +32,7 @@ func _capture(rig: Node3D, force: float) -> void:
 
 
 func _broadcast(rig: Node3D, label: String) -> void:
-    var s: Dictionary = _staging.get(rig, {})
+    var s: Dictionary = _staging[rig] if _staging.has(rig) else {}
     _staging.erase(rig)
     if s.is_empty():
         return

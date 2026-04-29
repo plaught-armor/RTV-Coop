@@ -155,7 +155,7 @@ func _post_common() -> void:
     var s: Node3D = _lib._caller as Node3D
     if s == null:
         return
-    var prev: int = _prevCount.get(s, -1)
+    var prev: int = _prevCount[s] if _prevCount.has(s) else -1
     _prevCount.erase(s)
     if prev < 0:
         return
