@@ -410,12 +410,12 @@ func _await_rtvmodlib() -> Object:
             return null
         waited += 1
     var lib: Object = Engine.get_meta(&"RTVModLib") if Engine.has_meta(&"RTVModLib") else null
-    if lib == null:
+    if !is_instance_valid(lib):
         _log("[hooks] RTVModLib meta never appeared — vostok-mod-loader missing?")
         return null
     if not lib._is_ready:
         await lib.frameworks_ready
-        if !is_instance_valid(self):
+        if !is_instance_valid(self) || !is_instance_valid(lib):
             return null
     return lib
 

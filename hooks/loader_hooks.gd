@@ -169,9 +169,12 @@ func _on_load_character() -> void:
         CoopManager._log("[loader] LoadCharacter SKIP reentry path=%s" % pp)
         return
     _loadCharacterInProgress = true
-    
+
     var tree: SceneTree = loader.get_tree()
     await tree.create_timer(0.1).timeout
+    if !is_instance_valid(loader):
+        _loadCharacterInProgress = false
+        return
 
     if !FileAccess.file_exists(pp + "Character.tres"):
         CoopManager._log("[loader] LoadCharacter NO_FILE path=%s" % pp)
@@ -193,6 +196,9 @@ func _on_load_character() -> void:
     _clear_equipment_slots(iface.equipment)
     _clear_grid_children(iface.catalogGrid)
     await tree.process_frame
+    if !is_instance_valid(loader) || !is_instance_valid(iface):
+        _loadCharacterInProgress = false
+        return
 
     _load_initial_kit(character, iface)
     _load_inventory_grids(character, iface)
@@ -376,7 +382,7 @@ func _on_save_world() -> void:
     world.weatherTime = Simulation.weatherTime
     world.difficulty = loader.gameData.difficulty
     ResourceSaver.save(world, sp + "World.tres")
-    print("SAVE: World (%s)" % sp)
+    if CoopManager.DEBUG: print("SAVE: World (%s)" % sp)
 
 
 func _on_load_world() -> void:
@@ -396,7 +402,7 @@ func _on_load_world() -> void:
     if world.difficulty == 3 && !loader.gameData.tutorial:
         loader.gameData.difficulty = 3
         loader.gameData.permadeath = true
-    print("LOAD: World (%s)" % sp)
+    if CoopManager.DEBUG: print("LOAD: World (%s)" % sp)
 
 
 func _on_format_save() -> void:
@@ -414,7 +420,7 @@ func _on_format_save() -> void:
         if file.ends_with(".tres") && file != "Validator.tres" && file != "Preferences.tres":
             var removal: int = directory.remove(sp + file)
             if removal == OK:
-                print("File removed: " + file)
+                if CoopManager.DEBUG: print("File removed: " + file)
             else:
                 push_warning("FormatSave: failed to remove %s (error %d)" % [file, removal])
         file = directory.get_next()
@@ -494,7 +500,7 @@ func _on_save_shelter(targetShelter: String) -> void:
         shelter.switches.append(switchSave)
 
     ResourceSaver.save(shelter, sp + targetShelter + ".tres")
-    print("SAVE: %s (%s)" % [targetShelter, sp])
+    if CoopManager.DEBUG: print("SAVE: %s (%s)" % [targetShelter, sp])
 
 
 func _on_load_shelter(targetShelter: String) -> void:
@@ -504,6 +510,8 @@ func _on_load_shelter(targetShelter: String) -> void:
     _lib.skip_super()
     var sp: String = _save_path(loader)
     await loader.get_tree().create_timer(0.1).timeout
+    if !is_instance_valid(loader):
+        return
     if !FileAccess.file_exists(sp + targetShelter + ".tres"):
         return
 
@@ -579,7 +587,7 @@ func _on_unlock_shelter(targetShelter: String) -> void:
     var shelter: ShelterSave = ShelterSave.new()
     shelter.initialVisit = true
     ResourceSaver.save(shelter, sp + targetShelter + ".tres")
-    print("Shelter Unlocked: %s (%s)" % [targetShelter, sp])
+    if CoopManager.DEBUG: print("Shelter Unlocked: %s (%s)" % [targetShelter, sp])
     loader.UpdateProgression()
 
 
@@ -606,7 +614,7 @@ func _on_save_trader(trader: String) -> void:
         elif trader == "Grandma": traders.grandma.append(taskString)
 
     ResourceSaver.save(traders, sp + "Traders.tres")
-    print("SAVE: Traders (%s) at %s" % [trader, sp])
+    if CoopManager.DEBUG: print("SAVE: Traders (%s) at %s" % [trader, sp])
 
 
 func _on_load_trader(trader: String) -> void:
@@ -616,6 +624,8 @@ func _on_load_trader(trader: String) -> void:
     _lib.skip_super()
     var sp: String = _save_path(loader)
     await loader.get_tree().create_timer(0.1).timeout
+    if !is_instance_valid(loader):
+        return
     if !FileAccess.file_exists(sp + "Traders.tres"):
         return
 
@@ -637,7 +647,7 @@ func _on_load_trader(trader: String) -> void:
             iface.trader.tasksCompleted.append(taskString)
 
     iface.UpdateTraderInfo()
-    print("LOAD: Traders (%s) at %s" % [trader, sp])
+    if CoopManager.DEBUG: print("LOAD: Traders (%s) at %s" % [trader, sp])
 
 
 func _on_save_task_notes(task: TaskData, add: bool) -> void:

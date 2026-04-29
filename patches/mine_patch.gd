@@ -14,6 +14,9 @@ func _ready() -> void:
 
 
 func Detonate() -> void:
+    if CoopManager == null:
+        super.Detonate()
+        return
     if CoopManager.is_session_active():
         CoopManager._log("[mine] Detonate path=%s host=%s" % [_cachedPath, str(CoopManager.isHost)])
         if CoopManager.isHost:
@@ -26,6 +29,9 @@ func Detonate() -> void:
 
 
 func InstantDetonate() -> void:
+    if CoopManager == null:
+        super.InstantDetonate()
+        return
     if CoopManager.is_session_active():
         CoopManager._log("[mine] InstantDetonate path=%s host=%s" % [_cachedPath, str(CoopManager.isHost)])
         if CoopManager.isHost:

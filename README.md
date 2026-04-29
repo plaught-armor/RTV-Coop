@@ -179,44 +179,33 @@ Both log files live in the same `logs/` directory. **Include both when reporting
 
 ## Mod Conflicts
 
-This mod patches game scripts via `take_over_path()`. Other mods patching the same scripts will conflict:
+### Script-swap conflicts (`take_over_path`)
+
+Only two vanilla scripts are still swapped via `take_over_path()` — they are on the vostok-mod-loader skip-list and cannot use the hook API. Any other mod that swaps these will conflict at the script level:
 
 | Script | Risk |
 |--------|------|
-| `Controller.gd` | **High** |
-| `AI.gd` | **High** |
-| `AISpawner.gd` | Medium |
-| `Interactor.gd` | Medium |
-| `Interface.gd` | Medium |
-| `Loader.gd` | Medium |
-| `Settings.gd` | Medium |
-| `BTR.gd` | Low |
-| `CASA.gd` | Low |
-| `CatFeeder.gd` | Low |
-| `CatRescue.gd` | Low |
-| `Character.gd` | Low |
-| `DecorMode.gd` | Low |
-| `EventSystem.gd` | Low |
-| `Explosion.gd` | Low |
-| `FishPool.gd` | Low |
-| `Furniture.gd` | Low |
-| `GrenadeRig.gd` | Low |
-| `Helicopter.gd` | Low |
-| `Instrument.gd` | Low |
-| `KnifeRig.gd` | Low |
-| `Layouts.gd` | Low |
-| `LootSimulation.gd` | Low |
 | `Mine.gd` | Low |
-| `MissileSpawner.gd` | Low |
-| `Pickup.gd` | Low |
-| `Police.gd` | Low |
-| `Radio.gd` | Low |
-| `RocketGrad.gd` | Low |
-| `RocketHelicopter.gd` | Low |
-| `Simulation.gd` | Low |
-| `Television.gd` | Low |
-| `Trader.gd` | Low |
-| `Transition.gd` | Low |
+| `Explosion.gd` | Low |
+
+### Hook-API conflicts (RTVModLib)
+
+The remaining 20 vanilla scripts are extended via vostok-mod-loader's `RTVModLib` hook API (`pre`, `post`, `replace` semantics). Other mods registering hooks against the same vanilla methods can interleave non-destructively, but `replace` hooks from multiple mods on the same method will conflict:
+
+| Vanilla script | Hook surface |
+|----------------|--------------|
+| `Controller.gd` | footstep + interaction dispatch |
+| `AI.gd` | spawn/death/loadout sync |
+| `AISpawner.gd` | pool creation + sync-id assign |
+| `Interactor.gd` | item/transition/interactable dispatch |
+| `Interface.gd` | trade UI + inventory hooks |
+| `Loader.gd` | character/shelter/trader save sync |
+| `BTR.gd`, `CASA.gd`, `Helicopter.gd`, `Police.gd` | vehicle authority |
+| `Character.gd`, `DecorMode.gd`, `EventSystem.gd` | event broadcast + decor sync |
+| `FishPool.gd`, `Furniture.gd`, `GrenadeRig.gd`, `KnifeRig.gd` | placement + rig sync |
+| `Instrument.gd`, `Layouts.gd`, `LootSimulation.gd` | misc world-state hooks |
+| `MissileSpawner.gd`, `RocketGrad.gd`, `RocketHelicopter.gd` | projectile sync |
+| `Trader.gd` | trader visibility + supply |
 
 ---
 
@@ -242,8 +231,8 @@ Steamworks SDK 1.64 redistributable binaries (`libsteam_api.so`, `steam_api64.dl
 
 ### Architecture
 
-- **Mod loading**: `.vmz` archive loaded via RTV Mod Loader's `load_resource_pack()`
-- **Script patching**: `take_over_path()` with `super.Method()` to preserve original behavior
+- **Mod loading**: `.vmz` archive loaded via vostok-mod-loader's `load_resource_pack()`
+- **Script patching**: vostok-mod-loader's `RTVModLib` hook API (pre/post/replace + `skip_super`) for 20 scripts; `take_over_path()` fallback for `Mine.gd` + `Explosion.gd` only (vostok skip-list)
 - **Networking**: ENet via `ENetMultiplayerPeer`, host-authoritative with request/validate/broadcast RPCs
 - **Steam helper**: Go binary on a single OS-locked thread, communicating via localhost TCP JSON. Required by Steamworks SDK threading model and critical for Proton compatibility
 - **P2P tunnel**: Steam Networking Sockets relay with local UDP bridge to ENet

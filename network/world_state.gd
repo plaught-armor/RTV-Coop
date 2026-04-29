@@ -97,7 +97,7 @@ func broadcast_item_drop(pickup: Node) -> void:
     if !trackingItems || !CoopManager.isActive:
         _log("broadcast_item_drop SKIP tracking=%s active=%s" % [str(trackingItems), str(CoopManager.isActive)])
         return
-    var slotData: SlotData = pickup.get(&"slotData")
+    var slotData: SlotData = pickup.get(&"slotData") as SlotData
     if slotData == null || slotData.itemData == null:
         _log("broadcast_item_drop SKIP null slotData")
         return
@@ -417,7 +417,7 @@ func _reset_bed_ready_except(keepPath: String) -> void:
 
 
 func _broadcast_bed_ready(bedPath: String) -> void:
-    var readyIds: PackedInt32Array = _bedReady.get(bedPath, PackedInt32Array())
+    var readyIds: PackedInt32Array = _bedReady[bedPath] if _bedReady.has(bedPath) else PackedInt32Array()
     var total: int = _expected_peer_count()
     CoopManager.set_meta(&"coop_sleep_ready_ids", readyIds.duplicate())
     CoopManager.set_meta(&"coop_sleep_total", total)
@@ -438,7 +438,7 @@ func _mark_bed_ready(bedPath: String, peerId: int) -> void:
     if !_active_peer_ids().has(peerId):
         return
     _reset_bed_ready_except(bedPath)
-    var readyIds: PackedInt32Array = _bedReady.get(bedPath, PackedInt32Array())
+    var readyIds: PackedInt32Array = _bedReady[bedPath] if _bedReady.has(bedPath) else PackedInt32Array()
     if !readyIds.has(peerId):
         readyIds.append(peerId)
     _bedReady[bedPath] = readyIds
@@ -691,7 +691,7 @@ func register_scene_items() -> void:
         if node.has_meta(&"sync_id"):
             skippedCount += 1
             continue
-        var slotData: SlotData = node.get(&"slotData")
+        var slotData: SlotData = node.get(&"slotData") as SlotData
         if slotData == null || slotData.itemData == null:
             skippedCount += 1
             continue
@@ -1193,11 +1193,19 @@ func broadcast_settings(newSettings: Dictionary) -> void:
 
 ## Host broadcasts a world event (helicopter, BTR, airdrop, etc.) to all clients.
 ## Params carry event-specific random values so clients reproduce the exact spawn.
+## Host-only atomic helper: append to late-joiner replay buffer + broadcast to
+## clients in one call. Wraps `broadcast_event.rpc(...)` (which is call_remote
+## and never runs on host) plus the local `_firedEvents` append. Use this from
+## host call sites instead of the rpc directly to avoid forgetting the record.
+func host_fire_event(eventName: String, params: PackedInt32Array) -> void:
+    if CoopManager == null || !CoopManager.isHost:
+        return
+    _firedEvents.append([eventName, params])
+    broadcast_event.rpc(eventName, params)
+
+
 @rpc("authority", "call_remote", "reliable")
 func broadcast_event(eventName: String, params: PackedInt32Array) -> void:
-    # Host side: record for late-joiner replay before forwarding.
-    if CoopManager != null && CoopManager.isHost:
-        _firedEvents.append([eventName, params])
     var scene: Node = _currentScene
     if !is_instance_valid(scene):
         return
@@ -1286,7 +1294,7 @@ func _is_valid_audio_path(clipPath: String) -> bool:
 func _check_drop_rate(peerId: int) -> bool:
     var now: int = Time.get_ticks_msec()
     var cutoff: int = now - DROP_RATE_WINDOW_MS
-    var bucket: PackedInt64Array = _dropRateBuckets.get(peerId, PackedInt64Array())
+    var bucket: PackedInt64Array = _dropRateBuckets[peerId] if _dropRateBuckets.has(peerId) else PackedInt64Array()
     while bucket.size() > 0 && bucket[0] < cutoff:
         bucket.remove_at(0)
     if bucket.size() >= DROP_RATE_LIMIT:

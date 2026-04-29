@@ -59,6 +59,8 @@ func _on_ready() -> void:
         s.agent = s.military
 
     await s.CreatePools()
+    if !is_instance_valid(s):
+        return
     _log("Pools created: A_Pool=%d, B_Pool=%d" % [s.APool.get_child_count(), s.BPool.get_child_count()])
 
     _assign_sync_ids(s)

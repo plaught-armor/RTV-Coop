@@ -9,6 +9,9 @@ const COOP_HIT_LAYER: int = 1 << 19
 
 
 func Explode() -> void:
+    if CoopManager == null:
+        super.Explode()
+        return
     if CoopManager.is_session_active():
         area.collision_mask |= COOP_HIT_LAYER
         CoopManager._log("[explosion] Explode pos=%s host=%s" % [str(global_position), str(CoopManager.isHost)])
@@ -16,7 +19,7 @@ func Explode() -> void:
 
 
 func CheckOverlap() -> void:
-    if !CoopManager.is_session_active():
+    if CoopManager == null || !CoopManager.is_session_active():
         super.CheckOverlap()
         return
 
@@ -33,7 +36,7 @@ func CheckOverlap() -> void:
 
 
 func CheckLOS(target) -> void:
-    if !CoopManager.is_session_active():
+    if CoopManager == null || !CoopManager.is_session_active():
         super.CheckLOS(target)
         return
 
@@ -58,7 +61,7 @@ func CheckLOS(target) -> void:
 
 
 func _check_los_remote(target: Node3D) -> void:
-    if !CoopManager.isHost:
+    if CoopManager == null || !CoopManager.isHost:
         return
 
     var eyePos: Vector3 = target.global_position + Vector3(0, 1.6, 0)

@@ -193,17 +193,14 @@ func _reassign_patched_scripts(root: Node) -> void:
     _walk_and_reassign(root)
 
 
-## Must run after CoopManager.register_patches().
+## Must run after CoopManager.register_patches(). Only Mine + Explosion remain
+## on take_over_path post hook-migration; all other scripts use the RTVModLib
+## hook API and don't need script reassignment on dynamically-loaded scenes.
 func _init_patch_map() -> void:
     if _patchMapReady:
         return
     var paths: PackedStringArray = [
-        "res://Scripts/AI.gd", "res://Scripts/Door.gd", "res://Scripts/Switch.gd",
-        "res://Scripts/Pickup.gd", "res://Scripts/LootContainer.gd",
-        "res://Scripts/LootSimulation.gd", "res://Scripts/AISpawner.gd",
-        "res://Scripts/Transition.gd", "res://Scripts/Fire.gd",
         "res://Scripts/Mine.gd", "res://Scripts/Explosion.gd",
-        "res://Scripts/Trader.gd",
     ]
     for p: String in paths:
         var script: Script = load(p)

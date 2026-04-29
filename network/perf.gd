@@ -22,10 +22,12 @@ func stop(label: String, startUsec: int) -> void:
     if !ENABLED:
         return
     var elapsed: int = Time.get_ticks_usec() - startUsec
-    _totals[label] = _totals.get(label, 0) + elapsed
-    _counts[label] = _counts.get(label, 0) + 1
-    var mx: int = _maxes.get(label, 0)
-    if elapsed > mx:
+    var prevTotal: int = _totals[label] if _totals.has(label) else 0
+    var prevCount: int = _counts[label] if _counts.has(label) else 0
+    var prevMax: int = _maxes[label] if _maxes.has(label) else 0
+    _totals[label] = prevTotal + elapsed
+    _counts[label] = prevCount + 1
+    if elapsed > prevMax:
         _maxes[label] = elapsed
 
 
@@ -42,7 +44,7 @@ func tick() -> void:
     print("[Perf] --- %d-tick window ---" % PERF_DUMP_TICKS)
     var keys: Array[String] = _totals.keys()
     keys.sort_custom(_sort_keys_by_total_desc)
-    for k in keys:
+    for k: String in keys:
         var total: int = _totals[k]
         var count: int = _counts[k]
         var avg: float = float(total) / float(count)

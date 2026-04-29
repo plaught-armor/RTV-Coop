@@ -71,49 +71,62 @@ func _post_simple(eventName: String) -> void:
         "transmission":     label = "Transmission"
         "deactivatetrader": label = "DeactivateTrader"
         _: return
-    CoopManager.worldState.broadcast_event.rpc(label, PackedInt32Array())
+    CoopManager.worldState.host_fire_event(label, PackedInt32Array())
 
 
 func _on_police() -> void:
+    if !CoopManager.is_session_active():
+        return  # solo: vanilla runs
     var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()
+    if !CoopManager.isHost:
+        return  # client: wait for host broadcast
     var pathIndex: int = randi_range(0, es.paths.get_child_count() - 1)
     var pathDir: int = randi_range(1, 2)
     _spawn_pathed_vehicle(es, es.police, pathIndex, pathDir)
-    if CoopManager.is_session_active() && CoopManager.isHost:
-        CoopManager.worldState.broadcast_event.rpc("Police", PackedInt32Array([pathIndex, pathDir]))
+    CoopManager.worldState.host_fire_event("Police", PackedInt32Array([pathIndex, pathDir]))
 
 
 func _on_btr() -> void:
+    if !CoopManager.is_session_active():
+        return  # solo: vanilla runs
     var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()
+    if !CoopManager.isHost:
+        return  # client: wait for host broadcast
     var pathIndex: int = randi_range(0, es.paths.get_child_count() - 1)
     var pathDir: int = randi_range(1, 2)
     _spawn_pathed_vehicle(es, es.btr, pathIndex, pathDir)
-    if CoopManager.is_session_active() && CoopManager.isHost:
-        CoopManager.worldState.broadcast_event.rpc("BTR", PackedInt32Array([pathIndex, pathDir]))
+    CoopManager.worldState.host_fire_event("BTR", PackedInt32Array([pathIndex, pathDir]))
 
 
 func _on_crashsite() -> void:
+    if !CoopManager.is_session_active():
+        return  # solo: vanilla runs
     var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()
+    if !CoopManager.isHost:
+        return  # client: wait for host broadcast
     var crashIndex: int = randi_range(0, es.crashes.get_child_count() - 1)
     _spawn_crash(es, crashIndex)
-    if CoopManager.is_session_active() && CoopManager.isHost:
-        CoopManager.worldState.broadcast_event.rpc("CrashSite", PackedInt32Array([crashIndex]))
+    CoopManager.worldState.host_fire_event("CrashSite", PackedInt32Array([crashIndex]))
 
 
 func _on_cat() -> void:
+    if !CoopManager.is_session_active():
+        return  # solo: vanilla runs
     var es: Node3D = _lib._caller as Node3D
     if es == null:
         return
     _lib.skip_super()
+    if !CoopManager.isHost:
+        return  # client: wait for host broadcast
     if es.gameData.catFound || es.gameData.catDead:
         return
     var wells: Array[Node] = es.get_tree().get_nodes_in_group(&"Well")
@@ -121,8 +134,7 @@ func _on_cat() -> void:
         return
     var wellIndex: int = randi_range(0, wells.size() - 1)
     _spawn_cat(es, wellIndex)
-    if CoopManager.is_session_active() && CoopManager.isHost:
-        CoopManager.worldState.broadcast_event.rpc("Cat", PackedInt32Array([wellIndex]))
+    CoopManager.worldState.host_fire_event("Cat", PackedInt32Array([wellIndex]))
 
 
 # Called from world_state.broadcast_event RPC on client to reproduce host's roll.
